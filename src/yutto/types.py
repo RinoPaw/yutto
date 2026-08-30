@@ -28,9 +28,7 @@ class BilibiliId(NamedTuple):
         return self.__str__()
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, BilibiliId):
-            return False
-        return self.value == other.value
+        return type(self) is type(other) and self.value == other.value
 
     def to_dict(self) -> dict[str, str]:
         raise NotImplementedError("请不要直接使用 BilibiliId")
@@ -145,7 +143,7 @@ class CId(BilibiliId):
 
 
 class EpisodeId(BilibiliId):
-    """番剧剧集 ID"""
+    """番剧/课程剧集 ID"""
 
     def to_dict(self):
         return {"episode_id": self.value}
@@ -159,7 +157,7 @@ class MediaId(BilibiliId):
 
 
 class SeasonId(BilibiliId):
-    """番剧（季） ID"""
+    """番剧/课程（季） ID"""
 
     def to_dict(self):
         return {"season_id": self.value}
