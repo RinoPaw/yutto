@@ -28,16 +28,18 @@ async def parse_source(
     from yutto.parser.cheese_parser import CheeseParser
     from yutto.parser.mixed_parser import MixedParser
     from yutto.parser.ugc_collection_parser import UgcCollectionParser
-    from yutto.parser.ugc_list_parser import UgcListParser
+    from yutto.parser.ugc_fav_parser import UgcFavParser
     from yutto.parser.ugc_series_parser import UgcSeriesParser
     from yutto.parser.ugc_video_parser import UgcVideoParser
+    from yutto.parser.ugc_watch_later_parser import UgcWatchLaterParser
 
     for parser in (
         BangumiParser(),
         CheeseParser(),
         UgcSeriesParser(),
         UgcCollectionParser(),
-        UgcListParser(),
+        UgcFavParser(),
+        UgcWatchLaterParser(),
         MixedParser(),
         UgcVideoParser(),
     ):
