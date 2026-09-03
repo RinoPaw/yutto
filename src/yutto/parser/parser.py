@@ -30,6 +30,7 @@ async def parse_source(
     from yutto.parser.ugc_collection_parser import UgcCollectionParser
     from yutto.parser.ugc_fav_parser import UgcFavParser
     from yutto.parser.ugc_series_parser import UgcSeriesParser
+    from yutto.parser.ugc_space_parser import UgcSpaceParser
     from yutto.parser.ugc_video_parser import UgcVideoParser
     from yutto.parser.ugc_watch_later_parser import UgcWatchLaterParser
 
@@ -40,6 +41,7 @@ async def parse_source(
         UgcCollectionParser(),
         UgcFavParser(),
         UgcWatchLaterParser(),
+        UgcSpaceParser(),
         MixedParser(),
         UgcVideoParser(),
     ):
