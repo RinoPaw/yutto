@@ -17,7 +17,7 @@ class UgcSeriesSource(Source):
     owner_id: MId
 
     async def resolve(self, scope: ExecutionScope) -> UgcSeries:
-        info_api = f"https://api.bilibili.com/x/v1/medialist/info?type=5&biz_id={self.id}"
+        info_api = f"https://api.bilibili.com/x/series/series?series_id={self.id}"
         list_api = (
             "https://api.bilibili.com/x/series/archives"
             f"?mid={self.owner_id}&series_id={self.id}&only_normal=true&pn=1&ps=30"
@@ -27,7 +27,7 @@ class UgcSeriesSource(Source):
         archives: list[dict[str, Any]] = payload.get("archives") or []
         return UgcSeries(
             id=self.id,
-            title=str(info.get("title", "")),
+            title=str(info.get("meta", {}).get("name", "")),
             items=[
                 UgcVideo(id=BvId(item["bvid"]), title=str(item.get("title", "")))
                 for item in archives
