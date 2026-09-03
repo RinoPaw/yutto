@@ -8,6 +8,7 @@ from yutto.source.cheese_season_source import CheeseSeasonSource
 from yutto.source.ugc_collection_source import UgcCollectionSource
 from yutto.source.ugc_fav_source import UgcFavSource
 from yutto.source.ugc_series_source import UgcSeriesSource
+from yutto.source.ugc_space_source import UgcSpaceSource
 from yutto.source.ugc_video_source import UgcVideoSource
 from yutto.source.ugc_watch_later_source import UgcWatchLaterSource
 
@@ -22,6 +23,7 @@ __all__ = [
     "UgcCollectionSource",
     "UgcFavSource",
     "UgcSeriesSource",
+    "UgcSpaceSource",
     "UgcVideoSource",
     "UgcWatchLaterSource",
 ]
