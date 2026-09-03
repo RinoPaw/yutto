@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from dict2xml import dict2xml
@@ -8,6 +9,8 @@ from yutto.utils.time import get_time_str_by_stamp
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from yutto.types import MId
 
 
 class Actor(TypedDict):
@@ -24,23 +27,35 @@ class ChapterInfoData(TypedDict):
     content: str
 
 
-class MetaData(TypedDict):
-    title: str
-    show_title: str
-    plot: str
-    thumb: str
-    premiered: int
-    dateadded: int
-    actor: list[Actor]
-    genre: list[str]
-    tag: list[str]
-    source: str
-    original_filename: str
-    website: str
-    chapter_info_data: list[ChapterInfoData]
+@dataclass(slots=True, kw_only=True)
+class MetaData:
+    plot: str = ""
+    premiered: int = 0
+    mid: MId | None = None
+    owner: str = ""
+    thumb: str = ""
 
 
-def metadata_value_format(metadata: MetaData, metadata_format: dict[str, str]) -> dict[str, Any]:
+@dataclass(slots=True, kw_only=True)
+class ItemMetaData(MetaData):
+    show_title: str = ""
+
+    genre: list[str] = field(default_factory=list)
+    tag: list[str] = field(default_factory=list)
+    actors: list[Actor] = field(default_factory=list)
+
+    dateadded: int = 0
+    source: str = ""
+    original_filename: str = ""
+    website: str = ""
+    chapter_info_data: list[ChapterInfoData] = field(default_factory=list)
+
+
+@dataclass(slots=True, kw_only=True)
+class ContainerMetaData(MetaData):
+    pass
+
+def metadata_value_format(metadata: ItemMetaData, metadata_format: dict[str, str]) -> dict[str, Any]:
     formatted_metadata: dict[str, Any] = {}
     for key, value in metadata.items():
         if key in metadata_format:
@@ -50,7 +65,7 @@ def metadata_value_format(metadata: MetaData, metadata_format: dict[str, str]) -
     return formatted_metadata
 
 
-def write_metadata(metadata: MetaData, video_path: Path, metadata_format: dict[str, str]) -> Path:
+def write_metadata(metadata: ItemMetaData, video_path: Path, metadata_format: dict[str, str]) -> Path:
     metadata_path = video_path.with_suffix(".nfo")
     custom_root = "episodedetails"  # TODO: 不同视频类型使用不同的 root name
     # 增加字段格式化内容，后续如果需要调整可以继续调整
@@ -61,7 +76,7 @@ def write_metadata(metadata: MetaData, video_path: Path, metadata_format: dict[s
     return metadata_path
 
 
-def attach_chapter_info(metadata: MetaData, chapter_info_data: list[ChapterInfoData]):
+def attach_chapter_info(metadata: ItemMetaData, chapter_info_data: list[ChapterInfoData]):
     metadata["chapter_info_data"] = chapter_info_data
 
 

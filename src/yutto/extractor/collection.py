@@ -26,11 +26,11 @@ class CollectionExtractor(BatchExtractor):
     """视频合集"""
 
     REGEX_COLLECTION_LISTS = re.compile(
-        r"https?://space\.bilibili\.com/(?P<mid>\d+)/lists/(?P<series_id>\d+)\?type=season"
+        r"https?://space\.bilibili\.com/(?P<mid>[0-9]+)/lists/(?P<series_id>[0-9]+)\?type=season"
     )
     # 订阅合集后，在个人空间的收藏夹页面
     REGEX_COLLECTION_FAV_PAGE: re.Pattern[str] = re.compile(
-        r"https?://space\.bilibili\.com/(?P<mid>\d+)/favlist\?fid=(?P<series_id>\d+)&ftype=collect"
+        r"https?://space\.bilibili\.com/(?P<mid>[0-9]+)/favlist\?fid=(?P<series_id>[0-9]+)&ftype=collect"
     )
 
     mid: MId

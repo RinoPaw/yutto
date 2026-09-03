@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 from returns.result import Failure
 
 from yutto.core.operation import ReportLevel, emit_download_report
-from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
+from yutto.exceptions import EpisodeNotFoundError, NoAccessPermissionError, UnSupportedTypeError
 from yutto.media.codec import audio_codec_map, video_codec_map
 from yutto.types import (
     AId,
@@ -18,7 +18,7 @@ from yutto.types import (
 )
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
-from yutto.utils.metadata import MetaData
+from yutto.utils.metadata import ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class CheeseListItem(TypedDict):
     cid: CId
     episode_id: EpisodeId
     avid: AvId
-    metadata: MetaData
+    metadata: ItemMetaData
 
 
 class CheeseList(TypedDict):
@@ -46,6 +46,8 @@ class CheeseList(TypedDict):
 async def get_season_id_by_episode_id(scope: ExecutionScope, episode_id: EpisodeId) -> SeasonId:
     home_url = f"https://api.bilibili.com/pugv/view/web/season?ep_id={episode_id}"
     res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, home_url))
+    if res_json.get("code") == -404:
+        raise EpisodeNotFoundError(f"未找到该话对应的课程（episode_id: {episode_id}）")
     return SeasonId(str(res_json["data"]["season_id"]))
 
 
@@ -79,10 +81,13 @@ async def get_cheese_playurl(
     scope: ExecutionScope, avid: AvId, episode_id: EpisodeId, cid: CId
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
     play_api = (
-        "https://api.bilibili.com/pugv/player/web/playurl?avid={aid}&cid={"
-        "cid}&qn=80&fnver=0&fnval=16&fourk=1&ep_id={episode_id}&from_client=BROWSER&drm_tech_type=2"
+        "https://api.bilibili.com/pugv/player/web/playurl?{avid}&{cid}&qn=80&fnver=0&fnval=16&{episode_id}&"
+        "from_client=BROWSER&drm_tech_type=2"
     )
-    play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid, episode_id=episode_id))
+    play_result = await Fetcher.fetch_json(
+        scope,
+        play_api.format(avid=avid.to_param(), cid=cid.to_param(), episode_id=episode_id.to_param()),
+    )
     if isinstance(play_result, Failure):
         raise NoAccessPermissionError(f"无法获取该视频链接（{format_ids(avid, cid)}）") from play_result.failure()
     resp_json = play_result.unwrap()
@@ -124,8 +129,8 @@ async def get_cheese_playurl(
 
 
 async def get_cheese_subtitles(scope: ExecutionScope, avid: AvId, cid: CId) -> list[MultiLangSubtitle]:
-    subtitle_api = "https://api.bilibili.com/x/player/v2?cid={cid}&aid={aid}&bvid={bvid}"
-    subtitle_url = subtitle_api.format(**avid.to_dict(), cid=cid)
+    subtitle_api = "https://api.bilibili.com/x/player/v2?{cid}&{avid}"
+    subtitle_url = subtitle_api.format(cid=cid.to_param(), avid=avid.to_param())
     subtitles_json_info = (await Fetcher.fetch_json(scope, subtitle_url)).value_or(None)
     if subtitles_json_info is None:
         return []
@@ -161,8 +166,8 @@ async def get_cheese_subtitles(scope: ExecutionScope, avid: AvId, cid: CId) -> l
     return results
 
 
-def _parse_cheese_metadata(item: dict[str, Any]) -> MetaData:
-    return MetaData(
+def _parse_cheese_metadata(item: dict[str, Any]) -> ItemMetaData:
+    return ItemMetaData(
         title=item["title"],
         show_title=item["title"],  # 无此字段，用 title 代替
         plot=item["title"],  # 无此字段，用 title 代替

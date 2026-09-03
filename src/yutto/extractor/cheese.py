@@ -26,9 +26,9 @@ if TYPE_CHECKING:
 class CheeseExtractor(SingleExtractor):
     """单课时"""
 
-    REGEX_EP = re.compile(r"https?://www\.bilibili\.com/cheese/play/ep(?P<episode_id>\d+)")
+    REGEX_EP = re.compile(r"https?://www\.bilibili\.com/cheese/play/ep(?P<episode_id>[0-9]+)")
 
-    REGEX_EP_ID = re.compile(r"ep(?P<episode_id>\d+)")
+    REGEX_EP_ID = re.compile(r"ep(?P<episode_id>[0-9]+)")
 
     episode_id: EpisodeId
 

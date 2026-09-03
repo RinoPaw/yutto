@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class UserAllFavouritesExtractor(BatchExtractor):
     """用户所有收藏夹"""
 
-    REGEX_FAV_ALL = re.compile(r"https?://space\.bilibili\.com/(?P<mid>\d+)/favlist$")
+    REGEX_FAV_ALL = re.compile(r"https?://space\.bilibili\.com/(?P<mid>[0-9]+)/favlist$")
 
     mid: MId
 

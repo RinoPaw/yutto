@@ -24,7 +24,7 @@ from yutto.types import (
 )
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional.data_access import data_has_chained_keys
-from yutto.utils.metadata import Actor, ChapterInfoData, MetaData
+from yutto.utils.metadata import Actor, ChapterInfoData, ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class UgcVideoListItem(TypedDict):
     name: str
     avid: AvId
     cid: CId
-    metadata: MetaData
+    metadata: ItemMetaData
 
 
 class UgcVideoList(TypedDict):
@@ -68,21 +68,19 @@ class UgcVideoList(TypedDict):
     pages: list[UgcVideoListItem]
 
 
-async def get_ugc_video_tag(scope: ExecutionScope, avid: AvId) -> list[str]:
-    tags: list[str] = []
-    tag_api = "http://api.bilibili.com/x/tag/archive/tags?aid={aid}&bvid={bvid}"
-    res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, tag_api.format(**avid.to_dict())))
-    if res_json["code"] != 0:
-        raise NotFoundError(f"无法获取视频 {avid} 标签")
-    for tag in res_json["data"]:
-        tags.append(tag["tag_name"])
-    return tags
-
-
+    async def get_ugc_video_tag(scope: ExecutionScope, avid: AvId) -> list[str]:
+        tags: list[str] = []
+        tag_api = "http://api.bilibili.com/x/tag/archive/tags?{avid}"
+        res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, tag_api.format(avid=avid.to_param())))
+        if res_json["code"] != 0:
+            raise NotFoundError(f"无法获取视频 {avid} 标签")
+        for tag in res_json["data"]:
+            tags.append(tag["tag_name"])
+        return tags
 async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> _UgcVideoInfo:
-    regex_ep = re.compile(r"https?://www\.bilibili\.com/bangumi/play/ep(?P<episode_id>\d+)")
-    info_api = "http://api.bilibili.com/x/web-interface/view?aid={aid}&bvid={bvid}"
-    info_result = await Fetcher.fetch_json(scope, info_api.format(**avid.to_dict()))
+    regex_ep = re.compile(r"https?://www\.bilibili\.com/bangumi/play/ep(?P<episode_id>[0-9]+)")
+    info_api = "http://api.bilibili.com/x/web-interface/view?{avid}"
+    info_result = await Fetcher.fetch_json(scope, info_api.format(avid=avid.to_param()))
     if isinstance(info_result, Failure):
         raise NotFoundError(f"无法获取该视频 {avid} 信息") from info_result.failure()
     res_json = info_result.unwrap()
@@ -206,11 +204,11 @@ async def get_ugc_video_playurl(
     scope: ExecutionScope, avid: AvId, cid: CId, ai_translation_language: str | None = None
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
     # 4048 = 16(useDash) | 64(useHDR) | 128(use4K) | 256(useDolbyAudio) | 512(useDolbyVision) | 1024(use8K) | 2048(useAV1)
-    play_api = "https://api.bilibili.com/x/player/playurl?avid={aid}&bvid={bvid}&cid={cid}&qn=127&type=&otype=json&fnver=0&fnval=4048&fourk=1"
+    play_api = "https://api.bilibili.com/x/player/playurl?{avid}&{cid}&qn=127&type=&otype=json&fnver=0&fnval=4048&fourk=1"
     if ai_translation_language:
         play_api += f"&cur_language={ai_translation_language}"
 
-    play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid))
+    play_result = await Fetcher.fetch_json(scope, play_api.format(avid=avid.to_param(), cid=cid.to_param()))
     if isinstance(play_result, Failure):
         raise NoAccessPermissionError(f"无法获取该视频链接（{format_ids(avid, cid)}）") from play_result.failure()
     resp_json = play_result.unwrap()
@@ -282,8 +280,8 @@ async def get_ugc_video_playurl(
 
 
 async def get_ugc_video_subtitles(scope: ExecutionScope, avid: AvId, cid: CId) -> list[MultiLangSubtitle]:
-    subtitle_api = "https://api.bilibili.com/x/player/wbi/v2?aid={aid}&bvid={bvid}&cid={cid}"
-    subtitle_url = subtitle_api.format(**avid.to_dict(), cid=cid)
+    subtitle_api = "https://api.bilibili.com/x/player/wbi/v2?{avid}&{cid}"
+    subtitle_url = subtitle_api.format(avid=avid.to_param(), cid=cid.to_param())
     res_json = (await Fetcher.fetch_json(scope, subtitle_url)).value_or(None)
     if res_json is None:
         return []
@@ -314,8 +312,8 @@ async def get_ugc_video_subtitles(scope: ExecutionScope, avid: AvId, cid: CId) -
 
 
 async def get_ugc_video_chapters(scope: ExecutionScope, avid: AvId, cid: CId) -> list[ChapterInfoData]:
-    chapter_api = "https://api.bilibili.com/x/player/v2?aid={aid}&bvid={bvid}&cid={cid}"
-    chapter_url = chapter_api.format(**avid.to_dict(), cid=cid)
+    chapter_api = "https://api.bilibili.com/x/player/v2?{avid}&{cid}"
+    chapter_url = chapter_api.format(avid=avid.to_param(), cid=cid.to_param())
     chapter_json_info = (await Fetcher.fetch_json(scope, chapter_url)).value_or(None)
     if chapter_json_info is None:
         return []
@@ -337,8 +335,8 @@ def _parse_ugc_video_metadata(
     video_info: _UgcVideoInfo,
     page_info: _UgcVideoPageInfo,
     is_first_page: bool = False,
-) -> MetaData:
-    return MetaData(
+) -> ItemMetaData:
+    return ItemMetaData(
         title=page_info["part"],
         show_title=page_info["part"],
         plot=video_info["description"],
@@ -355,42 +353,7 @@ def _parse_ugc_video_metadata(
     )
 
 
-def _parse_actor_info(video_info: dict[str, Any]):
-    actors: list[Actor] = []
-    if video_info.get("staff") and isinstance(video_info["staff"], list):
-        _index: int = 0
-        staff_list: list[dict[str, Any]] = video_info["staff"]
-        for staff in staff_list:
-            actors.append(
-                Actor(
-                    name=staff["name"],
-                    role=staff["title"],
-                    thumb=staff["face"],
-                    profile=f"https://space.bilibili.com/{staff['mid']}",
-                    order=_index,
-                )
-            )
-            _index += 1
-    elif video_info.get("owner") and isinstance(video_info["owner"], dict):
-        staff_info: dict[str, Any] = video_info["owner"]
-        actors.append(
-            Actor(
-                name=staff_info["name"],
-                role="UP主",
-                thumb=staff_info["face"],
-                profile=f"https://space.bilibili.com/{staff_info['mid']}",
-                order=0,
-            )
-        )
-    else:
-        emit_download_report("未找到演职人员信息", ReportLevel.WARNING)
-    return actors
 
-
-def _parse_genre_info(video_info: dict[str, Any]) -> list[str]:
-    genres: list[str] = []
-    if video_info.get("tname") and isinstance(video_info["tname"], str):
-        genres.append(video_info["tname"])
     return genres
 
 

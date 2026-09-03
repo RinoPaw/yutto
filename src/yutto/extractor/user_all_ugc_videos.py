@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class UserAllUgcVideosExtractor(BatchExtractor):
     """UP 主个人空间全部投稿视频"""
 
-    REGEX_SPACE = re.compile(r"https?://space\.bilibili\.com/(?P<mid>\d+)(/video)?")
+    REGEX_SPACE = re.compile(r"https?://space\.bilibili\.com/(?P<mid>[0-9]+)(/video)?")
 
     mid: MId
 

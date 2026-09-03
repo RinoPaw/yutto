@@ -20,11 +20,11 @@ if TYPE_CHECKING:
 class CheeseBatchExtractor(BatchExtractor):
     """课程全集"""
 
-    REGEX_EP = re.compile(r"https?://www\.bilibili\.com/cheese/play/ep(?P<episode_id>\d+)")
-    REGEX_SS = re.compile(r"https?://www\.bilibili\.com/cheese/play/ss(?P<season_id>\d+)")
+    REGEX_EP = re.compile(r"https?://www\.bilibili\.com/cheese/play/ep(?P<episode_id>[0-9]+)")
+    REGEX_SS = re.compile(r"https?://www\.bilibili\.com/cheese/play/ss(?P<season_id>[0-9]+)")
 
-    #  REGEX_EP_ID = re.compile(r"ep(?P<episode_id>\d+)")
-    #  REGEX_SS_ID = re.compile(r"ss(?P<season_id>\d+)")
+    #  REGEX_EP_ID = re.compile(r"ep(?P<episode_id>[0-9]+)")
+    #  REGEX_SS_ID = re.compile(r"ss(?P<season_id>[0-9]+)")
 
     _match_result: re.Match[Any]
     season_id: SeasonId

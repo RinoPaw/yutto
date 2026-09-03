@@ -6,27 +6,27 @@ from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 from returns.result import Failure
 
 from yutto.core.operation import ReportLevel, emit_download_report
-from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
+from yutto.exceptions import EpisodeNotFoundError, NoAccessPermissionError, UnSupportedTypeError
 from yutto.media.codec import audio_codec_map, video_codec_map
 from yutto.types import (
     AudioUrlMeta,
     BvId,
     CId,
     EpisodeId,
+    MediaId,
     SeasonId,
     VideoUrlMeta,
     format_ids,
 )
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
-from yutto.utils.metadata import Actor, MetaData
+from yutto.utils.metadata import Actor, ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.types import (
         AvId,
-        MediaId,
         MultiLangSubtitle,
     )
 
@@ -56,6 +56,8 @@ class _BangumiSection(TypedDict):
 
 
 class _BangumiSeasonResult(TypedDict):
+    media_id: int
+    season_id: int
     title: str
     episodes: list[_BangumiEpisode]
     evaluate: str
@@ -73,10 +75,12 @@ class BangumiListItem(TypedDict):
     duration: int
     is_section: bool  # 是否属于专区
     is_preview: bool
-    metadata: MetaData
+    metadata: ItemMetaData
 
 
 class BangumiList(TypedDict):
+    season_id: SeasonId
+    media_id: MediaId
     title: str
     pages: list[BangumiListItem]
 
@@ -90,6 +94,8 @@ async def get_season_id_by_media_id(scope: ExecutionScope, media_id: MediaId) ->
 async def get_season_id_by_episode_id(scope: ExecutionScope, episode_id: EpisodeId) -> SeasonId:
     episode_api = f"https://api.bilibili.com/pgc/view/web/season?ep_id={episode_id}"
     res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, episode_api))
+    if res_json.get("code") == -404:
+        raise EpisodeNotFoundError(f"未找到该话对应的番剧（episode_id: {episode_id}）")
     return SeasonId(str(res_json["result"]["season_id"]))
 
 
@@ -109,6 +115,8 @@ async def get_bangumi_list(scope: ExecutionScope, season_id: SeasonId) -> Bangum
             # 和 https://www.bilibili.com/bangumi/play/ep424859 中的「编辑推荐」
             section_episodes += section["episodes"]
     return BangumiList(
+        season_id=SeasonId(str(result["season_id"])),
+        media_id=MediaId(str(result["media_id"])),
         title=result["title"],
         pages=[
             BangumiListItem(
@@ -135,9 +143,9 @@ async def get_bangumi_list(scope: ExecutionScope, season_id: SeasonId) -> Bangum
 async def get_bangumi_playurl(
     scope: ExecutionScope, avid: AvId, cid: CId
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    play_api = "https://api.bilibili.com/pgc/player/web/v2/playurl?avid={aid}&bvid={bvid}&cid={cid}&qn=127&fnver=0&fnval=4048&fourk=1&support_multi_audio=true&from_client=BROWSER"
+    play_api = "https://api.bilibili.com/pgc/player/web/v2/playurl?{avid}&{cid}&qn=127&fnver=0&fnval=4048&fourk=1&support_multi_audio=true&from_client=BROWSER"
 
-    play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid))
+    play_result = await Fetcher.fetch_json(scope, play_api.format(avid=avid.to_param(), cid=cid.to_param()))
     if isinstance(play_result, Failure):
         raise NoAccessPermissionError(f"无法获取该视频链接（{format_ids(avid, cid)}）") from play_result.failure()
     resp_json = play_result.unwrap()
@@ -194,8 +202,8 @@ async def get_bangumi_playurl(
 
 
 async def get_bangumi_subtitles(scope: ExecutionScope, avid: AvId, cid: CId) -> list[MultiLangSubtitle]:
-    subtitle_api = "https://api.bilibili.com/x/player/wbi/v2?aid={aid}&bvid={bvid}&cid={cid}"
-    subtitle_url = subtitle_api.format(**avid.to_dict(), cid=cid)
+    subtitle_api = "https://api.bilibili.com/x/player/wbi/v2?{avid}&{cid}"
+    subtitle_url = subtitle_api.format(avid=avid.to_param(), cid=cid.to_param())
     subtitles_json_info = (await Fetcher.fetch_json(scope, subtitle_url)).value_or(None)
     if subtitles_json_info is None:
         return []
@@ -264,9 +272,9 @@ def _parse_bangumi_metadata(
     evaluate: str,
     styles: list[str],
     up_info: _BangumiUpInfo | None,
-) -> MetaData:
+) -> ItemMetaData:
     plot = evaluate or item["share_copy"]
-    return MetaData(
+    return ItemMetaData(
         title=_bangumi_episode_title(item["title"], item["long_title"]),
         show_title=item["share_copy"],
         plot=plot,

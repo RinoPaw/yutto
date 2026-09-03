@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from yutto.api.ugc_video import UgcVideoListItem
-from yutto.utils.metadata import MetaData
+from yutto.utils.metadata import ItemMetaData
 
 # 收藏夹路径模板：单分 p 视频直接以标题命名，多分 p 视频在标题目录下展开
 FAVOURITE_SINGLE_PAGE_TEMPLATE = "{username}的收藏夹/{series_title}/{title}"
@@ -36,7 +36,7 @@ def normalize_favourite_video_item(
         return ugc_video_item, FAVOURITE_MULTI_PAGE_TEMPLATE, favourite_title
 
     # 单分 p：用 B 站侧人工标题覆盖 metadata，避免使用机器生成的文件名
-    metadata = MetaData(**ugc_video_item["metadata"])
+    metadata = ItemMetaData(**ugc_video_item["metadata"])
     metadata["title"] = favourite_title
     metadata["show_title"] = favourite_title
     normalized_item = UgcVideoListItem(**ugc_video_item)

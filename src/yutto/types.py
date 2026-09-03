@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 if TYPE_CHECKING:
@@ -12,14 +13,19 @@ if TYPE_CHECKING:
     from yutto.media.quality import AudioQuality, VideoQuality
     from yutto.utils.danmaku import DanmakuData, DanmakuSaveType
     from yutto.utils.filter import PublicationTimeFilter
-    from yutto.utils.metadata import ChapterInfoData, MetaData
+    from yutto.utils.metadata import ChapterInfoData, ItemMetaData
     from yutto.utils.subtitle import SubtitleData
 
 
-class BilibiliId(NamedTuple):
+@dataclass(slots=True)
+class BilibiliId:
     """所有 bilibili id 的基类"""
 
     value: str
+
+    def __post_init__(self) -> None:
+        if not self.value:
+            raise ValueError(f"无效的 bilibili ID：{self.value!r}")
 
     def __str__(self) -> str:
         return self.value
@@ -30,10 +36,11 @@ class BilibiliId(NamedTuple):
     def __eq__(self, other: object) -> bool:
         return type(self) is type(other) and self.value == other.value
 
-    def to_dict(self) -> dict[str, str]:
+    def to_param(self) -> str:
         raise NotImplementedError("请不要直接使用 BilibiliId")
 
 
+@dataclass(slots=True)
 class AvId(BilibiliId):
     """AId 与 BvId 的统一，大多数 API 只需要其中一种即可正常工作
 
@@ -49,144 +56,152 @@ class AvId(BilibiliId):
     # 使用
     # 由于 B 站大多数需要 aid/bvid 的接口都是只提供其一即可，
     # 因此我们可以直接这样通过格式化的方式来产生一个合法的接口链接
-    api = "https://api.bilibili.com/x/player/pagelist?aid={aid}&bvid={bvid}&jsonp=jsonp"
-    api = api.format(aid=aid.value, bvid="")
-    api = api.format(aid="", bvid=bvid.value)
+    api = "https://api.bilibili.com/x/player/pagelist?{aid}&{bvid}&jsonp=jsonp"
 
-    # 为了方便，继承了 AvId 的 AId 和 BvId 都可以通过 to_dict 方法简化这一步
-    api = api.format(**aid.to_dict())
-    api = api.format(**bvid.to_dict())
+    # 为了方便，继承了 AvId 的 AId 和 BvId 都可以通过 to_param 方法简化这一步
+    api = api.format(aid=aid.to_param(), bvid=bvid.to_param())
     # 这样就完全屏蔽了 aid 和 bvid 的差异了
     ```
     """
 
-    # id conversion based on
-    # https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/bvid_desc.md
-
-    XOR_CODE = 23442827791579
-    MASK_CODE = 2251799813685247
-    MAX_AID = 1 << 51
-    ALPHABET = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
-    ENCODE_MAP = 8, 7, 0, 5, 1, 3, 2, 4, 6
-    DECODE_MAP = tuple(reversed(ENCODE_MAP))
-
-    BASE = len(ALPHABET)
-    PREFIX = "BV1"
-    PREFIX_LEN = len(PREFIX)
-    CODE_LEN = len(ENCODE_MAP)
-
-    @staticmethod
-    def av2bv(aid: int) -> str:
-        bvid = [""] * 9
-        tmp = (AvId.MAX_AID | aid) ^ AvId.XOR_CODE
-        for i in range(AvId.CODE_LEN):
-            bvid[AvId.ENCODE_MAP[i]] = AvId.ALPHABET[tmp % AvId.BASE]
-            tmp //= AvId.BASE
-        return AvId.PREFIX + "".join(bvid)
-
-    @staticmethod
-    def bv2av(bvid: str) -> int:
-        assert bvid[:3] == AvId.PREFIX
-
-        bvid = bvid[3:]
-        tmp = 0
-        for i in range(AvId.CODE_LEN):
-            idx = AvId.ALPHABET.index(bvid[AvId.DECODE_MAP[i]])
-            tmp = tmp * AvId.BASE + idx
-        return (tmp & AvId.MASK_CODE) ^ AvId.XOR_CODE
-
-    def to_dict(self) -> dict[str, str]:
-        raise NotImplementedError("请不要直接使用 AvId")
-
     def to_url(self) -> str:
         raise NotImplementedError("请不要直接使用 AvId")
 
-    def as_aid(self) -> AId:
-        if isinstance(self, AId):
-            return self
-        return AId(str(self.bv2av(self.value)))
 
-    def as_bvid(self) -> BvId:
-        if isinstance(self, BvId):
-            return self
-        return BvId(self.av2bv(int(self.value)))
-
-
+@dataclass(slots=True)
 class AId(AvId):
     """AID"""
 
-    def to_dict(self):
-        return {"aid": self.value, "bvid": ""}
+    def __init__(self, aid: Any):
+        self.value= str(aid)
+
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 AId：{self.value!r}")
 
     def to_url(self) -> str:
         return f"https://www.bilibili.com/video/av{self.value}"
 
+    def to_param(self) -> str:
+        return f"aid={self.value}"
 
+
+@dataclass(slots=True)
 class BvId(AvId):
     """BVID"""
 
-    def to_dict(self):
-        return {
-            "aid": "",
-            "bvid": self.value,
-        }
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.startswith("BV") or not self.value[2:].isalnum():
+            raise ValueError(f"无效的 BVID：{self.value!r}")
 
     def to_url(self) -> str:
         return f"https://www.bilibili.com/video/{self.value}"
 
+    def to_param(self) -> str:
+        return f"bvid={self.value}"
 
+
+@dataclass(slots=True)
 class CId(BilibiliId):
     """视频 ID"""
 
-    def to_dict(self):
-        return {"cid": self.value}
+    def __init__(self, cid: Any):
+        self.value= str(cid)
+
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 CId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"cid={self.value}"
 
 
+@dataclass(slots=True)
 class EpisodeId(BilibiliId):
     """番剧/课程剧集 ID"""
 
-    def to_dict(self):
-        return {"episode_id": self.value}
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 EpisodeId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"episode_id={self.value}"
 
 
+@dataclass(slots=True)
 class MediaId(BilibiliId):
     """番剧 ID"""
 
-    def to_dict(self):
-        return {"media_id": self.value}
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 MediaId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"media_id={self.value}"
 
 
+@dataclass(slots=True)
 class SeasonId(BilibiliId):
     """番剧/课程（季） ID"""
 
-    def to_dict(self):
-        return {"season_id": self.value}
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 SeasonId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"season_id={self.value}"
 
 
+@dataclass(slots=True)
 class MId(BilibiliId):
     """用户 ID"""
 
-    def to_dict(self):
-        return {"mid": self.value}
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 MId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"mid={self.value}"
 
 
+@dataclass(slots=True)
 class FId(BilibiliId):
     """收藏夹 ID"""
 
-    def to_dict(self):
-        return {"fid": self.value}
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 FId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"fid={self.value}"
 
 
+@dataclass(slots=True)
 class SeriesId(BilibiliId):
-    """视频合集 ID"""
+    """视频系列 ID"""
 
-    def to_dict(self):
-        return {"series_id": self.value}
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 SeriesId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"series_id={self.value}"
 
 
-def format_ids(*id: BilibiliId):
-    id_dicts = [i.to_dict() for i in id]
-    formatted_ids = [f"{k}: {v}" for i in id_dicts for k, v in i.items() if v]
+@dataclass(slots=True)
+class CollectionId(BilibiliId):
+    """UGC 视频合集 ID"""
+
+    def __post_init__(self) -> None:
+        if not self.value.isascii() or not self.value.isdigit():
+            raise ValueError(f"无效的 CollectionId：{self.value!r}")
+
+    def to_param(self) -> str:
+        return f"season_id={self.value}"
+
+
+def format_ids(*ids: BilibiliId) -> str:
+    formatted_ids = [id_.to_param().replace("=", ": ", 1) for id_ in ids]
     return ", ".join(formatted_ids)
 
 
@@ -211,6 +226,11 @@ class AudioUrlMeta(TypedDict):
 class MultiLangSubtitle(TypedDict):
     lang: str
     lines: SubtitleData
+
+
+@dataclass(slots=True, kw_only=True)
+class Options:
+    pass
 
 
 class ExtractorOptions(TypedDict):
@@ -244,7 +264,7 @@ class EpisodeData(TypedDict):
     videos: list[VideoUrlMeta]
     audios: list[AudioUrlMeta]
     subtitles: list[MultiLangSubtitle]
-    metadata: MetaData | None
+    metadata: ItemMetaData | None
     danmaku: DanmakuData
     cover_data: bytes | None
     chapter_info_data: list[ChapterInfoData]
@@ -273,9 +293,3 @@ class FavouriteVideoData(TypedDict):
 class UserInfo(TypedDict):
     vip_status: bool
     is_login: bool
-
-
-if __name__ == "__main__":
-    aid = AId("add")
-    cid = CId("xxx")
-    print("?aid={aid}&bvid={bvid}&cid={cid}".format(**aid.to_dict(), **cid.to_dict()))

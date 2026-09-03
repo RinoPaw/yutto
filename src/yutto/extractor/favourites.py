@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class FavouritesExtractor(BatchExtractor):
     """用户单一收藏夹"""
 
-    REGEX_FAV = re.compile(r"https?://space\.bilibili\.com/(?P<mid>\d+)/favlist\?fid=(?P<fid>\d+)((&ftype=create)|$)")
+    REGEX_FAV = re.compile(r"https?://space\.bilibili\.com/(?P<mid>[0-9]+)/favlist\?fid=(?P<fid>[0-9]+)((&ftype=create)|$)")
 
     mid: MId
     fid: FId

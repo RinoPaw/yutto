@@ -30,7 +30,7 @@ from yutto.types import EpisodeData, EpisodeInfo, ResolvableEpisode, format_ids
 from yutto.utils.asynclib import make_coroutine_factory
 from yutto.utils.danmaku import EmptyDanmakuData
 from yutto.utils.fetcher import Fetcher
-from yutto.utils.metadata import MetaData, attach_chapter_info
+from yutto.utils.metadata import ItemMetaData, attach_chapter_info
 
 if TYPE_CHECKING:
     from yutto.api.bangumi import (
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from yutto.types import AvId, EpisodeId, ExtractorOptions
 
 
-def _get_display_fields_from_metadata(metadata: MetaData | None) -> tuple[str, str, list[str]]:
+def _get_display_fields_from_metadata(metadata: ItemMetaData | None) -> tuple[str, str, list[str]]:
     """listing 元数据中用于前端展示的字段：UP 主、简介、标签。"""
     if metadata is None:
         return "", "", []
