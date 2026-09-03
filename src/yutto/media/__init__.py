@@ -6,10 +6,12 @@ from yutto.media.bangumi_season import BangumiSeason
 from yutto.media.cheese_episode import CheeseEpisode
 from yutto.media.cheese_season import CheeseSeason
 from yutto.media.ugc_collection import UgcCollection
-from yutto.media.ugc_list import UgcList
+from yutto.media.ugc_fav import UgcFav
 from yutto.media.ugc_page import UgcPage
 from yutto.media.ugc_series import UgcSeries
+from yutto.media.ugc_space import UgcSpace
 from yutto.media.ugc_video import UgcVideo
+from yutto.media.ugc_watch_later import UgcWatchLater
 
 __all__ = [
     "BangumiEpisode",
@@ -20,8 +22,10 @@ __all__ = [
     "MediaContainer",
     "MediaItem",
     "UgcCollection",
-    "UgcList",
+    "UgcFav",
     "UgcPage",
     "UgcSeries",
+    "UgcSpace",
     "UgcVideo",
+    "UgcWatchLater",
 ]
