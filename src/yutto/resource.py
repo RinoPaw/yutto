@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from yutto.api.bangumi import get_bangumi_playurl, get_bangumi_subtitles
 from yutto.api.cheese import get_cheese_playurl, get_cheese_subtitles
 from yutto.api.danmaku import get_danmaku
 from yutto.api.ugc_video import get_ugc_video_chapters, get_ugc_video_playurl, get_ugc_video_subtitles
+from yutto.core.options import ResourceOptions
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
@@ -15,19 +16,6 @@ if TYPE_CHECKING:
     from yutto.types import AudioUrlMeta, MultiLangSubtitle, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuData
     from yutto.utils.metadata import ChapterInfoData, ItemMetaData
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ResourceOptions:
-    video: bool = True
-    audio: bool = True
-    danmaku: bool = True
-    subtitle: bool = True
-    metadata: bool = False
-    cover: bool = True
-    chapter_info: bool = True
-    ai_translation_language: str | None = None
-    danmaku_format: Literal["xml", "ass", "protobuf"] = "ass"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

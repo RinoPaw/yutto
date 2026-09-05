@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import pytest
 from returns.result import Success
 
+from yutto.core.options import SourceOptions
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
 from yutto.media import BangumiSeason, CheeseSeason
 from yutto.parser import parse
+from yutto.selection import parse_selection
 from yutto.source import (
     AmbiguousSource,
     BangumiEpisodeSource,
     BangumiSeasonSource,
     CheeseEpisodeSource,
     CheeseSeasonSource,
-    SourceOptions,
     UgcCollectionSource,
     UgcFavSource,
     UgcSeriesSource,
@@ -26,7 +28,12 @@ from yutto.source import (
 from yutto.types import EpisodeId, MediaId, SeasonId
 
 _NOT_FOUND = {"code": -404, "message": "啥都木有"}
-_DEFAULT_OPTIONS = SourceOptions()
+_DEFAULT_OPTIONS = SourceOptions(
+    selection=None,
+    with_extra_episodes=False,
+    skip_preview=False,
+    require_metadata=False,
+)
 
 
 def _parse(value: str) -> Any:
@@ -195,7 +202,7 @@ def test_bangumi_episode_source_initializes_metadata_when_required(monkeypatch: 
     episode = asyncio.run(
         BangumiEpisodeSource(id=EpisodeId("123")).resolve(
             None,  # type: ignore[arg-type]
-            SourceOptions(require_metadata=True),
+            replace(_DEFAULT_OPTIONS, require_metadata=True),
         )
     )
 
@@ -421,8 +428,9 @@ def test_bangumi_season_source_filters_extra_and_preview_before_selection(
     season = asyncio.run(
         BangumiSeasonSource(id=SeasonId("456")).resolve(
             None,  # type: ignore[arg-type]
-            SourceOptions(
-                selection="1~-1",
+            replace(
+                _DEFAULT_OPTIONS,
+                selection=parse_selection("1~-1"),
                 with_extra_episodes=True,
                 skip_preview=True,
             ),

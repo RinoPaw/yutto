@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import pytest
 from returns.result import Success
 
-from yutto.source import SourceOptions, UgcCollectionSource, UgcSeriesSource
+from yutto.core.options import SourceOptions
+from yutto.selection import parse_selection
+from yutto.source import UgcCollectionSource, UgcSeriesSource
 from yutto.types import CollectionId, MId, SeriesId
+
+_DEFAULT_OPTIONS = SourceOptions(
+    selection=None,
+    with_extra_episodes=False,
+    skip_preview=False,
+    require_metadata=False,
+)
 
 
 def _install_fetcher_stub(
@@ -78,11 +88,13 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
         },
     )
 
+    options = replace(
+        _DEFAULT_OPTIONS,
+        selection=parse_selection("2"),
+        require_metadata=True,
+    )
     media = asyncio.run(
-        UgcSeriesSource(id=SeriesId("456")).resolve(
-            None,  # type: ignore[arg-type]
-            SourceOptions(selection="2", require_metadata=True),
-        )
+        UgcSeriesSource(id=SeriesId("456")).resolve(None, options)  # type: ignore[arg-type]
     )
 
     assert media.title == "视频系列"
@@ -91,7 +103,7 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     assert [page.title for page in media.items[0].items] == ["P1", "P2"]
     assert all(page.extraMetaData is not None for page in media.items[0].items)
     assert all(page.avid == media.items[0].avid for page in media.items[0].items)
-    assert media.get_downloadable_entries() == media.items[0].items
+    assert media.get_items() == tuple(media.items[0].items)
     assert any("mid=123" in call and "series_id=456" in call for call in calls)
     assert any("bvid=BVSECOND" in call for call in calls)
     assert not any("bvid=BVFIRST" in call for call in calls)
@@ -118,7 +130,7 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
         UgcCollectionSource(
             id=CollectionId("456"),
             owner_id=MId("123"),
-        ).resolve(None, SourceOptions())  # type: ignore[arg-type]
+        ).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
     )
 
     assert media.title == "视频合集"

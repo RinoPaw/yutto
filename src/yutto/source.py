@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from returns.result import Failure
 
 from yutto.api.user_info import encode_wbi, get_wbi_img
 from yutto.core.operation import ReportLevel, emit_download_report
+from yutto.core.options import SourceOptions
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
 from yutto.media import (
     BangumiEpisode,
@@ -24,7 +25,7 @@ from yutto.media import (
     UgcVideo,
     UgcWatchLater,
 )
-from yutto.selection import compile_selection
+from yutto.selection import Range, Selection
 from yutto.types import (
     AId,
     AvId,
@@ -44,34 +45,12 @@ from yutto.utils.metadata import Actor, ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from yutto.core.execution import ExecutionScope
-
-T = TypeVar("T")
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SourceOptions:
-    selection: str | None = None
-    with_extra_episodes: bool = False
-    skip_preview: bool = False
-    require_metadata: bool = False
 
 
 @dataclass(slots=True, kw_only=True)
 class Source(ABC):
     id: BilibiliId
-
-    @staticmethod
-    def _select_items(
-        items: Sequence[T],
-        selection: str | None,
-        *,
-        fallback: str = "1",
-    ) -> list[T]:
-        expression = selection if selection is not None else fallback
-        return [items[index - 1] for index in compile_selection(expression, len(items))]
 
     @abstractmethod
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaContainer:
@@ -205,7 +184,8 @@ class BangumiEpisodeSource(Source):
                         episode_items.extend(section["episodes"])
             if options.skip_preview:
                 episode_items = [item for item in episode_items if item.get("badge") != "预告"]
-            episode_items = self._select_items(episode_items, options.selection)
+            indexes = options.selection.resolve(len(episode_items))
+            episode_items = [episode_items[index - 1] for index in indexes]
 
         return BangumiSeason(
             season_id=SeasonId(str(res["season_id"])),
@@ -232,7 +212,11 @@ class BangumiSeasonSource(Source):
                     episode_items.extend(section["episodes"])
         if options.skip_preview:
             episode_items = [item for item in episode_items if item.get("badge") != "预告"]
-        episode_items = self._select_items(episode_items, options.selection)
+        if options.selection is None:
+            episode_items = episode_items[:1]
+        else:
+            indexes = options.selection.resolve(len(episode_items))
+            episode_items = [episode_items[index - 1] for index in indexes]
 
         return BangumiSeason(
             season_id=season_id,
@@ -281,11 +265,11 @@ class CheeseEpisodeSource(Source):
         if anchor_item is None:
             raise NotFoundError(f"无法在课程 {res['title']} 中找到剧集 ep{self.id}")
 
-        episode_items = (
-            [anchor_item]
-            if options.selection is None
-            else self._select_items(res["episodes"], options.selection)
-        )
+        if options.selection is None:
+            episode_items = [anchor_item]
+        else:
+            indexes = options.selection.resolve(len(res["episodes"]))
+            episode_items = [res["episodes"][index - 1] for index in indexes]
         season_id = res.get("season_id", self.id.value)
         return CheeseSeason(
             season_id=SeasonId(str(season_id)),
@@ -303,7 +287,12 @@ class CheeseSeasonSource(Source):
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> CheeseSeason:
         api = f"https://api.bilibili.com/pugv/view/web/season?season_id={self.id}"
         res = await self._fetch_payload(scope, api, "该课程列表", f"season_id: {self.id}", "data")
-        episode_items = self._select_items(res["episodes"], options.selection)
+        episode_items: list[dict[str, Any]] = list(res["episodes"])
+        if options.selection is None:
+            episode_items = episode_items[:1]
+        else:
+            indexes = options.selection.resolve(len(episode_items))
+            episode_items = [episode_items[index - 1] for index in indexes]
 
         return CheeseSeason(
             season_id=self.id,
@@ -329,6 +318,15 @@ class UgcVideoSource(Source):
             tags = await self.get_ugc_video_tag(scope, resolved_avid)
             dateadded = get_time_stamp_by_now()
 
+        page_items: list[dict[str, Any]] = list(video_info["pages"])
+        if options.selection is not None:
+            indexes = options.selection.resolve(len(page_items))
+        else:
+            page = self.page if self.page is not None else 1
+            if page > len(page_items):
+                raise WrongArgumentError(f"序号 {page} 超出范围（1~{len(page_items)}）")
+            indexes = (page,)
+
         pages = [
             UgcPage(
                 avid=resolved_avid,
@@ -339,11 +337,7 @@ class UgcVideoSource(Source):
                 else None,
                 cover_url=video_info["pic"],
             )
-            for item in self._select_items(
-                video_info["pages"],
-                options.selection,
-                fallback=str(self.page) if self.page is not None else "1",
-            )
+            for item in (page_items[index - 1] for index in indexes)
         ]
         return UgcVideo(avid=resolved_avid, title=video_info["title"], items=pages)
 
@@ -407,7 +401,7 @@ async def resolve_ugc_videos(
     avids: list[AvId],
     options: SourceOptions,
 ) -> list[UgcVideo]:
-    page_options = replace(options, selection="1~-1")
+    page_options = replace(options, selection=Selection((Range(None, None),)))
     return list(
         await asyncio.gather(
             *(UgcVideoSource(id=avid).resolve(scope, page_options) for avid in avids)
@@ -453,7 +447,11 @@ class UgcCollectionSource(Source):
                 break
             page_num += 1
 
-        selected_archives = self._select_items(archives, options.selection)
+        if options.selection is None:
+            selected_archives = archives[:1]
+        else:
+            indexes = options.selection.resolve(len(archives))
+            selected_archives = [archives[index - 1] for index in indexes]
         videos = await resolve_ugc_videos(
             scope,
             [BvId(item["bvid"]) for item in selected_archives],
@@ -493,7 +491,11 @@ class UgcFavSource(Source):
                 break
             page_num += 1
 
-        selected_medias = self._select_items(medias, options.selection)
+        if options.selection is None:
+            selected_medias = medias[:1]
+        else:
+            indexes = options.selection.resolve(len(medias))
+            selected_medias = [medias[index - 1] for index in indexes]
         videos = await resolve_ugc_videos(
             scope,
             [BvId(item["bvid"]) for item in selected_medias],
@@ -536,7 +538,11 @@ class UgcSeriesSource(Source):
                 break
             page_num += 1
 
-        selected_archives = self._select_items(archives, options.selection)
+        if options.selection is None:
+            selected_archives = archives[:1]
+        else:
+            indexes = options.selection.resolve(len(archives))
+            selected_archives = [archives[index - 1] for index in indexes]
         videos = await resolve_ugc_videos(
             scope,
             [BvId(item["bvid"]) for item in selected_archives],
@@ -595,7 +601,11 @@ class UgcSpaceSource(Source):
                 break
             page_num += 1
 
-        selected_archives = self._select_items(archives, options.selection)
+        if options.selection is None:
+            selected_archives = archives[:1]
+        else:
+            indexes = options.selection.resolve(len(archives))
+            selected_archives = [archives[index - 1] for index in indexes]
         videos = await resolve_ugc_videos(
             scope,
             [BvId(item["bvid"]) for item in selected_archives],
@@ -618,7 +628,11 @@ class UgcWatchLaterSource(Source):
             "data",
         )
         entries: list[dict[str, Any]] = [item for item in payload.get("list", []) if item.get("bvid")]
-        selected_entries = self._select_items(entries, options.selection)
+        if options.selection is None:
+            selected_entries = entries[:1]
+        else:
+            indexes = options.selection.resolve(len(entries))
+            selected_entries = [entries[index - 1] for index in indexes]
         videos = await resolve_ugc_videos(
             scope,
             [BvId(item["bvid"]) for item in selected_entries],
@@ -634,7 +648,6 @@ __all__ = [
     "CheeseEpisodeSource",
     "CheeseSeasonSource",
     "Source",
-    "SourceOptions",
     "UgcCollectionSource",
     "UgcFavSource",
     "UgcSeriesSource",
