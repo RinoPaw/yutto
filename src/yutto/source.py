@@ -62,12 +62,14 @@ class SourceOptions(Options):
 @dataclass(slots=True, kw_only=True)
 class Source(ABC):
     id: BilibiliId
-    selection: str = "1"
+    selection: str | None = None
     options: SourceOptions = field(default_factory=SourceOptions)
 
     @property
     def selections(self) -> tuple[int, ...]:
         """Compatibility view for the old literal single-page parser tests."""
+        if self.selection is None:
+            return ()
         try:
             value = int(self.selection)
         except ValueError:
@@ -75,7 +77,8 @@ class Source(ABC):
         return (value,) if value != 0 else ()
 
     def _select_items(self, items: Sequence[T]) -> list[T]:
-        return [items[index - 1] for index in compile_selection(self.selection, len(items))]
+        selection = self.selection if self.selection is not None else "1"
+        return [items[index - 1] for index in compile_selection(selection, len(items))]
 
     @abstractmethod
     async def resolve(self, scope: ExecutionScope) -> MediaContainer:
@@ -194,14 +197,30 @@ class BangumiEpisodeSource(Source):
         api = f"https://api.bilibili.com/pgc/view/web/season?ep_id={self.id}"
         res = await self._fetch_payload(scope, api, "该番剧", f"episode_id: {self.id}", "result")
 
-        item = next((entry for entry in bangumi_episode_items(res) if entry["id"] == int(self.id.value)), None)
-        if item is None:
+        all_episode_items = bangumi_episode_items(res)
+        anchor_item = next((entry for entry in all_episode_items if entry["id"] == int(self.id.value)), None)
+        if anchor_item is None:
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
+
+        if self.selection is None:
+            episode_items = [anchor_item]
+        else:
+            episode_items: list[dict[str, Any]] = list(res["episodes"])
+            if self.options.with_extra_episodes:
+                for section in res.get("section", []):
+                    if section["type"] != 5:
+                        episode_items.extend(section["episodes"])
+            if self.options.skip_preview:
+                episode_items = [item for item in episode_items if item.get("badge") != "预告"]
+            episode_items = self._select_items(episode_items)
 
         return BangumiSeason(
             season_id=SeasonId(str(res["season_id"])),
             title=res["title"],
-            items=[parse_bangumi_episode(item, require_metadata=self.options.require_metadata)],
+            items=[
+                parse_bangumi_episode(item, require_metadata=self.options.require_metadata)
+                for item in episode_items
+            ],
         )
 
 
@@ -265,15 +284,19 @@ class CheeseEpisodeSource(Source):
         api = f"https://api.bilibili.com/pugv/view/web/season?ep_id={self.id}"
         res = await self._fetch_payload(scope, api, "该课程", f"episode_id: {self.id}", "data")
 
-        item = next((entry for entry in res["episodes"] if entry["id"] == int(self.id.value)), None)
-        if item is None:
+        anchor_item = next((entry for entry in res["episodes"] if entry["id"] == int(self.id.value)), None)
+        if anchor_item is None:
             raise NotFoundError(f"无法在课程 {res['title']} 中找到剧集 ep{self.id}")
 
+        episode_items = [anchor_item] if self.selection is None else self._select_items(res["episodes"])
         season_id = res.get("season_id", self.id.value)
         return CheeseSeason(
             season_id=SeasonId(str(season_id)),
             title=res["title"],
-            items=[parse_cheese_episode(item, require_metadata=self.options.require_metadata)],
+            items=[
+                parse_cheese_episode(item, require_metadata=self.options.require_metadata)
+                for item in episode_items
+            ],
         )
 
 
