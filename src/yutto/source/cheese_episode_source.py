@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from yutto.exceptions import NotFoundError
 from yutto.media import CheeseEpisode, CheeseSeason
 from yutto.source import Source
-from yutto.types import EpisodeId, SeasonId
+from yutto.types import AId, CId, EpisodeId, SeasonId
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
@@ -20,12 +20,15 @@ def parse_cheese_episode(item: dict[str, Any], *, require_metadata: bool = False
             show_title=title,
             plot=title,
             thumb=item["cover"],
-            premiered=str(item["release_date"]),
+            premiered=item["release_date"],
         )
     return CheeseEpisode(
-        id=EpisodeId(str(item["id"])),
+        episode_id=EpisodeId(str(item["id"])),
+        avid=AId(item["aid"]),
+        cid=CId(item["cid"]),
         title=title,
         extraMetaData=metadata,
+        cover_url=item.get("cover"),
     )
 
 
@@ -42,7 +45,7 @@ class CheeseEpisodeSource(Source):
 
         season_id = res.get("season_id", self.id.value)
         return CheeseSeason(
-            id=SeasonId(str(season_id)),
-            title=str(res["title"]),
+            season_id=SeasonId(str(season_id)),
+            title=res["title"],
             items=[parse_cheese_episode(item, require_metadata=self.options.require_metadata)],
         )

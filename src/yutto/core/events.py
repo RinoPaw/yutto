@@ -8,8 +8,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.core.result import ItemSkipReason, ResolvedItem
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.media.quality import AudioQuality, VideoQuality
+    from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
 
 
 class DownloadStage(StrEnum):

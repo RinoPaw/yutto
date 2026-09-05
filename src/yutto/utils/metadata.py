@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from dict2xml import dict2xml
@@ -28,16 +28,12 @@ class ChapterInfoData(TypedDict):
 
 
 @dataclass(slots=True, kw_only=True)
-class MetaData:
+class ItemMetaData:
     plot: str = ""
     premiered: int = 0
     mid: MId | None = None
     owner: str = ""
     thumb: str = ""
-
-
-@dataclass(slots=True, kw_only=True)
-class ItemMetaData(MetaData):
     show_title: str = ""
 
     genre: list[str] = field(default_factory=list)
@@ -51,17 +47,16 @@ class ItemMetaData(MetaData):
     chapter_info_data: list[ChapterInfoData] = field(default_factory=list)
 
 
-@dataclass(slots=True, kw_only=True)
-class ContainerMetaData(MetaData):
-    pass
+def _metadata_as_dict(metadata: ItemMetaData) -> dict[str, Any]:
+    return {field_.name: getattr(metadata, field_.name) for field_ in fields(metadata)}
+
 
 def metadata_value_format(metadata: ItemMetaData, metadata_format: dict[str, str]) -> dict[str, Any]:
-    formatted_metadata: dict[str, Any] = {}
-    for key, value in metadata.items():
+    formatted_metadata = _metadata_as_dict(metadata)
+    for key, value in formatted_metadata.items():
         if key in metadata_format:
             assert isinstance(value, int)
-            value = get_time_str_by_stamp(value, metadata_format[key])
-        formatted_metadata[key] = value
+            formatted_metadata[key] = get_time_str_by_stamp(value, metadata_format[key])
     return formatted_metadata
 
 
@@ -69,7 +64,9 @@ def write_metadata(metadata: ItemMetaData, video_path: Path, metadata_format: di
     metadata_path = video_path.with_suffix(".nfo")
     custom_root = "episodedetails"  # TODO: 不同视频类型使用不同的 root name
     # 增加字段格式化内容，后续如果需要调整可以继续调整
-    user_formatted_metadata = metadata_value_format(metadata, metadata_format) if metadata_format else metadata
+    user_formatted_metadata = (
+        metadata_value_format(metadata, metadata_format) if metadata_format else _metadata_as_dict(metadata)
+    )
     xml_content = dict2xml(user_formatted_metadata, wrap=custom_root, indent="  ")
     with metadata_path.open("w", encoding="utf-8") as f:
         f.write(xml_content)
@@ -77,7 +74,7 @@ def write_metadata(metadata: ItemMetaData, video_path: Path, metadata_format: di
 
 
 def attach_chapter_info(metadata: ItemMetaData, chapter_info_data: list[ChapterInfoData]):
-    metadata["chapter_info_data"] = chapter_info_data
+    metadata.chapter_info_data = chapter_info_data
 
 
 # https://wklchris.github.io/blog/FFmpeg/FFmpeg.html#id26

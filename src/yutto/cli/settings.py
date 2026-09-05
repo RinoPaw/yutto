@@ -7,10 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from yutto.auth import xdg_config_home
-from yutto.media.quality import (
-    AudioQuality,
-    VideoQuality,
-)
+from yutto.stream import AudioQuality, VideoQuality
 from yutto.utils.console.logger import Logger
 from yutto.utils.time import TIME_DATE_FMT
 

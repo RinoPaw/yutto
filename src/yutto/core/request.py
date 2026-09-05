@@ -5,8 +5,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from yutto.media.codec import AudioCodec, VideoCodec
-from yutto.media.quality import AudioQuality, VideoQuality
+from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
 from yutto.utils.time import TIME_DATE_FMT
 
 
@@ -31,14 +30,14 @@ class AccessRequestOptions(_RequestModel):
 class ScopeRequestOptions(_RequestModel):
     """Whether resolution targets one episode or an expanded collection."""
 
-    batch: bool = False
+    batch: bool = Field(default=False, deprecated=True)
     with_extra_episodes: bool = False
 
 
 class SelectionRequestOptions(_RequestModel):
-    """Filters applied while selecting episodes from an expanded scope."""
+    """Selection for the direct children of the top-level source."""
 
-    episodes: str = "1~-1"
+    episodes: str | None = None
     skip_preview: bool = False
     start_time: str | None = None
     end_time: str | None = None

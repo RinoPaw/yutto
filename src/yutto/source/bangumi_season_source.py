@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from yutto.media import BangumiSeason
 from yutto.source import Source
-from yutto.source.bangumi_episode_source import bangumi_episode_items, parse_bangumi_episode
+from yutto.source.bangumi_episode_source import parse_bangumi_episode
 from yutto.types import MediaId, SeasonId
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
@@ -16,20 +16,29 @@ class BangumiSeasonSource(Source):
     id: SeasonId | MediaId
 
     async def resolve(self, scope: ExecutionScope) -> BangumiSeason:
-        if isinstance(self.id, MediaId):
-            self.id = await self._get_season_id(scope, self.id)
-        elif isinstance(self.id, SeasonId):
-            self.id = self.id
+        season_id = (
+            await self._get_season_id(scope, self.id)
+            if isinstance(self.id, MediaId)
+            else self.id
+        )
+        api = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
+        res = await self._fetch_payload(scope, api, "该番剧列表", f"season_id: {season_id}", "result")
 
-        api = f"https://api.bilibili.com/pgc/view/web/season?season_id={self.id}"
-        res = await self._fetch_payload(scope, api, "该番剧列表", f"season_id: {self.id}", "result")
+        episode_items: list[dict[str, Any]] = list(res["episodes"])
+        if self.options.with_extra_episodes:
+            for section in res.get("section", []):
+                if section["type"] != 5:
+                    episode_items.extend(section["episodes"])
+        if self.options.skip_preview:
+            episode_items = [item for item in episode_items if item.get("badge") != "预告"]
+        episode_items = self._select_items(episode_items)
 
         return BangumiSeason(
-            id=self.id,
-            title=str(res["title"]),
+            season_id=season_id,
+            title=res["title"],
             items=[
                 parse_bangumi_episode(item, require_metadata=self.options.require_metadata)
-                for item in bangumi_episode_items(res)
+                for item in episode_items
             ],
         )
 

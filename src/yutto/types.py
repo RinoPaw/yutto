@@ -9,8 +9,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from yutto.core.result import ResolvedItem
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.media.quality import AudioQuality, VideoQuality
+    from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.utils.danmaku import DanmakuData, DanmakuSaveType
     from yutto.utils.filter import PublicationTimeFilter
     from yutto.utils.metadata import ChapterInfoData, ItemMetaData
@@ -73,7 +72,8 @@ class AId(AvId):
     """AID"""
 
     def __init__(self, aid: Any):
-        self.value= str(aid)
+        self.value = str(aid)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if not self.value.isascii() or not self.value.isdigit():
@@ -106,7 +106,8 @@ class CId(BilibiliId):
     """视频 ID"""
 
     def __init__(self, cid: Any):
-        self.value= str(cid)
+        self.value = str(cid)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if not self.value.isascii() or not self.value.isdigit():

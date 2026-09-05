@@ -6,7 +6,7 @@ from returns.result import Failure
 
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.exceptions import EpisodeNotFoundError, NoAccessPermissionError, UnSupportedTypeError
-from yutto.media.codec import audio_codec_map, video_codec_map
+from yutto.stream import audio_codec_map, video_codec_map
 from yutto.types import (
     AId,
     AudioUrlMeta,

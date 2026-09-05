@@ -11,7 +11,7 @@ from yutto.exceptions import (
     NotFoundError,
     UnSupportedTypeError,
 )
-from yutto.media.codec import audio_codec_map, video_codec_map
+from yutto.stream import audio_codec_map, video_codec_map
 from yutto.types import (
     AId,
     AudioUrlMeta,

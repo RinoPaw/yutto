@@ -6,10 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from yutto.__version__ import VERSION as yutto_version
 from yutto.cli.settings import YuttoSettings, load_settings_file, search_for_settings_file
 from yutto.input_parser import alias_parser, path_from_cli
-from yutto.media.quality import (
-    audio_quality_priority_default,
-    video_quality_priority_default,
-)
+from yutto.stream import audio_quality_priority_default, video_quality_priority_default
 from yutto.utils.console.logger import Logger
 from yutto.utils.functional.functional import map_optional
 
@@ -331,6 +328,15 @@ def add_download_arguments(parser: argparse.ArgumentParser, settings: YuttoSetti
         help="认证信息 profile 名称，默认 default",
     )
 
+    # 内容选择
+    group_selection = parser.add_argument_group("selection", "内容选择参数")
+    group_selection.add_argument(
+        "-p",
+        "--episodes",
+        default=None,
+        help="选择当前资源的直接子项；未指定时默认选择第 1 项",
+    )
+
     # 资源选择
     group_resource = parser.add_argument_group("resource", "资源选择参数")
     group_resource.add_argument(
@@ -458,10 +464,9 @@ def add_download_arguments(parser: argparse.ArgumentParser, settings: YuttoSetti
         help="屏蔽匹配关键词的弹幕，使用逗号分隔",
     )
 
-    # 仅批量下载使用
+    # 兼容旧批量下载参数
     group_batch = parser.add_argument_group("batch", "批量下载参数")
     group_batch.add_argument("-b", "--batch", action="store_true", help="批量下载")
-    group_batch.add_argument("-p", "--episodes", default="1~-1", help="选集")
     group_batch.add_argument(
         "--with-extra-episodes",
         action="store_true",

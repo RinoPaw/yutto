@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.api.user_info import validate_user_info
 from yutto.core.events import DownloadItemListed, DownloadStage, DownloadStageChanged
+from yutto.core.input import ParsedInput, parse_input
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import DownloadResult, ItemResult, ResolvedItem, ResolveFailure, ResolveResult
 from yutto.downloader.downloader import process_download
@@ -31,8 +31,8 @@ from yutto.extractor import (
 from yutto.extractor._abc import BatchExtractor
 from yutto.input_parser import validate_batch_selection
 from yutto.path_templates import create_unique_path_resolver
+from yutto.source import BangumiEpisodeSource, BangumiSeasonSource, UgcVideoSource
 from yutto.types import EpisodeData, ExtractorOptions
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.filter import PublicationTimeFilter
 
 if TYPE_CHECKING:
@@ -81,6 +81,26 @@ def show_batch_episode_title(
 
 def _emit_item_listed(item: ResolvedItem) -> None:
     emit_download_event(DownloadItemListed(item=item))
+
+
+def _legacy_input_value(parsed_input: ParsedInput) -> str:
+    """Adapt directly parseable b23 semantic URLs for the temporary Extractor bridge."""
+    value = parsed_input.value
+    if not value.lower().startswith(("http://b23.tv/", "https://b23.tv/")):
+        return value
+
+    source = parsed_input.source
+    if isinstance(source, UgcVideoSource):
+        url = source.id.to_url()
+        selection = source.selection
+        if selection.isascii() and selection.isdigit() and selection != "0":
+            return f"{url}?p={selection}"
+        return url
+    if isinstance(source, BangumiEpisodeSource):
+        return f"https://www.bilibili.com/bangumi/play/ep{source.id}"
+    if isinstance(source, BangumiSeasonSource):
+        return f"https://www.bilibili.com/bangumi/play/ss{source.id}"
+    return value
 
 
 @dataclass(eq=False, slots=True)
@@ -311,17 +331,19 @@ class DownloadManager:
         *,
         on_item: EpisodeListedCallback | None = None,
     ) -> ResolveOutcome[ResolvableEpisode, YuttoBaseException]:
-        """Match the request to an extractor and run its listing phase."""
+        """Parse the request input, then bridge it to the legacy Extractor listing phase."""
+        parsed_input = await parse_input(scope, request)
         publication_time_filter = PublicationTimeFilter.from_strings(
             request.selection.start_time,
             request.selection.end_time,
         )
-        # 验证批量参数
+        # The legacy Extractor path keeps its historical batch default until Media takes over listing.
+        legacy_episodes = parsed_input.source.selection if request.selection.episodes is not None else "1~-1"
         if request.scope.batch:
-            validate_batch_selection(request.selection.episodes)
+            validate_batch_selection(legacy_episodes)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
 
-        # 初始化各种提取器
+        # Extractor dispatch is still the compatibility layer below Parser/Source for now.
         extractors = (
             [
                 UgcVideoBatchExtractor(),  # 投稿全集
@@ -341,8 +363,8 @@ class DownloadManager:
                 CheeseExtractor(),  # 课程单集
             ]
         )
-        url = request.source.url
-        # 将 shortcut 转为完整 url
+        url = _legacy_input_value(parsed_input)
+        # 将 shortcut 转为完整 url；Parser 已经负责识别输入，这里只为旧 Extractor 适配格式。
         for extractor in extractors:
             matched, url = extractor.resolve_shortcut(url)
             if matched:
@@ -354,24 +376,12 @@ class DownloadManager:
             {"is_login": request.access.login_strict, "vip_status": request.access.vip_strict},
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
-        # 重定向到可识别的 url
-        try:
-            url = unwrap_fetch_result(await Fetcher.get_redirected_url(scope, url))
-        except InvalidUrlError:
-            raise WrongUrlError(f"无效的 url({url})～请检查一下链接是否正确～") from None
-        except UnsupportedProtocolError:
-            error_text = f"无效的 url 协议（{url}）～请检查一下链接协议是否正确"
-            if not request.scope.batch:
-                error_text += (
-                    "，如使用裸 id 功能，请确认该类型 id 是否支持当前单话模式，如不支持需要添加 `-b` 以使用批量模式"
-                )
-            raise WrongUrlError(error_text) from None
 
         # 提取信息，构造解析任务～
         for extractor in extractors:
             if extractor.match(url):
                 extractor_options = ExtractorOptions(
-                    episodes=request.selection.episodes,
+                    episodes=legacy_episodes,
                     with_extra_episodes=request.scope.with_extra_episodes,
                     skip_preview=request.selection.skip_preview,
                     require_video=request.resources.video,

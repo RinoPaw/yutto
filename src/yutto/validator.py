@@ -9,7 +9,7 @@ import biliass
 from yutto.auth import format_auth_inline, resolve_auth
 from yutto.exceptions import ErrorCode
 from yutto.input_parser import validate_batch_selection
-from yutto.media.codec import audio_codec_priority_default, video_codec_priority_default
+from yutto.stream import audio_codec_priority_default, video_codec_priority_default
 from yutto.utils.console.colorful import set_no_color
 from yutto.utils.console.logger import Logger, set_logger_debug
 from yutto.utils.fetcher import resolve_proxy
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     import argparse
 
     from yutto.auth import AuthInfo
-    from yutto.media.codec import VideoCodec
+    from yutto.stream import VideoCodec
 
 
 def hydrate_auth(args: argparse.Namespace) -> AuthInfo | None:

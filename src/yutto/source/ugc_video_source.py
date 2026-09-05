@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from returns.result import Failure
@@ -15,6 +16,7 @@ from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
+    from yutto.source import SourceOptions
 
 
 class UgcVideoSource(Source):
@@ -22,10 +24,8 @@ class UgcVideoSource(Source):
 
     async def resolve(self, scope: ExecutionScope) -> UgcVideo:
         video_info = await self.get_ugc_video_info(scope, self.id)
-        selected_pages: list[UgcPage] = []
 
         metadata: ItemMetaData | None = None
-
         if self.options.require_metadata:
             metadata = ItemMetaData(
                 show_title=video_info["title"],
@@ -39,21 +39,17 @@ class UgcVideoSource(Source):
                 website=BvId(video_info["bvid"]).to_url(),
             )
 
-        for page in self.selections:
-            if page < 1 or page > len(video_info["pages"]):
-                raise NotFoundError(f"视频 {self.id} 不存在第 {page} 个分 P")
-
-            item = video_info["pages"][page - 1]
-
-            selected_pages.append(
-                UgcPage(
-                    id=CId(item["cid"]),
-                    title=item["part"],
-                    extraMetaData=metadata
-                )
+        pages = [
+            UgcPage(
+                avid=self.id,
+                cid=CId(item["cid"]),
+                title=item["part"],
+                extraMetaData=metadata,
+                cover_url=video_info["pic"],
             )
-
-        return UgcVideo(id=self.id, title=video_info["title"], items=selected_pages)
+            for item in self._select_items(video_info["pages"])
+        ]
+        return UgcVideo(avid=self.id, title=video_info["title"], items=pages)
 
     async def get_ugc_video_info(self, scope: ExecutionScope, avid: AvId) -> dict[str, Any]:
         api = f"https://api.bilibili.com/x/web-interface/view?{avid.to_param()}"
@@ -88,3 +84,18 @@ class UgcVideoSource(Source):
         if res_json["code"] != 0:
             raise NotFoundError(f"无法获取视频 {avid} 标签")
         return [tag["tag_name"] for tag in res_json["data"]]
+
+
+async def resolve_ugc_videos(
+    scope: ExecutionScope,
+    avids: list[AvId],
+    options: SourceOptions,
+) -> list[UgcVideo]:
+    return list(
+        await asyncio.gather(
+            *(
+                UgcVideoSource(id=avid, selection="1~-1", options=options).resolve(scope)
+                for avid in avids
+            )
+        )
+    )

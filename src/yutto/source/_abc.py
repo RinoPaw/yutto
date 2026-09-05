@@ -3,22 +3,26 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
+from yutto.selection import compile_selection
 from yutto.types import BilibiliId, Options
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.metadata import Actor
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from yutto.core.execution import ExecutionScope
     from yutto.media import MediaContainer
+
+T = TypeVar("T")
 
 
 @dataclass(slots=True, kw_only=True)
 class SourceOptions(Options):
-    selections: tuple[int, ...] = ()
     with_extra_episodes: bool = False
     skip_preview: bool = False
     require_metadata: bool = False
@@ -27,13 +31,20 @@ class SourceOptions(Options):
 @dataclass(slots=True, kw_only=True)
 class Source(ABC):
     id: BilibiliId
-    selections: tuple[int, ...] = ()
+    selection: str = "1"
     options: SourceOptions = field(default_factory=SourceOptions)
 
-    def __init__(self, id: BilibiliId, page: int = 1, options: SourceOptions | None = None):
-        self.options = options or SourceOptions()
-        self.id = id
-        self.selections = self.options.selections or (page,)
+    @property
+    def selections(self) -> tuple[int, ...]:
+        """Compatibility view for the old literal single-page parser tests."""
+        try:
+            value = int(self.selection)
+        except ValueError:
+            return ()
+        return (value,) if value != 0 else ()
+
+    def _select_items(self, items: Sequence[T]) -> list[T]:
+        return [items[index - 1] for index in compile_selection(self.selection, len(items))]
 
     @abstractmethod
     async def resolve(self, scope: ExecutionScope) -> MediaContainer:
@@ -79,8 +90,14 @@ class Source(ABC):
         description: str,
         identifier: str,
         data_key: str,
+        *,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        response = unwrap_fetch_result(await Fetcher.fetch_json(scope, url))
+        if params is None:
+            result = await Fetcher.fetch_json(scope, url)
+        else:
+            result = await Fetcher.fetch_json(scope, url, params=params)
+        response = unwrap_fetch_result(result)
         if response.get("code") == -404:
             raise NotFoundError(f"未找到{description}（{identifier}）")
         payload = response.get(data_key)

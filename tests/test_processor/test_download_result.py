@@ -20,7 +20,7 @@ from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
     from yutto.downloader.planner import DownloadPlan
-    from yutto.media.codec import AudioCodec
+    from yutto.stream import AudioCodec
     from yutto.types import AudioUrlMeta, EpisodeData
     from yutto.utils.danmaku import DanmakuData, DanmakuOptions
 

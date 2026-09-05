@@ -13,7 +13,7 @@ from yutto.downloader.planner import DownloadPlan, DownloadPlanner
 
 if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
-    from yutto.media.codec import AudioCodec, VideoCodec
+    from yutto.stream import AudioCodec, VideoCodec
     from yutto.types import EpisodeData, VideoUrlMeta
 
 pytestmark = pytest.mark.processor

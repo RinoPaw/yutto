@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from yutto.exceptions import NotFoundError
 from yutto.media import BangumiEpisode, BangumiSeason
 from yutto.source import Source
-from yutto.types import EpisodeId, SeasonId
+from yutto.types import BvId, CId, EpisodeId, SeasonId
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
@@ -29,12 +29,15 @@ def parse_bangumi_episode(item: dict[str, Any], *, require_metadata: bool = Fals
             show_title=item["share_copy"],
             plot=item["share_copy"],
             thumb=item["cover"],
-            premiered=str(item["pub_time"]),
+            premiered=item["pub_time"],
         )
     return BangumiEpisode(
-        id=EpisodeId(str(item["id"])),
+        episode_id=EpisodeId(str(item["id"])),
+        avid=BvId(item["bvid"]),
+        cid=CId(item["cid"]),
         title=title,
         extraMetaData=metadata,
+        cover_url=item.get("cover"),
     )
 
 
@@ -50,7 +53,7 @@ class BangumiEpisodeSource(Source):
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
 
         return BangumiSeason(
-            id=SeasonId(str(res["season_id"])),
-            title=str(res["title"]),
+            season_id=SeasonId(str(res["season_id"])),
+            title=res["title"],
             items=[parse_bangumi_episode(item, require_metadata=self.options.require_metadata)],
         )

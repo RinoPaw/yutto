@@ -10,8 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.core.request import DownloadRequest
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.media.quality import AudioQuality, VideoQuality
+    from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, EpisodeData, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
 

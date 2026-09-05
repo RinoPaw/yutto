@@ -10,8 +10,8 @@ from yutto.types import (
     CollectionId,
     EpisodeId,
     FId,
-    MId,
     MediaId,
+    MId,
     SeasonId,
     SeriesId,
 )

@@ -4,13 +4,30 @@ from typing import Literal
 
 from yutto.utils.priority import gen_priority_sequence
 
+VideoCodecId = Literal[7, 12, 13]
+VideoCodec = Literal["avc", "hevc", "av1"]
+AudioCodecId = Literal[0]
+AudioCodec = Literal["mp4a", "flac", "eac3"]
+
 VideoQuality = Literal[127, 126, 125, 120, 116, 112, 100, 80, 74, 64, 32, 16]
 AudioQuality = Literal[30251, 30255, 30250, 30280, 30232, 30216]
 AudioCryptoQuality = Literal[100010, 100009, 100008]
 
+video_codec_priority_default: list[VideoCodec] = ["avc", "hevc", "av1"]
+audio_codec_priority_default: list[AudioCodec] = ["mp4a", "flac", "eac3"]
 video_quality_priority_default: list[VideoQuality] = [127, 126, 125, 120, 116, 112, 100, 80, 74, 64, 32, 16]
 audio_quality_priority_default: list[AudioQuality] = [30251, 30255, 30250, 30280, 30232, 30216]
 audio_encrypted_quality_priorities: list[AudioCryptoQuality] = [100010, 100009, 100008]
+
+video_codec_map: dict[VideoCodecId, VideoCodec] = {
+    7: "avc",
+    12: "hevc",
+    13: "av1",  # Example: BV1w34y1q7HY
+}
+
+audio_codec_map: dict[AudioCodecId, AudioCodec] = {
+    0: "mp4a",
+}
 
 video_quality_map = {
     127: {
@@ -105,6 +122,24 @@ audio_quality_map = {
         "bitrate": 0,
     },
 }
+
+
+def gen_vcodec_priority(video_codec: VideoCodec) -> list[VideoCodec]:
+    """生成视频编码优先级序列"""
+
+    choice = video_codec_priority_default.index(video_codec)
+    return [
+        video_codec_priority_default[idx] for idx in gen_priority_sequence(choice, len(video_codec_priority_default))
+    ]
+
+
+def gen_acodec_priority(audio_codec: AudioCodec) -> list[AudioCodec]:
+    """生成音频编码优先级序列"""
+
+    choice = audio_codec_priority_default.index(audio_codec)
+    return [
+        audio_codec_priority_default[idx] for idx in gen_priority_sequence(choice, len(audio_codec_priority_default))
+    ]
 
 
 def is_encrypted_audio_quality(quality: int) -> bool:
