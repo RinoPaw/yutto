@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.exceptions import WrongUrlError
-from yutto.parser import ParseOptions, parse
+from yutto.parser import parse
 from yutto.source import SourceOptions
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
@@ -23,22 +23,20 @@ class ParsedInput:
     source: Source
 
 
-def parse_options_from_request(request: DownloadRequest) -> ParseOptions:
-    """Translate one core request into the options visible to the Parser and Source layers."""
-    return ParseOptions(
+def source_options_from_request(request: DownloadRequest) -> SourceOptions:
+    """Translate one core request into the options visible to the Source layer."""
+    return SourceOptions(
         selection=request.selection.episodes,
-        source_options=SourceOptions(
-            with_extra_episodes=request.scope.with_extra_episodes,
-            skip_preview=request.selection.skip_preview,
-            require_metadata=request.resources.metadata,
-        ),
+        with_extra_episodes=request.scope.with_extra_episodes,
+        skip_preview=request.selection.skip_preview,
+        require_metadata=request.resources.metadata,
     )
 
 
 async def parse_input(scope: ExecutionScope, request: DownloadRequest) -> ParsedInput:
     """Parse one request input, following a redirect only when pure parsing cannot identify it."""
     value = request.source.url.strip()
-    options = parse_options_from_request(request)
+    options = source_options_from_request(request)
 
     if source := parse(value, options):
         return ParsedInput(value=value, source=source)

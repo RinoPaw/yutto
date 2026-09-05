@@ -81,8 +81,7 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     media = asyncio.run(
         UgcSeriesSource(
             id=SeriesId("456"),
-            selection="2",
-            options=SourceOptions(require_metadata=True),
+            options=SourceOptions(selection="2", require_metadata=True),
         ).resolve(None)  # type: ignore[arg-type]
     )
 

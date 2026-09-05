@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
 from yutto.exceptions import WrongArgumentError
@@ -30,7 +29,6 @@ from yutto.types import (
     FId,
     MediaId,
     MId,
-    Options,
     SeasonId,
     SeriesId,
 )
@@ -47,22 +45,10 @@ _B23 = r"https?://b23\.tv"
 _URL_END = r"(?:/(?:[?#].*)?|(?:[?#].*)?)"
 
 
-@dataclass(slots=True, kw_only=True)
-class ParseOptions(Options):
-    """Options used while turning one user input into its top-level Source."""
-
-    selection: str | None = None
-    source_options: SourceOptions = field(default_factory=SourceOptions)
-
-
 class Parser(ABC):
     @abstractmethod
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         raise NotImplementedError
-
-    @staticmethod
-    def _selection(options: ParseOptions, fallback: str = "1") -> str:
-        return options.selection if options.selection is not None else fallback
 
     @staticmethod
     def _single_query_value(query: dict[str, list[str]], key: str) -> str | None:
@@ -81,21 +67,15 @@ class UgcVideoParser(Parser):
     _B23_BV_URL = re.compile(rf"{_B23}/(?P<bvid>BV[A-Za-z0-9]+){_URL_END}", re.IGNORECASE)
     _FESTIVAL_URL = re.compile(rf"{_BILIBILI}/festival/", re.IGNORECASE)
 
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
-
         avid = self._parse_avid(url, query)
         if avid is None:
             return None
-
-        selection = options.selection
-        if selection is None:
-            selection = self._parse_page(query)
-
         return UgcVideoSource(
             id=avid,
-            selection=selection,
-            options=options.source_options,
+            page=self._parse_page(query),
+            options=options,
         )
 
     def _parse_avid(self, url: str, query: dict[str, list[str]]) -> AId | BvId | None:
@@ -115,15 +95,14 @@ class UgcVideoParser(Parser):
             return BvId(match.group("bvid"))
         return None
 
-    def _parse_page(self, query: dict[str, list[str]]) -> str:
+    def _parse_page(self, query: dict[str, list[str]]) -> int | None:
         page = self._single_query_value(query, "p")
         if page is None:
-            return "1"
+            return None
         try:
-            int(page)
+            return int(page)
         except ValueError:
             raise WrongArgumentError(f"page `{page}` 不是整数") from None
-        return page
 
     def _parse_avid_from_query(self, query: dict[str, list[str]]) -> AId | BvId | None:
         bvid = self._single_query_value(query, "bvid")
@@ -151,43 +130,19 @@ class BangumiParser(Parser):
     _B23_EP_URL = re.compile(rf"{_B23}/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE)
     _B23_SS_URL = re.compile(rf"{_B23}/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE)
 
-    def parse(self, url: str, options: ParseOptions) -> BangumiEpisodeSource | BangumiSeasonSource | None:
+    def parse(self, url: str, options: SourceOptions) -> BangumiEpisodeSource | BangumiSeasonSource | None:
         if match := self._BANGUMI_SS_URL.fullmatch(url):
-            return BangumiSeasonSource(
-                id=SeasonId(match.group("season_id")),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return BangumiSeasonSource(id=SeasonId(match.group("season_id")), options=options)
         if match := self._BANGUMI_EP_URL.fullmatch(url):
-            return BangumiEpisodeSource(
-                id=EpisodeId(match.group("episode_id")),
-                selection=options.selection,
-                options=options.source_options,
-            )
+            return BangumiEpisodeSource(id=EpisodeId(match.group("episode_id")), options=options)
         if match := self._BANGUMI_MD_URL.fullmatch(url):
-            return BangumiSeasonSource(
-                id=MediaId(match.group("media_id")),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return BangumiSeasonSource(id=MediaId(match.group("media_id")), options=options)
         if match := self._B23_SS_URL.fullmatch(url):
-            return BangumiSeasonSource(
-                id=SeasonId(match.group("season_id")),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return BangumiSeasonSource(id=SeasonId(match.group("season_id")), options=options)
         if match := self._B23_EP_URL.fullmatch(url):
-            return BangumiEpisodeSource(
-                id=EpisodeId(match.group("episode_id")),
-                selection=options.selection,
-                options=options.source_options,
-            )
+            return BangumiEpisodeSource(id=EpisodeId(match.group("episode_id")), options=options)
         if match := _MD_ID.fullmatch(url):
-            return BangumiSeasonSource(
-                id=MediaId(match.group("media_id")),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return BangumiSeasonSource(id=MediaId(match.group("media_id")), options=options)
         return None
 
 
@@ -199,19 +154,11 @@ class CheeseParser(Parser):
         r"https?://(?:www\.)?bilibili\.com/cheese/play/ss(?P<season_id>[0-9]+)/?", re.IGNORECASE
     )
 
-    def parse(self, url: str, options: ParseOptions) -> CheeseEpisodeSource | CheeseSeasonSource | None:
+    def parse(self, url: str, options: SourceOptions) -> CheeseEpisodeSource | CheeseSeasonSource | None:
         if match := self._CHEESE_EP_URL.fullmatch(url):
-            return CheeseEpisodeSource(
-                id=EpisodeId(match.group("episode_id")),
-                selection=options.selection,
-                options=options.source_options,
-            )
+            return CheeseEpisodeSource(id=EpisodeId(match.group("episode_id")), options=options)
         if match := self._CHEESE_SS_URL.fullmatch(url):
-            return CheeseSeasonSource(
-                id=SeasonId(match.group("season_id")),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return CheeseSeasonSource(id=SeasonId(match.group("season_id")), options=options)
         return None
 
 
@@ -221,20 +168,17 @@ class UgcSeriesParser(Parser):
         rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/lists/(?P<list_id>[0-9]+){_URL_END}", re.IGNORECASE
     )
 
-    def parse(self, url: str, options: ParseOptions) -> UgcSeriesSource | None:
+    def parse(self, url: str, options: SourceOptions) -> UgcSeriesSource | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
-        selection = self._selection(options)
         if self._PLAYLIST_URL.fullmatch(url):
             sid = self._single_query_value(query, "sid")
             if sid is None:
                 return None
-            return UgcSeriesSource(id=SeriesId(sid), selection=selection, options=options.source_options)
+            return UgcSeriesSource(id=SeriesId(sid), options=options)
         if match := self._SPACE_LIST_URL.fullmatch(url):
             if self._single_query_value(query, "type") != "series":
                 return None
-            return UgcSeriesSource(
-                id=SeriesId(match.group("list_id")), selection=selection, options=options.source_options
-            )
+            return UgcSeriesSource(id=SeriesId(match.group("list_id")), options=options)
         return None
 
 
@@ -246,17 +190,15 @@ class UgcCollectionParser(Parser):
         rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE
     )
 
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
-        selection = self._selection(options)
         if match := self._SPACE_LIST_URL.fullmatch(url):
             if self._single_query_value(query, "type") != "season":
                 return None
             return UgcCollectionSource(
                 id=CollectionId(match.group("list_id")),
                 owner_id=MId(match.group("mid")),
-                selection=selection,
-                options=options.source_options,
+                options=options,
             )
         if match := self._FAVOURITE_URL.fullmatch(url):
             if self._single_query_value(query, "ftype") != "collect":
@@ -267,8 +209,7 @@ class UgcCollectionParser(Parser):
             return UgcCollectionSource(
                 id=CollectionId(fid),
                 owner_id=MId(match.group("mid")),
-                selection=selection,
-                options=options.source_options,
+                options=options,
             )
         return None
 
@@ -278,7 +219,7 @@ class UgcFavParser(Parser):
         rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE
     )
 
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
         if not self._FAVOURITE_URL.fullmatch(url):
             return None
@@ -287,19 +228,15 @@ class UgcFavParser(Parser):
         fid = self._single_query_value(query, "fid")
         if fid is None:
             return None
-        return UgcFavSource(id=FId(fid), selection=self._selection(options), options=options.source_options)
+        return UgcFavSource(id=FId(fid), options=options)
 
 
 class UgcWatchLaterParser(Parser):
     _WATCH_LATER_URL = re.compile(rf"{_BILIBILI}/(?:list/)?watchlater{_URL_END}", re.IGNORECASE)
 
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         if self._WATCH_LATER_URL.fullmatch(url):
-            return UgcWatchLaterSource(
-                id=BilibiliId("watchlater"),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return UgcWatchLaterSource(id=BilibiliId("watchlater"), options=options)
         return None
 
 
@@ -308,58 +245,43 @@ class UgcSpaceParser(Parser):
         rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)(?:/video)?{_URL_END}", re.IGNORECASE
     )
 
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         if match := self._SPACE_URL.fullmatch(url):
-            return UgcSpaceSource(
-                id=MId(match.group("mid")),
-                selection=self._selection(options),
-                options=options.source_options,
-            )
+            return UgcSpaceSource(id=MId(match.group("mid")), options=options)
         return None
 
 
 class MixedParser(Parser):
-    def parse(self, url: str, options: ParseOptions) -> Source | None:
-        source_options = options.source_options
+    def parse(self, url: str, options: SourceOptions) -> Source | None:
         if match := _EP_ID.fullmatch(url):
             episode_id = EpisodeId(match.group("episode_id"))
-            selection = options.selection
             return AmbiguousSource(
                 id=episode_id,
-                selection=selection,
-                options=source_options,
+                options=options,
                 candidates=(
-                    BangumiEpisodeSource(id=episode_id, selection=selection, options=source_options),
-                    CheeseEpisodeSource(id=episode_id, selection=selection, options=source_options),
+                    BangumiEpisodeSource(id=episode_id, options=options),
+                    CheeseEpisodeSource(id=episode_id, options=options),
                 ),
             )
         if match := _SS_ID.fullmatch(url):
             season_id = SeasonId(match.group("season_id"))
-            selection = self._selection(options)
             return AmbiguousSource(
                 id=season_id,
-                selection=selection,
-                options=source_options,
+                options=options,
                 candidates=(
-                    BangumiSeasonSource(id=season_id, selection=selection, options=source_options),
-                    CheeseSeasonSource(id=season_id, selection=selection, options=source_options),
+                    BangumiSeasonSource(id=season_id, options=options),
+                    CheeseSeasonSource(id=season_id, options=options),
                 ),
             )
         return None
 
 
-def parse(value: str, options: ParseOptions | SourceOptions | None = None) -> Source | None:
+def parse(value: str, options: SourceOptions | None = None) -> Source | None:
     value = value.strip()
     if not value:
         return None
 
-    if options is None:
-        parse_options = ParseOptions()
-    elif isinstance(options, SourceOptions):
-        parse_options = ParseOptions(source_options=options)
-    else:
-        parse_options = options
-
+    source_options = options if options is not None else SourceOptions()
     for parser in (
         UgcVideoParser(),
         BangumiParser(),
@@ -371,7 +293,7 @@ def parse(value: str, options: ParseOptions | SourceOptions | None = None) -> So
         UgcSpaceParser(),
         MixedParser(),
     ):
-        source = parser.parse(value, parse_options)
+        source = parser.parse(value, source_options)
         if source is not None:
             return source
     return None

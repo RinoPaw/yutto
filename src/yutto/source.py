@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from returns.result import Failure
@@ -36,7 +36,6 @@ from yutto.types import (
     FId,
     MId,
     MediaId,
-    Options,
     SeasonId,
     SeriesId,
 )
@@ -53,7 +52,8 @@ T = TypeVar("T")
 
 
 @dataclass(slots=True, kw_only=True)
-class SourceOptions(Options):
+class SourceOptions:
+    selection: str | None = None
     with_extra_episodes: bool = False
     skip_preview: bool = False
     require_metadata: bool = False
@@ -62,22 +62,27 @@ class SourceOptions(Options):
 @dataclass(slots=True, kw_only=True)
 class Source(ABC):
     id: BilibiliId
-    selection: str | None = None
     options: SourceOptions = field(default_factory=SourceOptions)
+
+    @property
+    def selection(self) -> str | None:
+        """Compatibility view for the temporary legacy Extractor bridge."""
+        return self.options.selection
 
     @property
     def selections(self) -> tuple[int, ...]:
         """Compatibility view for the old literal single-page parser tests."""
-        if self.selection is None:
+        selection = self.selection
+        if selection is None:
             return ()
         try:
-            value = int(self.selection)
+            value = int(selection)
         except ValueError:
             return ()
         return (value,) if value != 0 else ()
 
-    def _select_items(self, items: Sequence[T]) -> list[T]:
-        selection = self.selection if self.selection is not None else "1"
+    def _select_items(self, items: Sequence[T], *, fallback: str = "1") -> list[T]:
+        selection = self.options.selection if self.options.selection is not None else fallback
         return [items[index - 1] for index in compile_selection(selection, len(items))]
 
     @abstractmethod
@@ -202,7 +207,7 @@ class BangumiEpisodeSource(Source):
         if anchor_item is None:
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
 
-        if self.selection is None:
+        if self.options.selection is None:
             episode_items = [anchor_item]
         else:
             episode_items: list[dict[str, Any]] = list(res["episodes"])
@@ -288,7 +293,7 @@ class CheeseEpisodeSource(Source):
         if anchor_item is None:
             raise NotFoundError(f"无法在课程 {res['title']} 中找到剧集 ep{self.id}")
 
-        episode_items = [anchor_item] if self.selection is None else self._select_items(res["episodes"])
+        episode_items = [anchor_item] if self.options.selection is None else self._select_items(res["episodes"])
         season_id = res.get("season_id", self.id.value)
         return CheeseSeason(
             season_id=SeasonId(str(season_id)),
@@ -318,8 +323,16 @@ class CheeseSeasonSource(Source):
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class UgcVideoSource(Source):
     id: AvId
+    page: int | None = None
+
+    @property
+    def selection(self) -> str:
+        if self.options.selection is not None:
+            return self.options.selection
+        return str(self.page) if self.page is not None else "1"
 
     async def resolve(self, scope: ExecutionScope) -> UgcVideo:
         resolved_avid, video_info = await self.get_ugc_video_info(scope, self.id)
@@ -340,7 +353,10 @@ class UgcVideoSource(Source):
                 else None,
                 cover_url=video_info["pic"],
             )
-            for item in self._select_items(video_info["pages"])
+            for item in self._select_items(
+                video_info["pages"],
+                fallback=str(self.page) if self.page is not None else "1",
+            )
         ]
         return UgcVideo(avid=resolved_avid, title=video_info["title"], items=pages)
 
@@ -404,12 +420,10 @@ async def resolve_ugc_videos(
     avids: list[AvId],
     options: SourceOptions,
 ) -> list[UgcVideo]:
+    page_options = replace(options, selection="1~-1")
     return list(
         await asyncio.gather(
-            *(
-                UgcVideoSource(id=avid, selection="1~-1", options=options).resolve(scope)
-                for avid in avids
-            )
+            *(UgcVideoSource(id=avid, options=page_options).resolve(scope) for avid in avids)
         )
     )
 

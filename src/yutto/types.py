@@ -229,11 +229,6 @@ class MultiLangSubtitle(TypedDict):
     lines: SubtitleData
 
 
-@dataclass(slots=True, kw_only=True)
-class Options:
-    pass
-
-
 class ExtractorOptions(TypedDict):
     episodes: str
     with_extra_episodes: bool
@@ -256,41 +251,3 @@ class EpisodeInfo(TypedDict):
 
     listing: ResolvedItem
     path: Path  # 初始等于 listing.planned_path，下载时可能因去重而调整
-
-
-class EpisodeData(TypedDict):
-    """剧集数据 = canonical listing + 下载期路径 + 下载所需的资源数据。"""
-
-    info: EpisodeInfo
-    videos: list[VideoUrlMeta]
-    audios: list[AudioUrlMeta]
-    subtitles: list[MultiLangSubtitle]
-    metadata: ItemMetaData | None
-    danmaku: DanmakuData
-    cover_data: bytes | None
-    chapter_info_data: list[ChapterInfoData]
-
-
-class ResolvableEpisode(NamedTuple):
-    """listing 阶段产出的条目：info 立即可用，data 在下载前按需创建并解析"""
-
-    info: EpisodeInfo
-    resolve_data: Callable[[], Coroutine[Any, Any, EpisodeData | None]]
-
-
-class FavouriteMetaData(TypedDict):
-    fid: FId
-    title: str
-
-
-class FavouriteVideoData(TypedDict):
-    """收藏夹条目的元数据，含完整视频标题与分 p 数量"""
-
-    avid: AvId
-    title: str  # B 站返回的视频标题（人工填写）
-    page: int  # 视频分 p 数量
-
-
-class UserInfo(TypedDict):
-    vip_status: bool
-    is_login: bool

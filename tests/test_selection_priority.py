@@ -6,13 +6,15 @@ from typing import Any, cast
 import pytest
 from returns.result import Success
 
+from yutto.exceptions import WrongArgumentError
 from yutto.media import BangumiSeason, CheeseSeason
-from yutto.parser import ParseOptions, parse
+from yutto.parser import parse
 from yutto.source import (
     BangumiEpisodeSource,
     BangumiSeasonSource,
     CheeseEpisodeSource,
     CheeseSeasonSource,
+    SourceOptions,
     UgcVideoSource,
 )
 from yutto.types import EpisodeId
@@ -70,56 +72,60 @@ def _cheese_response() -> dict[str, Any]:
     }
 
 
-def test_episode_and_season_parser_selection_semantics() -> None:
+def test_episode_and_season_parser_share_source_options() -> None:
     bangumi_ep = parse("https://www.bilibili.com/bangumi/play/ep102")
     bangumi_ss = parse("https://www.bilibili.com/bangumi/play/ss456")
     cheese_ep = parse("https://www.bilibili.com/cheese/play/ep102")
     cheese_ss = parse("https://www.bilibili.com/cheese/play/ss456")
 
     assert isinstance(bangumi_ep, BangumiEpisodeSource)
-    assert bangumi_ep.selection is None
+    assert bangumi_ep.options.selection is None
     assert isinstance(bangumi_ss, BangumiSeasonSource)
-    assert bangumi_ss.selection == "1"
+    assert bangumi_ss.options.selection is None
     assert isinstance(cheese_ep, CheeseEpisodeSource)
-    assert cheese_ep.selection is None
+    assert cheese_ep.options.selection is None
     assert isinstance(cheese_ss, CheeseSeasonSource)
-    assert cheese_ss.selection == "1"
+    assert cheese_ss.options.selection is None
 
-    options = ParseOptions(selection="2~-1")
+    options = SourceOptions(selection="2~-1")
     bangumi_ep = parse("https://www.bilibili.com/bangumi/play/ep102", options)
     bangumi_ss = parse("https://www.bilibili.com/bangumi/play/ss456", options)
     cheese_ep = parse("https://www.bilibili.com/cheese/play/ep102", options)
     cheese_ss = parse("https://www.bilibili.com/cheese/play/ss456", options)
 
-    assert bangumi_ep is not None and bangumi_ep.selection == "2~-1"
-    assert bangumi_ss is not None and bangumi_ss.selection == "2~-1"
-    assert cheese_ep is not None and cheese_ep.selection == "2~-1"
-    assert cheese_ss is not None and cheese_ss.selection == "2~-1"
+    assert bangumi_ep is not None and bangumi_ep.options is options
+    assert bangumi_ss is not None and bangumi_ss.options is options
+    assert cheese_ep is not None and cheese_ep.options is options
+    assert cheese_ss is not None and cheese_ss.options is options
 
 
-def test_ugc_selection_priority() -> None:
+def test_ugc_url_page_and_source_selection_are_separate() -> None:
     source = parse("https://www.bilibili.com/video/BV1D84y1t76J")
     assert isinstance(source, UgcVideoSource)
+    assert source.page is None
+    assert source.options.selection is None
     assert source.selection == "1"
 
     source = parse("https://www.bilibili.com/video/BV1D84y1t76J?p=5")
     assert isinstance(source, UgcVideoSource)
+    assert source.page == 5
+    assert source.options.selection is None
     assert source.selection == "5"
 
-    source = parse(
-        "https://www.bilibili.com/video/BV1D84y1t76J?p=5",
-        ParseOptions(selection="2"),
-    )
+    options = SourceOptions(selection="2")
+    source = parse("https://www.bilibili.com/video/BV1D84y1t76J?p=5", options)
     assert isinstance(source, UgcVideoSource)
+    assert source.page == 5
+    assert source.options is options
     assert source.selection == "2"
 
-    # 显式 -p 优先时，不需要再解释被覆盖掉的 URL p 参数。
-    source = parse(
-        "https://www.bilibili.com/video/BV1D84y1t76J?p=not-a-number",
-        ParseOptions(selection="3"),
-    )
-    assert isinstance(source, UgcVideoSource)
-    assert source.selection == "3"
+
+def test_ugc_parser_validates_url_page_even_when_selection_overrides_it() -> None:
+    with pytest.raises(WrongArgumentError, match="不是整数"):
+        parse(
+            "https://www.bilibili.com/video/BV1D84y1t76J?p=not-a-number",
+            SourceOptions(selection="3"),
+        )
 
 
 def test_bangumi_ep_defaults_to_anchor_but_explicit_selection_targets_season(
@@ -132,7 +138,10 @@ def test_bangumi_ep_defaults_to_anchor_but_explicit_selection_targets_season(
     assert [item.episode_id for item in media.items] == [EpisodeId("102")]
 
     media = asyncio.run(
-        BangumiEpisodeSource(id=EpisodeId("102"), selection="1~2").resolve(cast(Any, None))
+        BangumiEpisodeSource(
+            id=EpisodeId("102"),
+            options=SourceOptions(selection="1~2"),
+        ).resolve(cast(Any, None))
     )
     assert [item.episode_id for item in media.items] == [EpisodeId("101"), EpisodeId("102")]
 
@@ -147,7 +156,10 @@ def test_cheese_ep_defaults_to_anchor_but_explicit_selection_targets_season(
     assert [item.episode_id for item in media.items] == [EpisodeId("102")]
 
     media = asyncio.run(
-        CheeseEpisodeSource(id=EpisodeId("102"), selection="1~2").resolve(cast(Any, None))
+        CheeseEpisodeSource(
+            id=EpisodeId("102"),
+            options=SourceOptions(selection="1~2"),
+        ).resolve(cast(Any, None))
     )
     assert [item.episode_id for item in media.items] == [EpisodeId("101"), EpisodeId("102")]
 

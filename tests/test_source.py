@@ -421,8 +421,11 @@ def test_bangumi_season_source_filters_extra_and_preview_before_selection(
     season = asyncio.run(
         BangumiSeasonSource(
             id=SeasonId("456"),
-            selection="1~-1",
-            options=SourceOptions(with_extra_episodes=True, skip_preview=True),
+            options=SourceOptions(
+                selection="1~-1",
+                with_extra_episodes=True,
+                skip_preview=True,
+            ),
         ).resolve(None)  # type: ignore[arg-type]
     )
 
