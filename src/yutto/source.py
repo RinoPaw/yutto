@@ -1,167 +1,620 @@
 from __future__ import annotations
 
 import asyncio
-import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, urlparse
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, TypeVar
 
-from yutto.api.bangumi import get_season_id_by_episode_id as get_bangumi_season_id_by_episode_id
-from yutto.api.cheese import get_season_id_by_episode_id as get_cheese_season_id_by_episode_id
-from yutto.container import Collection, Favourite, Series, UserFavourites, UserVideos, WatchLater
-from yutto.exceptions import EpisodeNotFoundError, WrongArgumentError
+from returns.result import Failure
+
+from yutto.api.user_info import encode_wbi, get_wbi_img
+from yutto.core.operation import ReportLevel, emit_download_report
+from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
 from yutto.media import (
     BangumiEpisode,
-    BangumiMedia,
     BangumiSeason,
     CheeseEpisode,
     CheeseSeason,
+    MediaContainer,
+    UgcCollection,
+    UgcFav,
     UgcPage,
+    UgcSeries,
+    UgcSpace,
     UgcVideo,
+    UgcWatchLater,
 )
-from yutto.types import AId, BvId, EpisodeId, FId, MediaId, MId, SeasonId, SeriesId
+from yutto.selection import compile_selection
+from yutto.types import (
+    AId,
+    AvId,
+    BilibiliId,
+    BvId,
+    CId,
+    CollectionId,
+    EpisodeId,
+    FId,
+    MId,
+    MediaId,
+    Options,
+    SeasonId,
+    SeriesId,
+)
+from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
+from yutto.utils.metadata import Actor, ItemMetaData
+from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from yutto.core.execution import ExecutionScope
 
-
-Container = WatchLater | UserVideos | Favourite | UserFavourites | Series | Collection
-Item = UgcVideo | BangumiMedia | BangumiSeason | CheeseSeason
-Child = UgcPage | BangumiEpisode | CheeseEpisode
+T = TypeVar("T")
 
 
-@dataclass(frozen=True, slots=True)
-class Source:
-    """用户输入中携带的来源上下文与当前焦点。"""
+@dataclass(slots=True, kw_only=True)
+class SourceOptions(Options):
+    with_extra_episodes: bool = False
+    skip_preview: bool = False
+    require_metadata: bool = False
 
-    container: Container | None = None
-    current_item: Item | None = None
-    current_child: Child | None = None
 
-    # 用户直接输入 ID
-    _AV_ID = re.compile(r"av(?P<aid>[0-9]+)", re.IGNORECASE)
-    _BV_ID = re.compile(r"(?P<bvid>BV[A-Za-z0-9]+)", re.IGNORECASE)
-    _EP_ID = re.compile(r"ep(?P<episode_id>[0-9]+)", re.IGNORECASE)
-    _SS_ID = re.compile(r"ss(?P<season_id>[0-9]+)", re.IGNORECASE)
-    _MD_ID = re.compile(r"md(?P<media_id>[0-9]+)", re.IGNORECASE)
+@dataclass(slots=True, kw_only=True)
+class Source(ABC):
+    id: BilibiliId
+    selection: str = "1"
+    options: SourceOptions = field(default_factory=SourceOptions)
 
-    _BILIBILI = r"https?://(?:www\.)?bilibili\.com"
-    _SPACE_BILIBILI = r"https?://space\.bilibili\.com"
-    _URL_END = r"/?(?=[?#]|$)"
+    @property
+    def selections(self) -> tuple[int, ...]:
+        """Compatibility view for the old literal single-page parser tests."""
+        try:
+            value = int(self.selection)
+        except ValueError:
+            return ()
+        return (value,) if value != 0 else ()
 
-    # 用户输入 URL
-    _UGC_AV_URL = re.compile(rf"{_BILIBILI}/video/av(?P<aid>[0-9]+){_URL_END}", re.IGNORECASE)
-    _UGC_BV_URL = re.compile(rf"{_BILIBILI}/video/(?P<bvid>BV[A-Za-z0-9]+){_URL_END}", re.IGNORECASE)
-    _FESTIVAL_URL = re.compile(rf"{_BILIBILI}/festival/", re.IGNORECASE)
-    _BANGUMI_EP_URL = re.compile(rf"{_BILIBILI}/bangumi/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE)
-    _BANGUMI_SS_URL = re.compile(rf"{_BILIBILI}/bangumi/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE)
-    _BANGUMI_MD_URL = re.compile(rf"{_BILIBILI}/bangumi/media/md(?P<media_id>[0-9]+){_URL_END}", re.IGNORECASE)
-    _CHEESE_EP_URL = re.compile(rf"{_BILIBILI}/cheese/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE)
-    _CHEESE_SS_URL = re.compile(rf"{_BILIBILI}/cheese/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE)
-    _WATCH_LATER_URL = re.compile(rf"{_BILIBILI}/(?:list/)?watchlater{_URL_END}", re.IGNORECASE)
-    _SERIES_PLAYLIST_URL = re.compile(rf"{_BILIBILI}/list/(?P<mid>[0-9]+){_URL_END}", re.IGNORECASE)
-    _SPACE_LIST_URL = re.compile(rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/lists/(?P<list_id>[0-9]+){_URL_END}", re.IGNORECASE)
-    _FAVOURITE_URL = re.compile(rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE)
-    _USER_SPACE_URL = re.compile(rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)(?:/video)?{_URL_END}", re.IGNORECASE)
+    def _select_items(self, items: Sequence[T]) -> list[T]:
+        return [items[index - 1] for index in compile_selection(self.selection, len(items))]
 
-    def __post_init__(self) -> None:
-        if self.container is None and self.current_item is None and self.current_child is None:
-            raise ValueError("Source must contain at least one target")
+    @abstractmethod
+    async def resolve(self, scope: ExecutionScope) -> MediaContainer:
+        raise NotImplementedError
 
-    @classmethod
-    async def parse(cls, scope: ExecutionScope, value: str) -> Source | None:
-        """解析用户输入并创建对应的领域对象。"""
+    @staticmethod
+    def _parse_actors_info(video_info: dict[str, Any]) -> list[Actor]:
+        if staff := video_info.get("staff"):
+            return [
+                Actor(
+                    name=staff_info["name"],
+                    role=staff_info["title"],
+                    thumb=staff_info["face"],
+                    profile=f"https://space.bilibili.com/{staff_info['mid']}",
+                    order=index,
+                )
+                for index, staff_info in enumerate(staff)
+            ]
 
-        value = value.strip()
-        if not value:
-            return None
+        if owner := video_info.get("owner"):
+            return [
+                Actor(
+                    name=owner["name"],
+                    role="UP主",
+                    thumb=owner["face"],
+                    profile=f"https://space.bilibili.com/{owner['mid']}",
+                    order=0,
+                )
+            ]
 
-        if parsed := await cls._parse_url(scope, value):
-            return parsed
-        return await cls._parse_id(scope, value)
+        emit_download_report("未找到演职人员信息", ReportLevel.WARNING)
+        return []
 
-    @classmethod
-    async def _parse_url(cls, scope: ExecutionScope, value: str) -> Source | None:
-        parsed = urlparse(value)
-        query = parse_qs(parsed.query, keep_blank_values=True)
+    @staticmethod
+    def _parse_genre_info(video_info: dict[str, Any]) -> list[str]:
+        genre = video_info.get("tname")
+        return [genre] if isinstance(genre, str) and genre else []
 
-        if cls._WATCH_LATER_URL.match(value):
-            container = await WatchLater.create(scope)
-            current_item = await cls._ugc_item_from_query(scope, query)
-            return Source(
-                container=container,
-                current_item=current_item,
-                current_child=cls._ugc_page_from_query(current_item, query) if current_item is not None else None,
+    @staticmethod
+    async def _fetch_payload(
+        scope: ExecutionScope,
+        url: str,
+        description: str,
+        identifier: str,
+        data_key: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if params is None:
+            result = await Fetcher.fetch_json(scope, url)
+        else:
+            result = await Fetcher.fetch_json(scope, url, params=params)
+        response = unwrap_fetch_result(result)
+        if response.get("code") == -404:
+            raise NotFoundError(f"未找到{description}（{identifier}）")
+        payload = response.get(data_key)
+        if payload is None:
+            raise NoAccessPermissionError(f"无法解析{description}（{identifier}），原因：{response.get('message')}")
+        return payload
+
+
+@dataclass(slots=True, kw_only=True)
+class AmbiguousSource(Source):
+    candidates: tuple[Source, ...]
+
+    async def resolve(self, scope: ExecutionScope) -> MediaContainer:
+        results = await asyncio.gather(
+            *(candidate.resolve(scope) for candidate in self.candidates),
+            return_exceptions=True,
+        )
+        successes = [result for result in results if not isinstance(result, BaseException)]
+        if len(successes) > 1:
+            raise WrongArgumentError("该 ID 同时存在于多个命名空间，无法自动判断")
+        if successes:
+            return successes[0]
+
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, NotFoundError):
+                raise result
+        raise NotFoundError("未找到对应的内容")
+
+
+def bangumi_episode_items(result: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = list(result["episodes"])
+    for section in result.get("section", []):
+        if section["type"] != 5:
+            items += section["episodes"]
+    return items
+
+
+def parse_bangumi_episode(item: dict[str, Any], *, require_metadata: bool = False) -> BangumiEpisode:
+    long_title = item["long_title"]
+    title = f"{item['title']} {long_title}" if long_title else item["title"]
+    metadata = None
+    if require_metadata:
+        metadata = ItemMetaData(
+            show_title=item["share_copy"],
+            plot=item["share_copy"],
+            thumb=item["cover"],
+            premiered=item["pub_time"],
+        )
+    return BangumiEpisode(
+        episode_id=EpisodeId(str(item["id"])),
+        avid=BvId(item["bvid"]),
+        cid=CId(item["cid"]),
+        title=title,
+        extraMetaData=metadata,
+        cover_url=item.get("cover"),
+    )
+
+
+class BangumiEpisodeSource(Source):
+    id: EpisodeId
+
+    async def resolve(self, scope: ExecutionScope) -> BangumiSeason:
+        api = f"https://api.bilibili.com/pgc/view/web/season?ep_id={self.id}"
+        res = await self._fetch_payload(scope, api, "该番剧", f"episode_id: {self.id}", "result")
+
+        item = next((entry for entry in bangumi_episode_items(res) if entry["id"] == int(self.id.value)), None)
+        if item is None:
+            raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
+
+        return BangumiSeason(
+            season_id=SeasonId(str(res["season_id"])),
+            title=res["title"],
+            items=[parse_bangumi_episode(item, require_metadata=self.options.require_metadata)],
+        )
+
+
+class BangumiSeasonSource(Source):
+    id: SeasonId | MediaId
+
+    async def resolve(self, scope: ExecutionScope) -> BangumiSeason:
+        season_id = await self._get_season_id(scope, self.id) if isinstance(self.id, MediaId) else self.id
+        api = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
+        res = await self._fetch_payload(scope, api, "该番剧列表", f"season_id: {season_id}", "result")
+
+        episode_items: list[dict[str, Any]] = list(res["episodes"])
+        if self.options.with_extra_episodes:
+            for section in res.get("section", []):
+                if section["type"] != 5:
+                    episode_items.extend(section["episodes"])
+        if self.options.skip_preview:
+            episode_items = [item for item in episode_items if item.get("badge") != "预告"]
+        episode_items = self._select_items(episode_items)
+
+        return BangumiSeason(
+            season_id=season_id,
+            title=res["title"],
+            items=[
+                parse_bangumi_episode(item, require_metadata=self.options.require_metadata)
+                for item in episode_items
+            ],
+        )
+
+    @staticmethod
+    async def _get_season_id(scope: ExecutionScope, media_id: MediaId) -> SeasonId:
+        media_api = f"https://api.bilibili.com/pgc/review/user?media_id={media_id}"
+        res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, media_api))
+        return SeasonId(str(res_json["result"]["media"]["season_id"]))
+
+
+def parse_cheese_episode(item: dict[str, Any], *, require_metadata: bool = False) -> CheeseEpisode:
+    title = item["title"]
+    metadata = None
+    if require_metadata:
+        metadata = ItemMetaData(
+            show_title=title,
+            plot=title,
+            thumb=item["cover"],
+            premiered=item["release_date"],
+        )
+    return CheeseEpisode(
+        episode_id=EpisodeId(str(item["id"])),
+        avid=AId(item["aid"]),
+        cid=CId(item["cid"]),
+        title=title,
+        extraMetaData=metadata,
+        cover_url=item.get("cover"),
+    )
+
+
+class CheeseEpisodeSource(Source):
+    id: EpisodeId
+
+    async def resolve(self, scope: ExecutionScope) -> CheeseSeason:
+        api = f"https://api.bilibili.com/pugv/view/web/season?ep_id={self.id}"
+        res = await self._fetch_payload(scope, api, "该课程", f"episode_id: {self.id}", "data")
+
+        item = next((entry for entry in res["episodes"] if entry["id"] == int(self.id.value)), None)
+        if item is None:
+            raise NotFoundError(f"无法在课程 {res['title']} 中找到剧集 ep{self.id}")
+
+        season_id = res.get("season_id", self.id.value)
+        return CheeseSeason(
+            season_id=SeasonId(str(season_id)),
+            title=res["title"],
+            items=[parse_cheese_episode(item, require_metadata=self.options.require_metadata)],
+        )
+
+
+class CheeseSeasonSource(Source):
+    id: SeasonId
+
+    async def resolve(self, scope: ExecutionScope) -> CheeseSeason:
+        api = f"https://api.bilibili.com/pugv/view/web/season?season_id={self.id}"
+        res = await self._fetch_payload(scope, api, "该课程列表", f"season_id: {self.id}", "data")
+        episode_items = self._select_items(res["episodes"])
+
+        return CheeseSeason(
+            season_id=self.id,
+            title=res["title"],
+            items=[
+                parse_cheese_episode(item, require_metadata=self.options.require_metadata)
+                for item in episode_items
+            ],
+        )
+
+
+class UgcVideoSource(Source):
+    id: AvId
+
+    async def resolve(self, scope: ExecutionScope) -> UgcVideo:
+        resolved_avid, video_info = await self.get_ugc_video_info(scope, self.id)
+
+        tags: list[str] = []
+        dateadded = 0
+        if self.options.require_metadata:
+            tags = await self.get_ugc_video_tag(scope, resolved_avid)
+            dateadded = get_time_stamp_by_now()
+
+        pages = [
+            UgcPage(
+                avid=resolved_avid,
+                cid=CId(item["cid"]),
+                title=item["part"],
+                extraMetaData=self._make_ugc_metadata(video_info, tags, dateadded)
+                if self.options.require_metadata
+                else None,
+                cover_url=video_info["pic"],
             )
+            for item in self._select_items(video_info["pages"])
+        ]
+        return UgcVideo(avid=resolved_avid, title=video_info["title"], items=pages)
 
-        if match := cls._SERIES_PLAYLIST_URL.match(value):
-            series_id = cls._single_query_value(query, "sid")
-            if series_id is not None and not (series_id.isascii() and series_id.isdigit()):
-                raise WrongArgumentError(f"无效的 sid 参数（sid: {series_id}）")
-            if series_id is not None:
-                container = await Series.create(
-                    scope,
-                    MId(match.group("mid")),
-                    SeriesId(series_id),
-                )
-                current_item = await cls._ugc_item_from_query(scope, query)
-                return Source(
-                    container=container,
-                    current_item=current_item,
-                    current_child=cls._ugc_page_from_query(current_item, query) if current_item is not None else None,
-                )
+    def _make_ugc_metadata(
+        self,
+        video_info: dict[str, Any],
+        tags: list[str],
+        dateadded: int,
+    ) -> ItemMetaData:
+        return ItemMetaData(
+            show_title=video_info["title"],
+            plot=video_info["desc"],
+            thumb=video_info["pic"],
+            premiered=video_info["pubdate"],
+            dateadded=dateadded,
+            actors=self._parse_actors_info(video_info),
+            genre=self._parse_genre_info(video_info),
+            tag=list(tags),
+            website=BvId(video_info["bvid"]).to_url(),
+        )
 
-        if match := cls._SPACE_LIST_URL.match(value):
-            mid = MId(match.group("mid"))
-            list_id = match.group("list_id")
-            list_type = cls._single_query_value(query, "type")
-            if list_type is not None and list_type not in ("season", "series"):
-                raise WrongArgumentError(f"无效的 type 参数（type: {list_type}）")
+    async def get_ugc_video_info(
+        self,
+        scope: ExecutionScope,
+        avid: AvId,
+    ) -> tuple[AvId, dict[str, Any]]:
+        api = f"https://api.bilibili.com/x/web-interface/view?{avid.to_param()}"
+        res = await Fetcher.fetch_json(scope, api)
+        if isinstance(res, Failure):
+            raise NotFoundError(f"无法获取该视频 {avid} 信息") from res.failure()
 
-            if list_type == "season":
-                container = await Collection.create(scope, mid, SeasonId(list_id))
-                current_item = await cls._ugc_item_from_query(scope, query)
-                return Source(
-                    container=container,
-                    current_item=current_item,
-                    current_child=cls._ugc_page_from_query(current_item, query) if current_item is not None else None,
-                )
-
-            if list_type == "series":
-                container = await Series.create(scope, mid, SeriesId(list_id))
-                current_item = await cls._ugc_item_from_query(scope, query)
-                return Source(
-                    container=container,
-                    current_item=current_item,
-                    current_child=cls._ugc_page_from_query(current_item, query) if current_item is not None else None,
-                )
-
-            return None
-
-        if match := cls._FAVOURITE_URL.match(value):
-            mid = MId(match.group("mid"))
-            fid = cls._single_query_value(query, "fid")
-            favourite_type = cls._single_query_value(query, "ftype")
-
-            container: Container
-            if fid is None:
-                container = await UserFavourites.create(scope, mid)
-            elif not (fid.isascii() and fid.isdigit()):
-                raise WrongArgumentError(f"无效的 fid 参数（fid: {fid}）")
-            elif favourite_type == "collect":
-                container = await Collection.create(scope, mid, SeasonId(fid))
-            else:
-                container = await Favourite.create(scope, mid, FId(fid))
-
-            current_item = await cls._ugc_item_from_query(scope, query)
-            return Source(
-                container=container,
-                current_item=current_item,
-                current_child=cls._ugc_page_from_query(current_item, query) if current_item is not None else None,
+        res_json = res.unwrap()
+        res_json_data = res_json.get("data")
+        if res_json["code"] == 62002:
+            raise NotFoundError(f"无法下载该视频 {avid}，原因：{res_json['message']}")
+        if res_json["code"] == 62012:
+            raise NoAccessPermissionError(
+                f"无法获取该视频 {avid} 信息，原因：{res_json['message']}（当前稿件up主设置为仅自见）"
             )
+        if res_json["code"] == -404:
+            raise NotFoundError(f"啊叻？视频 {avid} 不见了诶")
+        assert res_json_data is not None, "响应数据无 data 域"
 
-        if match := cls._USER_SPACE_URL.match(value):
-            container = await UserVideos.create(scope, MId(match.group("mid")))
-            return Source(container=container)
+        if res_json_data.get("forward"):
+            forward_avid = AId(res_json_data["forward"])
+            emit_download_report(f"视频 {avid} 撞车了哦！正在跳转到原视频 {forward_avid}～")
+            return await self.get_ugc_video_info(scope, forward_avid)
 
-        return None
+        return avid, res_json_data
+
+    async def get_ugc_video_tag(self, scope: ExecutionScope, avid: AvId) -> list[str]:
+        api = f"https://api.bilibili.com/x/tag/archive/tags?{avid.to_param()}"
+        res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
+        if res_json["code"] != 0:
+            raise NotFoundError(f"无法获取视频 {avid} 标签")
+        return [tag["tag_name"] for tag in res_json["data"]]
+
+
+async def resolve_ugc_videos(
+    scope: ExecutionScope,
+    avids: list[AvId],
+    options: SourceOptions,
+) -> list[UgcVideo]:
+    return list(
+        await asyncio.gather(
+            *(
+                UgcVideoSource(id=avid, selection="1~-1", options=options).resolve(scope)
+                for avid in avids
+            )
+        )
+    )
+
+
+@dataclass(slots=True, kw_only=True)
+class UgcCollectionSource(Source):
+    id: CollectionId
+    owner_id: MId
+
+    async def resolve(self, scope: ExecutionScope) -> UgcCollection:
+        page_size = 30
+        page_num = 1
+        archives: list[dict[str, Any]] = []
+        title = ""
+
+        while True:
+            list_api = (
+                "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list"
+                f"?mid={self.owner_id}&season_id={self.id}&sort_reverse=false"
+                f"&page_num={page_num}&page_size={page_size}"
+            )
+            payload = await self._fetch_payload(
+                scope,
+                list_api,
+                "视频合集",
+                f"collection_id: {self.id}",
+                "data",
+            )
+            if page_num == 1:
+                title = payload.get("meta", {}).get("name", "")
+
+            page_archives: list[dict[str, Any]] = payload.get("archives") or []
+            archives.extend(item for item in page_archives if item.get("bvid"))
+
+            total = payload.get("page", {}).get("total")
+            if isinstance(total, int):
+                if page_num * page_size >= total:
+                    break
+            elif len(page_archives) < page_size:
+                break
+            page_num += 1
+
+        selected_archives = self._select_items(archives)
+        videos = await resolve_ugc_videos(
+            scope,
+            [BvId(item["bvid"]) for item in selected_archives],
+            self.options,
+        )
+        return UgcCollection(
+            collection_id=self.id,
+            title=title,
+            items=videos,
+        )
+
+
+class UgcFavSource(Source):
+    id: FId
+
+    async def resolve(self, scope: ExecutionScope) -> UgcFav:
+        info_api = f"https://api.bilibili.com/x/v3/fav/folder/info?media_id={self.id}"
+        info = await self._fetch_payload(scope, info_api, "收藏夹", f"fid: {self.id}", "data")
+
+        page_size = 20
+        page_num = 1
+        medias: list[dict[str, Any]] = []
+        while True:
+            list_api = (
+                f"https://api.bilibili.com/x/v3/fav/resource/list?media_id={self.id}"
+                f"&pn={page_num}&ps={page_size}&platform=web"
+            )
+            payload = await self._fetch_payload(scope, list_api, "收藏夹", f"fid: {self.id}", "data")
+            page_medias: list[dict[str, Any]] = payload.get("medias") or []
+            medias.extend(item for item in page_medias if item.get("bvid"))
+
+            has_more = payload.get("has_more")
+            if has_more is not None:
+                if not has_more:
+                    break
+            elif len(page_medias) < page_size:
+                break
+            page_num += 1
+
+        selected_medias = self._select_items(medias)
+        videos = await resolve_ugc_videos(
+            scope,
+            [BvId(item["bvid"]) for item in selected_medias],
+            self.options,
+        )
+        return UgcFav(
+            fid=self.id,
+            title=info.get("title", ""),
+            items=videos,
+        )
+
+
+class UgcSeriesSource(Source):
+    id: SeriesId
+
+    async def resolve(self, scope: ExecutionScope) -> UgcSeries:
+        info_api = f"https://api.bilibili.com/x/series/series?series_id={self.id}"
+        info = await self._fetch_payload(scope, info_api, "视频系列", f"series_id: {self.id}", "data")
+        meta = info.get("meta", {})
+        mid = MId(str(meta["mid"]))
+
+        page_size = 30
+        page_num = 1
+        archives: list[dict[str, Any]] = []
+        while True:
+            list_api = (
+                "https://api.bilibili.com/x/series/archives"
+                f"?mid={mid}&series_id={self.id}&only_normal=true"
+                f"&pn={page_num}&ps={page_size}"
+            )
+            payload = await self._fetch_payload(scope, list_api, "视频系列", f"series_id: {self.id}", "data")
+            page_archives: list[dict[str, Any]] = payload.get("archives") or []
+            archives.extend(item for item in page_archives if item.get("bvid"))
+
+            total = payload.get("page", {}).get("total")
+            if isinstance(total, int):
+                if page_num * page_size >= total:
+                    break
+            elif len(page_archives) < page_size:
+                break
+            page_num += 1
+
+        selected_archives = self._select_items(archives)
+        videos = await resolve_ugc_videos(
+            scope,
+            [BvId(item["bvid"]) for item in selected_archives],
+            self.options,
+        )
+        return UgcSeries(
+            series_id=self.id,
+            title=meta.get("name", ""),
+            items=videos,
+        )
+
+
+class UgcSpaceSource(Source):
+    id: MId
+
+    async def resolve(self, scope: ExecutionScope) -> UgcSpace:
+        wbi_img = await get_wbi_img(scope)
+        profile = await self._fetch_payload(
+            scope,
+            "https://api.bilibili.com/x/space/wbi/acc/info",
+            "UP 主",
+            f"mid: {self.id}",
+            "data",
+            params=encode_wbi({"mid": self.id}, wbi_img),
+        )
+
+        page_size = 30
+        page_num = 1
+        archives: list[dict[str, Any]] = []
+        while True:
+            payload = await self._fetch_payload(
+                scope,
+                "https://api.bilibili.com/x/space/wbi/arc/search",
+                "UP 主空间",
+                f"mid: {self.id}",
+                "data",
+                params=encode_wbi(
+                    {
+                        "mid": self.id,
+                        "ps": page_size,
+                        "tid": 0,
+                        "pn": page_num,
+                        "order": "pubdate",
+                    },
+                    wbi_img,
+                ),
+            )
+            page_archives: list[dict[str, Any]] = payload.get("list", {}).get("vlist") or []
+            archives.extend(item for item in page_archives if item.get("bvid"))
+
+            total = payload.get("page", {}).get("count")
+            if isinstance(total, int):
+                if page_num * page_size >= total:
+                    break
+            elif len(page_archives) < page_size:
+                break
+            page_num += 1
+
+        selected_archives = self._select_items(archives)
+        videos = await resolve_ugc_videos(
+            scope,
+            [BvId(item["bvid"]) for item in selected_archives],
+            self.options,
+        )
+        return UgcSpace(
+            mid=self.id,
+            title=profile["name"],
+            items=videos,
+        )
+
+
+class UgcWatchLaterSource(Source):
+    async def resolve(self, scope: ExecutionScope) -> UgcWatchLater:
+        payload = await self._fetch_payload(
+            scope,
+            "https://api.bilibili.com/x/v2/history/toview/web",
+            "稍后再看",
+            "watch_later",
+            "data",
+        )
+        entries: list[dict[str, Any]] = [item for item in payload.get("list", []) if item.get("bvid")]
+        selected_entries = self._select_items(entries)
+        videos = await resolve_ugc_videos(
+            scope,
+            [BvId(item["bvid"]) for item in selected_entries],
+            self.options,
+        )
+        return UgcWatchLater(title="稍后再看", items=videos)
+
+
+__all__ = [
+    "AmbiguousSource",
+    "BangumiEpisodeSource",
+    "BangumiSeasonSource",
+    "CheeseEpisodeSource",
+    "CheeseSeasonSource",
+    "Source",
+    "SourceOptions",
+    "UgcCollectionSource",
+    "UgcFavSource",
+    "UgcSeriesSource",
+    "UgcSpaceSource",
+    "UgcVideoSource",
+    "UgcWatchLaterSource",
+]
