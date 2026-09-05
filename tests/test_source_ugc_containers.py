@@ -12,12 +12,7 @@ from yutto.selection import parse_selection
 from yutto.source import UgcCollectionSource, UgcSeriesSource
 from yutto.types import CollectionId, MId, SeriesId
 
-_DEFAULT_OPTIONS = SourceOptions(
-    selection=None,
-    with_extra_episodes=False,
-    skip_preview=False,
-    require_metadata=False,
-)
+_DEFAULT_OPTIONS = SourceOptions()
 
 
 def _install_fetcher_stub(
@@ -91,25 +86,33 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     options = replace(
         _DEFAULT_OPTIONS,
         selection=parse_selection("2"),
-        require_metadata=True,
+        fetch_tags=True,
     )
     media = asyncio.run(
         UgcSeriesSource(id=SeriesId("456")).resolve(None, options)  # type: ignore[arg-type]
     )
 
-    assert media.title == "视频系列"
+    assert media.metadata.title == "视频系列"
     assert len(media.items) == 1
-    assert media.items[0].title == "第二个"
-    assert [page.title for page in media.items[0].items] == ["P1", "P2"]
-    assert all(page.extraMetaData is not None for page in media.items[0].items)
+    assert media.items[0].metadata.title == "第二个"
+    assert [page.metadata.title for page in media.items[0].items] == ["P1", "P2"]
+    assert all(page.metadata.owner == "UP" for page in media.items[0].items)
+    assert all(page.metadata.tag == ["标签"] for page in media.items[0].items)
     assert all(page.avid == media.items[0].avid for page in media.items[0].items)
-    assert media.get_items() == tuple(media.items[0].items)
+
+    tree = media.to_dict()
+    assert tree["metadata"]["title"] == "视频系列"
+    assert tree["items"][0]["metadata"]["title"] == "第二个"
+    assert [page["metadata"]["title"] for page in tree["items"][0]["items"]] == ["P1", "P2"]
+    assert tree["items"][0]["avid"] == "BVSECOND"
+
     assert any("mid=123" in call and "series_id=456" in call for call in calls)
     assert any("bvid=BVSECOND" in call for call in calls)
+    assert any("/x/tag/archive/tags" in call for call in calls)
     assert not any("bvid=BVFIRST" in call for call in calls)
 
 
-def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_collection_keeps_read_metadata_without_fetching_tags(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fetcher_stub(
         monkeypatch,
         {
@@ -133,8 +136,13 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
         ).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
     )
 
-    assert media.title == "视频合集"
+    assert media.metadata.title == "视频合集"
     assert len(media.items) == 1
-    assert [page.title for page in media.items[0].items] == ["P1", "P2"]
+    assert media.items[0].metadata.owner == "UP"
+    assert media.items[0].metadata.plot == "简介"
+    assert media.items[0].metadata.genre == ["知识"]
+    assert media.items[0].metadata.tag == []
+    assert [page.metadata.title for page in media.items[0].items] == ["P1", "P2"]
     assert any("/x/polymer/web-space/seasons_archives_list" in call for call in calls)
+    assert not any("/x/tag/archive/tags" in call for call in calls)
     assert not any("seasons_series_detail" in call for call in calls)

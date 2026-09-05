@@ -36,6 +36,17 @@ def test_request_defaults_follow_internal_defaults() -> None:
     assert resource_options_from_request(request) == DEFAULT_RESOURCE_OPTIONS
 
 
+def test_metadata_resource_requests_tags() -> None:
+    request = DownloadRequest.model_validate(
+        {
+            "source": {"url": "BV1D84y1t76J"},
+            "resources": {"metadata": True},
+        }
+    )
+
+    assert source_options_from_request(request).fetch_tags is True
+
+
 def test_source_selection_is_parsed_at_request_boundary() -> None:
     request = DownloadRequest.model_validate(
         {

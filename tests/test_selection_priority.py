@@ -21,12 +21,7 @@ from yutto.source import (
 )
 from yutto.types import EpisodeId
 
-_DEFAULT_OPTIONS = SourceOptions(
-    selection=None,
-    with_extra_episodes=False,
-    skip_preview=False,
-    require_metadata=False,
-)
+_DEFAULT_OPTIONS = SourceOptions()
 
 
 def _install_fetcher_stub(monkeypatch: pytest.MonkeyPatch, response: dict[str, Any]) -> None:
@@ -130,7 +125,7 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
     assert isinstance(source, UgcVideoSource)
 
     media = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
-    assert [page.title for page in media.items] == ["P2"]
+    assert [page.metadata.title for page in media.items] == ["P2"]
 
     media = asyncio.run(
         source.resolve(
@@ -138,7 +133,7 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
             replace(_DEFAULT_OPTIONS, selection=parse_selection("3")),
         )
     )
-    assert [page.title for page in media.items] == ["P3"]
+    assert [page.metadata.title for page in media.items] == ["P3"]
 
 
 def test_bangumi_ep_defaults_to_anchor_but_explicit_selection_targets_season(

@@ -14,7 +14,7 @@ class SourceOptions:
     selection: Selection | None = None
     with_extra_episodes: bool = False
     skip_preview: bool = False
-    require_metadata: bool = False
+    fetch_tags: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -40,7 +40,7 @@ def source_options_from_request(request: DownloadRequest) -> SourceOptions:
         selection=parse_selection(expression) if expression is not None else None,
         with_extra_episodes=request.scope.with_extra_episodes,
         skip_preview=request.selection.skip_preview,
-        require_metadata=request.resources.metadata,
+        fetch_tags=request.resources.metadata,
     )
 
 

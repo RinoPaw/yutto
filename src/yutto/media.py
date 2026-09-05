@@ -1,38 +1,45 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field, fields, is_dataclass
+from typing import TYPE_CHECKING, Any
+
+from yutto.types import BilibiliId
+from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
     from yutto.types import AvId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
-    from yutto.utils.metadata import ItemMetaData
+
+
+def _to_plain(value: Any) -> Any:
+    if isinstance(value, BilibiliId):
+        return str(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field_.name: _to_plain(getattr(value, field_.name)) for field_ in fields(value)}
+    if isinstance(value, dict):
+        return {key: _to_plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(item) for item in value]
+    return value
 
 
 @dataclass(slots=True, kw_only=True)
-class Media(ABC):
-    title: str
+class Media:
+    metadata: ItemMetaData
 
-    @abstractmethod
-    def get_items(self) -> tuple[MediaItem, ...]:
-        raise NotImplementedError
+    def to_dict(self) -> dict[str, Any]:
+        result = _to_plain(self)
+        assert isinstance(result, dict)
+        return result
 
 
 @dataclass(slots=True, kw_only=True)
 class MediaItem(Media):
-    extraMetaData: ItemMetaData | None = None
-    cover_url: str | None = None
-
-    def get_items(self) -> tuple[MediaItem, ...]:
-        return (self,)
+    pass
 
 
 @dataclass(slots=True, kw_only=True)
 class MediaContainer(Media):
     items: list[Media]
-
-    def get_items(self) -> tuple[MediaItem, ...]:
-        return tuple(entry for item in self.items for entry in item.get_items())
 
 
 @dataclass(slots=True, kw_only=True)

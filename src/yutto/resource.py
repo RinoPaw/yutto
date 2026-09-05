@@ -75,15 +75,15 @@ async def resolve_media_item(
         danmaku = await get_danmaku(scope, item.cid, item.avid, options.danmaku_format)
 
     cover_data = None
-    if options.cover and item.cover_url:
-        cover_data = unwrap_fetch_result(await Fetcher.fetch_bin(scope, item.cover_url))
+    if options.cover and item.metadata.thumb:
+        cover_data = unwrap_fetch_result(await Fetcher.fetch_bin(scope, item.metadata.thumb))
 
     return DownloadableEntry(
-        title=item.title,
+        title=item.metadata.title,
         videos=tuple(videos),
         audios=tuple(audios),
         subtitles=tuple(subtitles),
-        metadata=item.extraMetaData if options.metadata else None,
+        metadata=item.metadata if options.metadata else None,
         danmaku=danmaku,
         cover_data=cover_data,
         chapter_info_data=tuple(chapters),

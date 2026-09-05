@@ -28,12 +28,7 @@ from yutto.source import (
 from yutto.types import EpisodeId, MediaId, SeasonId
 
 _NOT_FOUND = {"code": -404, "message": "啥都木有"}
-_DEFAULT_OPTIONS = SourceOptions(
-    selection=None,
-    with_extra_episodes=False,
-    skip_preview=False,
-    require_metadata=False,
-)
+_DEFAULT_OPTIONS = SourceOptions()
 
 
 def _parse(value: str) -> Any:
@@ -187,26 +182,13 @@ def test_bangumi_episode_source_single_request_resolution(monkeypatch: pytest.Mo
     )
 
     assert isinstance(episode, BangumiSeason)
+    assert episode.metadata.title == "番剧"
     assert episode.items[0].episode_id == EpisodeId("123")
-    assert episode.items[0].extraMetaData is None
+    assert episode.items[0].metadata.title == "1 第1话"
+    assert episode.items[0].metadata.thumb == "https://img/0.jpg"
+    assert episode.items[0].metadata.premiered == 1700000000
     assert len(calls) == 1
     assert "ep_id=123" in calls[0]
-
-
-def test_bangumi_episode_source_initializes_metadata_when_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fetcher_stub(
-        monkeypatch,
-        {"pgc/view/web/season": _bangumi_season_response("123")},
-    )
-
-    episode = asyncio.run(
-        BangumiEpisodeSource(id=EpisodeId("123")).resolve(
-            None,  # type: ignore[arg-type]
-            replace(_DEFAULT_OPTIONS, require_metadata=True),
-        )
-    )
-
-    assert episode.items[0].extraMetaData is not None
 
 
 def test_cheese_episode_source_rejects_quirk_response(monkeypatch: pytest.MonkeyPatch) -> None:

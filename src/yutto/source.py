@@ -141,24 +141,47 @@ def bangumi_episode_items(result: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def parse_bangumi_episode(item: dict[str, Any], *, require_metadata: bool = False) -> BangumiEpisode:
+def parse_bangumi_episode(item: dict[str, Any]) -> BangumiEpisode:
     long_title = item["long_title"]
     title = f"{item['title']} {long_title}" if long_title else item["title"]
-    metadata = None
-    if require_metadata:
-        metadata = ItemMetaData(
-            show_title=item["share_copy"],
-            plot=item["share_copy"],
-            thumb=item["cover"],
-            premiered=item["pub_time"],
-        )
     return BangumiEpisode(
         episode_id=EpisodeId(str(item["id"])),
         avid=BvId(item["bvid"]),
         cid=CId(item["cid"]),
-        title=title,
-        extraMetaData=metadata,
-        cover_url=item.get("cover"),
+        metadata=ItemMetaData(
+            title=title,
+            show_title=item.get("share_copy", title),
+            plot=item.get("share_copy", ""),
+            thumb=item.get("cover", ""),
+            premiered=int(item.get("pub_time", 0)),
+            duration=int(item.get("duration", 0)) // 1000,
+        ),
+    )
+
+
+def make_bangumi_season_metadata(result: dict[str, Any]) -> ItemMetaData:
+    up_info = result.get("up_info") or {}
+    mid_value = up_info.get("mid")
+    mid = MId(str(mid_value)) if mid_value is not None else None
+    owner = str(up_info.get("uname", ""))
+    actors: list[Actor] = []
+    if owner:
+        actors.append(
+            Actor(
+                name=owner,
+                role="UP主",
+                thumb=str(up_info.get("avatar", "")),
+                profile=f"https://space.bilibili.com/{mid}" if mid is not None else "",
+                order=0,
+            )
+        )
+    return ItemMetaData(
+        title=str(result.get("title", "")),
+        plot=str(result.get("evaluate", "")),
+        mid=mid,
+        owner=owner,
+        genre=list(result.get("styles") or []),
+        actors=actors,
     )
 
 
@@ -189,11 +212,8 @@ class BangumiEpisodeSource(Source):
 
         return BangumiSeason(
             season_id=SeasonId(str(res["season_id"])),
-            title=res["title"],
-            items=[
-                parse_bangumi_episode(item, require_metadata=options.require_metadata)
-                for item in episode_items
-            ],
+            metadata=make_bangumi_season_metadata(res),
+            items=[parse_bangumi_episode(item) for item in episode_items],
         )
 
 
@@ -220,11 +240,8 @@ class BangumiSeasonSource(Source):
 
         return BangumiSeason(
             season_id=season_id,
-            title=res["title"],
-            items=[
-                parse_bangumi_episode(item, require_metadata=options.require_metadata)
-                for item in episode_items
-            ],
+            metadata=make_bangumi_season_metadata(res),
+            items=[parse_bangumi_episode(item) for item in episode_items],
         )
 
     @staticmethod
@@ -234,23 +251,20 @@ class BangumiSeasonSource(Source):
         return SeasonId(str(res_json["result"]["media"]["season_id"]))
 
 
-def parse_cheese_episode(item: dict[str, Any], *, require_metadata: bool = False) -> CheeseEpisode:
+def parse_cheese_episode(item: dict[str, Any]) -> CheeseEpisode:
     title = item["title"]
-    metadata = None
-    if require_metadata:
-        metadata = ItemMetaData(
-            show_title=title,
-            plot=title,
-            thumb=item["cover"],
-            premiered=item["release_date"],
-        )
     return CheeseEpisode(
         episode_id=EpisodeId(str(item["id"])),
         avid=AId(item["aid"]),
         cid=CId(item["cid"]),
-        title=title,
-        extraMetaData=metadata,
-        cover_url=item.get("cover"),
+        metadata=ItemMetaData(
+            title=title,
+            show_title=title,
+            plot=title,
+            thumb=item.get("cover", ""),
+            premiered=int(item.get("release_date", 0)),
+            duration=int(item.get("duration", 0)),
+        ),
     )
 
 
@@ -273,11 +287,8 @@ class CheeseEpisodeSource(Source):
         season_id = res.get("season_id", self.id.value)
         return CheeseSeason(
             season_id=SeasonId(str(season_id)),
-            title=res["title"],
-            items=[
-                parse_cheese_episode(item, require_metadata=options.require_metadata)
-                for item in episode_items
-            ],
+            metadata=ItemMetaData(title=str(res.get("title", ""))),
+            items=[parse_cheese_episode(item) for item in episode_items],
         )
 
 
@@ -296,11 +307,8 @@ class CheeseSeasonSource(Source):
 
         return CheeseSeason(
             season_id=self.id,
-            title=res["title"],
-            items=[
-                parse_cheese_episode(item, require_metadata=options.require_metadata)
-                for item in episode_items
-            ],
+            metadata=ItemMetaData(title=str(res.get("title", ""))),
+            items=[parse_cheese_episode(item) for item in episode_items],
         )
 
 
@@ -311,12 +319,8 @@ class UgcVideoSource(Source):
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcVideo:
         resolved_avid, video_info = await self.get_ugc_video_info(scope, self.id)
-
-        tags: list[str] = []
-        dateadded = 0
-        if options.require_metadata:
-            tags = await self.get_ugc_video_tag(scope, resolved_avid)
-            dateadded = get_time_stamp_by_now()
+        tags = await self.get_ugc_video_tag(scope, resolved_avid) if options.fetch_tags else []
+        dateadded = get_time_stamp_by_now()
 
         page_items: list[dict[str, Any]] = list(video_info["pages"])
         if options.selection is not None:
@@ -331,27 +335,48 @@ class UgcVideoSource(Source):
             UgcPage(
                 avid=resolved_avid,
                 cid=CId(item["cid"]),
-                title=item["part"],
-                extraMetaData=self._make_ugc_metadata(video_info, tags, dateadded)
-                if options.require_metadata
-                else None,
-                cover_url=video_info["pic"],
+                metadata=self._make_ugc_metadata(
+                    video_info,
+                    tags,
+                    dateadded,
+                    title=str(item.get("part", video_info["title"])),
+                    duration=int(item.get("duration", 0)),
+                ),
             )
             for item in (page_items[index - 1] for index in indexes)
         ]
-        return UgcVideo(avid=resolved_avid, title=video_info["title"], items=pages)
+        return UgcVideo(
+            avid=resolved_avid,
+            metadata=self._make_ugc_metadata(
+                video_info,
+                tags,
+                dateadded,
+                title=str(video_info["title"]),
+                duration=int(video_info.get("duration", 0)),
+            ),
+            items=pages,
+        )
 
     def _make_ugc_metadata(
         self,
         video_info: dict[str, Any],
         tags: list[str],
         dateadded: int,
+        *,
+        title: str,
+        duration: int,
     ) -> ItemMetaData:
+        owner_info = video_info.get("owner") or {}
+        mid_value = owner_info.get("mid")
         return ItemMetaData(
-            show_title=video_info["title"],
-            plot=video_info["desc"],
-            thumb=video_info["pic"],
-            premiered=video_info["pubdate"],
+            title=title,
+            show_title=str(video_info.get("title", title)),
+            plot=str(video_info.get("desc", "")),
+            thumb=str(video_info.get("pic", "")),
+            premiered=int(video_info.get("pubdate", 0)),
+            duration=duration,
+            mid=MId(str(mid_value)) if mid_value is not None else None,
+            owner=str(owner_info.get("name", "")),
             dateadded=dateadded,
             actors=self._parse_actors_info(video_info),
             genre=self._parse_genre_info(video_info),
@@ -459,7 +484,7 @@ class UgcCollectionSource(Source):
         )
         return UgcCollection(
             collection_id=self.id,
-            title=title,
+            metadata=ItemMetaData(title=title, mid=self.owner_id),
             items=videos,
         )
 
@@ -503,7 +528,11 @@ class UgcFavSource(Source):
         )
         return UgcFav(
             fid=self.id,
-            title=info.get("title", ""),
+            metadata=ItemMetaData(
+                title=str(info.get("title", "")),
+                plot=str(info.get("intro", "")),
+                thumb=str(info.get("cover", "")),
+            ),
             items=videos,
         )
 
@@ -550,7 +579,11 @@ class UgcSeriesSource(Source):
         )
         return UgcSeries(
             series_id=self.id,
-            title=meta.get("name", ""),
+            metadata=ItemMetaData(
+                title=str(meta.get("name", "")),
+                mid=mid,
+                plot=str(meta.get("description", "")),
+            ),
             items=videos,
         )
 
@@ -613,7 +646,13 @@ class UgcSpaceSource(Source):
         )
         return UgcSpace(
             mid=self.id,
-            title=profile["name"],
+            metadata=ItemMetaData(
+                title=str(profile.get("name", "")),
+                plot=str(profile.get("sign", "")),
+                thumb=str(profile.get("face", "")),
+                mid=self.id,
+                owner=str(profile.get("name", "")),
+            ),
             items=videos,
         )
 
@@ -638,7 +677,7 @@ class UgcWatchLaterSource(Source):
             [BvId(item["bvid"]) for item in selected_entries],
             options,
         )
-        return UgcWatchLater(title="稍后再看", items=videos)
+        return UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=videos)
 
 
 __all__ = [

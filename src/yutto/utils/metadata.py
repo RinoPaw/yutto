@@ -29,8 +29,10 @@ class ChapterInfoData(TypedDict):
 
 @dataclass(slots=True, kw_only=True)
 class ItemMetaData:
+    title: str = ""
     plot: str = ""
     premiered: int = 0
+    duration: int = 0
     mid: MId | None = None
     owner: str = ""
     thumb: str = ""
