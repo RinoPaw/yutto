@@ -11,23 +11,27 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SourceOptions:
-    selection: Selection | None
-    with_extra_episodes: bool
-    skip_preview: bool
-    require_metadata: bool
+    selection: Selection | None = None
+    with_extra_episodes: bool = False
+    skip_preview: bool = False
+    require_metadata: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResourceOptions:
-    video: bool
-    audio: bool
-    danmaku: bool
-    subtitle: bool
-    metadata: bool
-    cover: bool
-    chapter_info: bool
-    ai_translation_language: str | None
-    danmaku_format: Literal["xml", "ass", "protobuf"]
+    video: bool = True
+    audio: bool = True
+    danmaku: bool = True
+    subtitle: bool = True
+    metadata: bool = False
+    cover: bool = True
+    chapter_info: bool = True
+    ai_translation_language: str | None = None
+    danmaku_format: Literal["xml", "ass", "protobuf"] = "ass"
+
+
+DEFAULT_SOURCE_OPTIONS = SourceOptions()
+DEFAULT_RESOURCE_OPTIONS = ResourceOptions()
 
 
 def source_options_from_request(request: DownloadRequest) -> SourceOptions:
@@ -56,6 +60,8 @@ def resource_options_from_request(request: DownloadRequest) -> ResourceOptions:
 
 
 __all__ = [
+    "DEFAULT_RESOURCE_OPTIONS",
+    "DEFAULT_SOURCE_OPTIONS",
     "ResourceOptions",
     "SourceOptions",
     "resource_options_from_request",
