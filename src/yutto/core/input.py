@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.exceptions import WrongUrlError
 from yutto.parser import parse
-from yutto.source import SourceOptions
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
@@ -23,22 +22,11 @@ class ParsedInput:
     source: Source
 
 
-def source_options_from_request(request: DownloadRequest) -> SourceOptions:
-    """Translate one core request into the options visible to the Source layer."""
-    return SourceOptions(
-        selection=request.selection.episodes,
-        with_extra_episodes=request.scope.with_extra_episodes,
-        skip_preview=request.selection.skip_preview,
-        require_metadata=request.resources.metadata,
-    )
-
-
 async def parse_input(scope: ExecutionScope, request: DownloadRequest) -> ParsedInput:
     """Parse one request input, following a redirect only when pure parsing cannot identify it."""
     value = request.source.url.strip()
-    options = source_options_from_request(request)
 
-    if source := parse(value, options):
+    if source := parse(value):
         return ParsedInput(value=value, source=source)
 
     try:
@@ -48,6 +36,6 @@ async def parse_input(scope: ExecutionScope, request: DownloadRequest) -> Parsed
     except UnsupportedProtocolError:
         raise WrongUrlError(f"无效的 url 协议（{value}）～请检查一下链接协议是否正确") from None
 
-    if source := parse(redirected_value, options):
+    if source := parse(redirected_value):
         return ParsedInput(value=redirected_value, source=source)
     raise WrongUrlError(f"无法识别 url（{redirected_value}）")

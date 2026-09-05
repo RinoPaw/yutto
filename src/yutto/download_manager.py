@@ -92,10 +92,7 @@ def _legacy_input_value(parsed_input: ParsedInput) -> str:
     source = parsed_input.source
     if isinstance(source, UgcVideoSource):
         url = source.id.to_url()
-        selection = source.selection
-        if selection.isascii() and selection.isdigit() and selection != "0":
-            return f"{url}?p={selection}"
-        return url
+        return f"{url}?p={source.page}" if source.page is not None else url
     if isinstance(source, BangumiEpisodeSource):
         return f"https://www.bilibili.com/bangumi/play/ep{source.id}"
     if isinstance(source, BangumiSeasonSource):
@@ -338,7 +335,7 @@ class DownloadManager:
             request.selection.end_time,
         )
         # The legacy Extractor path keeps its historical batch default until Media takes over listing.
-        legacy_episodes = parsed_input.source.selection if request.selection.episodes is not None else "1~-1"
+        legacy_episodes = request.selection.episodes if request.selection.episodes is not None else "1~-1"
         if request.scope.batch:
             validate_batch_selection(legacy_episodes)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))

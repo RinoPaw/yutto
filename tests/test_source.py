@@ -26,6 +26,7 @@ from yutto.source import (
 from yutto.types import EpisodeId, MediaId, SeasonId
 
 _NOT_FOUND = {"code": -404, "message": "啥都木有"}
+_DEFAULT_OPTIONS = SourceOptions()
 
 
 def _parse(value: str) -> Any:
@@ -101,7 +102,6 @@ def _install_fetcher_stub(
     monkeypatch: pytest.MonkeyPatch,
     routes: dict[str, Any],
 ) -> list[str]:
-    """按 URL 子串路由响应；值为 dict 时返回 Success(dict)，为异常实例时抛出。返回捕获的 URL 列表。"""
     calls: list[str] = []
 
     async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
@@ -117,9 +117,6 @@ def _install_fetcher_stub(
     return calls
 
 
-# ---------- parser：纯语法匹配，无网络请求 ----------
-
-
 def test_parse_namespace_urls() -> None:
     assert isinstance(_parse("https://www.bilibili.com/bangumi/play/ep123"), BangumiEpisodeSource)
     assert isinstance(_parse("https://www.bilibili.com/bangumi/play/ss456"), BangumiSeasonSource)
@@ -130,7 +127,7 @@ def test_parse_namespace_urls() -> None:
     assert isinstance(_parse("av123"), UgcVideoSource)
     source = _parse("BV1D84y1t76J?p=2")
     assert isinstance(source, UgcVideoSource)
-    assert source.selections == (2,)
+    assert source.page == 2
     assert _parse("https://example.com/video/BV1D84y1t76J") is None
 
 
@@ -159,14 +156,6 @@ def test_parse_ugc_container_urls() -> None:
     assert isinstance(_parse("https://www.bilibili.com/list/watchlater"), UgcWatchLaterSource)
 
 
-def test_parse_passes_source_options() -> None:
-    options = SourceOptions(require_metadata=True)
-    source = parse("av123", options)
-
-    assert isinstance(source, UgcVideoSource)
-    assert source.options is options
-
-
 def test_parse_bare_ids_route_to_agnostic_sources() -> None:
     source = _parse("ep779775")
     assert isinstance(source, AmbiguousSource)
@@ -176,13 +165,8 @@ def test_parse_bare_ids_route_to_agnostic_sources() -> None:
     assert isinstance(source, AmbiguousSource)
     assert source.id == SeasonId("34184")
 
-    # 裸 ss 不再被番剧/课程解析器按顺序抢占
     assert not isinstance(_parse("ss34184"), (BangumiSeasonSource, CheeseSeasonSource))
-    # md 仅存在于番剧命名空间，保持直达
     assert isinstance(_parse("md789"), BangumiSeasonSource)
-
-
-# ---------- 命名空间专属 Source：一次请求完成检测与解析 ----------
 
 
 def test_bangumi_episode_source_single_request_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,7 +175,9 @@ def test_bangumi_episode_source_single_request_resolution(monkeypatch: pytest.Mo
         {"pgc/view/web/season": _bangumi_season_response("123")},
     )
 
-    episode = asyncio.run(BangumiEpisodeSource(id=EpisodeId("123")).resolve(None))  # type: ignore[arg-type]
+    episode = asyncio.run(
+        BangumiEpisodeSource(id=EpisodeId("123")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(episode, BangumiSeason)
     assert episode.items[0].episode_id == EpisodeId("123")
@@ -207,27 +193,25 @@ def test_bangumi_episode_source_initializes_metadata_when_required(monkeypatch: 
     )
 
     episode = asyncio.run(
-        BangumiEpisodeSource(
-            id=EpisodeId("123"),
-            options=SourceOptions(require_metadata=True),
-        ).resolve(None)  # type: ignore[arg-type]
+        BangumiEpisodeSource(id=EpisodeId("123")).resolve(
+            None,  # type: ignore[arg-type]
+            SourceOptions(require_metadata=True),
+        )
     )
 
     assert episode.items[0].extraMetaData is not None
 
 
 def test_cheese_episode_source_rejects_quirk_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    # pugv 对外来 ep_id 可能返回 code=0 的无关课程，剧集不在列表中时应判定未命中
     _install_fetcher_stub(
         monkeypatch,
         {"pugv/view/web/season": _cheese_season_response("999")},
     )
 
     with pytest.raises(NotFoundError):
-        asyncio.run(CheeseEpisodeSource(id=EpisodeId("779775")).resolve(None))  # type: ignore[arg-type]
-
-
-# ---------- 裸 ep：严格跨命名空间消歧 ----------
+        asyncio.run(
+            CheeseEpisodeSource(id=EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        )
 
 
 def test_episode_source_resolves_when_only_bangumi_has_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -239,7 +223,9 @@ def test_episode_source_resolves_when_only_bangumi_has_it(monkeypatch: pytest.Mo
         },
     )
 
-    episode = asyncio.run(_episode_source(EpisodeId("779775")).resolve(None))  # type: ignore[arg-type]
+    episode = asyncio.run(
+        _episode_source(EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(episode, BangumiSeason)
     assert episode.items[0].episode_id == EpisodeId("779775")
@@ -255,7 +241,9 @@ def test_episode_source_resolves_when_only_cheese_has_it(monkeypatch: pytest.Mon
         },
     )
 
-    episode = asyncio.run(_episode_source(EpisodeId("779775")).resolve(None))  # type: ignore[arg-type]
+    episode = asyncio.run(
+        _episode_source(EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(episode, CheeseSeason)
     assert episode.items[0].episode_id == EpisodeId("779775")
@@ -271,7 +259,9 @@ def test_episode_source_raises_when_both_namespaces_have_it(monkeypatch: pytest.
     )
 
     with pytest.raises(WrongArgumentError):
-        asyncio.run(_episode_source(EpisodeId("779775")).resolve(None))  # type: ignore[arg-type]
+        asyncio.run(
+            _episode_source(EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        )
 
 
 def test_episode_source_raises_when_neither_namespace_has_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -284,7 +274,9 @@ def test_episode_source_raises_when_neither_namespace_has_it(monkeypatch: pytest
     )
 
     with pytest.raises(NotFoundError):
-        asyncio.run(_episode_source(EpisodeId("999999")).resolve(None))  # type: ignore[arg-type]
+        asyncio.run(
+            _episode_source(EpisodeId("999999")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        )
 
 
 def test_episode_source_propagates_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -297,7 +289,9 @@ def test_episode_source_propagates_unexpected_errors(monkeypatch: pytest.MonkeyP
     )
 
     with pytest.raises(NoAccessPermissionError):
-        asyncio.run(_episode_source(EpisodeId("123")).resolve(None))  # type: ignore[arg-type]
+        asyncio.run(
+            _episode_source(EpisodeId("123")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        )
 
 
 def test_episode_source_prefers_success_over_other_namespace_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,12 +303,11 @@ def test_episode_source_prefers_success_over_other_namespace_error(monkeypatch: 
         },
     )
 
-    episode = asyncio.run(_episode_source(EpisodeId("123")).resolve(None))  # type: ignore[arg-type]
+    episode = asyncio.run(
+        _episode_source(EpisodeId("123")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(episode, BangumiSeason)
-
-
-# ---------- 裸 ss：严格跨命名空间消歧 ----------
 
 
 def test_season_source_resolves_bangumi_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,7 +319,9 @@ def test_season_source_resolves_bangumi_only(monkeypatch: pytest.MonkeyPatch) ->
         },
     )
 
-    season = asyncio.run(_season_source(SeasonId("34184")).resolve(None))  # type: ignore[arg-type]
+    season = asyncio.run(
+        _season_source(SeasonId("34184")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(season, BangumiSeason)
     assert season.season_id == SeasonId("34184")
@@ -342,7 +337,9 @@ def test_season_source_resolves_cheese_only(monkeypatch: pytest.MonkeyPatch) -> 
         },
     )
 
-    season = asyncio.run(_season_source(SeasonId("34184")).resolve(None))  # type: ignore[arg-type]
+    season = asyncio.run(
+        _season_source(SeasonId("34184")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(season, CheeseSeason)
     assert [item.episode_id for item in season.items] == [EpisodeId("1122054")]
@@ -358,7 +355,9 @@ def test_season_source_raises_when_both_namespaces_have_it(monkeypatch: pytest.M
     )
 
     with pytest.raises(WrongArgumentError):
-        asyncio.run(_season_source(SeasonId("34184")).resolve(None))  # type: ignore[arg-type]
+        asyncio.run(
+            _season_source(SeasonId("34184")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        )
 
 
 def test_season_source_raises_when_neither_namespace_has_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -371,10 +370,9 @@ def test_season_source_raises_when_neither_namespace_has_it(monkeypatch: pytest.
     )
 
     with pytest.raises(NotFoundError):
-        asyncio.run(_season_source(SeasonId("999999")).resolve(None))  # type: ignore[arg-type]
-
-
-# ---------- BangumiSeasonSource 的 MediaId 路径 ----------
+        asyncio.run(
+            _season_source(SeasonId("999999")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        )
 
 
 def test_bangumi_season_source_resolves_media_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -386,7 +384,9 @@ def test_bangumi_season_source_resolves_media_id(monkeypatch: pytest.MonkeyPatch
         },
     )
 
-    season = asyncio.run(BangumiSeasonSource(id=MediaId("789")).resolve(None))  # type: ignore[arg-type]
+    season = asyncio.run(
+        BangumiSeasonSource(id=MediaId("789")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+    )
 
     assert isinstance(season, BangumiSeason)
     assert season.season_id == SeasonId("456")
@@ -419,14 +419,14 @@ def test_bangumi_season_source_filters_extra_and_preview_before_selection(
     _install_fetcher_stub(monkeypatch, {"pgc/view/web/season": response})
 
     season = asyncio.run(
-        BangumiSeasonSource(
-            id=SeasonId("456"),
-            options=SourceOptions(
+        BangumiSeasonSource(id=SeasonId("456")).resolve(
+            None,  # type: ignore[arg-type]
+            SourceOptions(
                 selection="1~-1",
                 with_extra_episodes=True,
                 skip_preview=True,
             ),
-        ).resolve(None)  # type: ignore[arg-type]
+        )
     )
 
     assert [item.episode_id for item in season.items] == [EpisodeId("124"), EpisodeId("125")]

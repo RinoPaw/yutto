@@ -27,7 +27,7 @@ async def test_parse_input_prefers_pure_parser(monkeypatch: pytest.MonkeyPatch):
 
     assert parsed_input.value == "BV1D84y1t76J"
     assert isinstance(parsed_input.source, UgcVideoSource)
-    assert parsed_input.source.selection == "1"
+    assert parsed_input.source.page is None
 
 
 @as_sync
@@ -43,11 +43,11 @@ async def test_parse_input_redirects_only_after_parse_miss(monkeypatch: pytest.M
 
     assert parsed_input.value == "https://www.bilibili.com/video/BV1D84y1t76J?p=2"
     assert isinstance(parsed_input.source, UgcVideoSource)
-    assert parsed_input.source.selection == "2"
+    assert parsed_input.source.page == 2
 
 
 @as_sync
-async def test_parse_input_maps_user_selection_and_source_options(monkeypatch: pytest.MonkeyPatch):
+async def test_parse_input_does_not_attach_request_options(monkeypatch: pytest.MonkeyPatch):
     async def fail_redirect(*args: Any, **kwargs: Any):
         pytest.fail("redirect must not be requested for directly parseable inputs")
 
@@ -65,10 +65,8 @@ async def test_parse_input_maps_user_selection_and_source_options(monkeypatch: p
     source = parsed_input.source
 
     assert isinstance(source, UgcVideoSource)
-    assert source.selection == "3"
-    assert source.options.with_extra_episodes is True
-    assert source.options.skip_preview is True
-    assert source.options.require_metadata is True
+    assert source.page is None
+    assert not hasattr(source, "options")
 
 
 @as_sync

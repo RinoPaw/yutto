@@ -79,10 +79,10 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     )
 
     media = asyncio.run(
-        UgcSeriesSource(
-            id=SeriesId("456"),
-            options=SourceOptions(selection="2", require_metadata=True),
-        ).resolve(None)  # type: ignore[arg-type]
+        UgcSeriesSource(id=SeriesId("456")).resolve(
+            None,  # type: ignore[arg-type]
+            SourceOptions(selection="2", require_metadata=True),
+        )
     )
 
     assert media.title == "视频系列"
@@ -118,7 +118,7 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
         UgcCollectionSource(
             id=CollectionId("456"),
             owner_id=MId("123"),
-        ).resolve(None)  # type: ignore[arg-type]
+        ).resolve(None, SourceOptions())  # type: ignore[arg-type]
     )
 
     assert media.title == "视频合集"
