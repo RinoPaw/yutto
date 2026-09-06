@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.auth import validate_user_info
-from yutto.core.events import DownloadItemListed, DownloadStage, DownloadStageChanged
+from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
 from yutto.core.options import resource_options_from_request, source_options_from_request
-from yutto.core.result import DownloadResult, ItemResult, ResolvedItem, ResolveFailure, ResolveResult
+from yutto.core.result import DownloadResult, ItemResult, ResolveFailure, ResolveResult
 from yutto.downloader.downloader import process_download
 from yutto.downloader.path_leases import DownloadPathLeasePool
 from yutto.exceptions import (
@@ -25,9 +25,9 @@ from yutto.exceptions import (
 )
 from yutto.listing import (
     MediaAncestry,
+    filter_media_tree,
     iter_media_items,
     media_item_pubdate,
-    project_media_item,
     resolve_media_path,
 )
 from yutto.media import UgcFav, UgcVideo
@@ -49,26 +49,26 @@ if TYPE_CHECKING:
 
 
 def show_batch_episode_title(
-    group_title: str | None,
+    display_group: str | None,
     path: Path,
     index: int,
     total: int,
-    current_group_title: str | None,
+    current_display_group: str | None,
 ) -> str | None:
-    if group_title is not None and group_title != current_group_title:
-        emit_download_report(group_title, badge="列表")
-        current_group_title = group_title
-    elif group_title is None:
-        current_group_title = None
+    if display_group is not None and display_group != current_display_group:
+        emit_download_report(display_group, badge="列表")
+        current_display_group = display_group
+    elif display_group is None:
+        current_display_group = None
 
     display_name = path.name
-    if group_title is not None:
+    if display_group is not None:
         display_name = f"  {display_name}"
     emit_download_report(display_name, badge=f"[{index}/{total}]")
-    return current_group_title
+    return current_display_group
 
 
-def _batch_group_title(ancestry: MediaAncestry) -> str | None:
+def _display_group(ancestry: MediaAncestry) -> str | None:
     if len(ancestry) < 2:
         return None
     root = ancestry[-2]
@@ -76,10 +76,6 @@ def _batch_group_title(ancestry: MediaAncestry) -> str | None:
     if isinstance(root, UgcFav) and isinstance(video, UgcVideo) and len(video.items) > 1:
         return video.metadata.title
     return None
-
-
-def _emit_item_listed(item: ResolvedItem) -> None:
-    emit_download_event(DownloadItemListed(item=item))
 
 
 async def _resolve_source(scope: ExecutionScope, value: str) -> MediaSource:
@@ -119,12 +115,6 @@ class _ResolvedRequestOutcome:
     source: MediaSource | None = None
     media: Media | None = None
     failures: tuple[YuttoBaseException, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedItemsOutcome:
-    items: tuple[ResolvedItem, ...]
-    failures: tuple[YuttoBaseException, ...]
 
 
 class DownloadManager:
@@ -172,14 +162,29 @@ class DownloadManager:
         scope_factory: ExecutionScopeFactory,
         requests: Sequence[DownloadRequest],
     ) -> ResolveResult:
-        items: list[ResolvedItem] = []
+        media: list[Media] = []
         failures: list[YuttoBaseException] = []
         for request in requests:
             async with scope_factory.open(request) as scope:
-                outcome = await self.resolve_items(scope, request)
-                items.extend(outcome.items)
+                outcome = await self.resolve_request(scope, request)
                 failures.extend(outcome.failures)
-        if failures and not items:
+                if outcome.media is None:
+                    continue
+
+                publication_time_filter = PublicationTimeFilter.from_strings(
+                    request.selection.start_time,
+                    request.selection.end_time,
+                )
+                filter_by_time = request.selection.start_time is not None or request.selection.end_time is not None
+                selected_media = filter_media_tree(
+                    outcome.media,
+                    lambda ancestry, item: not filter_by_time
+                    or publication_time_filter.matches(media_item_pubdate(ancestry, item)),
+                )
+                if selected_media is not None:
+                    media.append(selected_media)
+
+        if failures and not media:
             if len(failures) == 1:
                 raise failures[0]
             raise ResolveFailedError(f"解析未得到任何条目：{len(failures)} 个来源/条目解析失败（详见 server 日志）")
@@ -187,24 +192,7 @@ class DownloadManager:
             ResolveFailure(type=type(error).__name__, message=error.message, code=error.code.value)
             for error in failures
         )
-        return ResolveResult(items=tuple(items), failures=resolved_failures)
-
-    async def resolve_items(
-        self,
-        scope: ExecutionScope,
-        request: DownloadRequest,
-    ) -> _ResolvedItemsOutcome:
-        outcome = await self.resolve_request(scope, request)
-        if outcome.source is None or outcome.media is None:
-            return _ResolvedItemsOutcome(items=(), failures=outcome.failures)
-
-        items: list[ResolvedItem] = []
-        for ancestry, item in _iter_request_items(outcome.media, request):
-            listing = project_media_item(outcome.source, ancestry, item, request)
-            items.append(listing)
-            _emit_item_listed(listing)
-            await asyncio.sleep(0)
-        return _ResolvedItemsOutcome(items=tuple(items), failures=outcome.failures)
+        return ResolveResult(media=tuple(media), failures=resolved_failures)
 
     async def process_request(
         self,
@@ -223,11 +211,11 @@ class DownloadManager:
 
         download_list = tuple(_iter_request_items(outcome.media, request))
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
-        current_group_title: str | None = None
+        current_display_group: str | None = None
         for ancestry, item in download_list:
             path = Path(self.unique_path(str(resolve_media_path(outcome.source, ancestry, item, request))))
-            prepared.append((ancestry, item, path, current_group_title))
-            current_group_title = _batch_group_title(ancestry)
+            prepared.append((ancestry, item, path, current_display_group))
+            current_display_group = _display_group(ancestry)
 
         if request.network.download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {request.network.download_interval} 秒")
@@ -243,7 +231,7 @@ class DownloadManager:
             ancestry: MediaAncestry,
             item: MediaItem,
             path: Path,
-            previous_group_title: str | None,
+            previous_display_group: str | None,
         ) -> None:
             if index > 0 and request.network.download_interval > 0:
                 await asyncio.sleep(index * request.network.download_interval)
@@ -282,11 +270,11 @@ class DownloadManager:
                     )
                 if request.scope.batch:
                     show_batch_episode_title(
-                        _batch_group_title(ancestry),
+                        _display_group(ancestry),
                         path,
                         index + 1,
                         len(download_list),
-                        previous_group_title,
+                        previous_display_group,
                     )
                 if index + 1 < len(start_turns):
                     start_turns[index + 1].set()
@@ -300,10 +288,10 @@ class DownloadManager:
 
         tasks = [
             asyncio.create_task(
-                run_item(index, ancestry, item, path, previous_group_title),
+                run_item(index, ancestry, item, path, previous_display_group),
                 name=f"yutto-item-{index}",
             )
-            for index, (ancestry, item, path, previous_group_title) in enumerate(prepared)
+            for index, (ancestry, item, path, previous_display_group) in enumerate(prepared)
         ]
         await _gather_cancelling(tasks)
         emit_download_report("", ReportLevel.PLAIN)
