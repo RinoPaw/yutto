@@ -76,5 +76,5 @@ class ResolveFailure(_ResultModel):
 class ResolveResult:
     """Resolve 结果直接保留每个请求得到的 Media 根节点。"""
 
-    media: tuple[Media, ...] = ()
+    items: tuple[Media, ...] = ()
     failures: tuple[ResolveFailure, ...] = ()
