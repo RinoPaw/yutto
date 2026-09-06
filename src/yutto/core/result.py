@@ -60,7 +60,7 @@ class DownloadResult(_ResultModel):
 
 
 class ResolvedItem(_ResultModel):
-    """The canonical immutable snapshot of one listed episode."""
+    """Stable flat representation of one item at the resolve/RPC boundary."""
 
     avid: AvId
     cid: CId
