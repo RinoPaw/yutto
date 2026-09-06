@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.core.request import DownloadRequest
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.media.quality import AudioQuality, VideoQuality
-    from yutto.types import AudioUrlMeta, EpisodeData, VideoUrlMeta
+    from yutto.resource import DownloadableEntry
+    from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
+    from yutto.types import AudioUrlMeta, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
 
 
@@ -72,7 +72,7 @@ class MetadataPlan:
 
 @dataclass(frozen=True, slots=True)
 class DownloadResources:
-    """Frozen write policy; large extractor payloads remain in EpisodeData."""
+    """Frozen write policy; resolved payloads stay in DownloadableEntry."""
 
     subtitle_languages: tuple[str, ...]
     has_danmaku: bool
@@ -111,17 +111,17 @@ class DownloadPlan:
 
 
 class DownloadPlanner:
-    """Turn extractor data plus a request into a pure download plan."""
+    """Turn resolved resources plus a path and request into a pure download plan."""
 
-    def plan(self, episode_data: EpisodeData, request: DownloadRequest) -> DownloadPlan:
+    def plan(self, resources: DownloadableEntry, path: Path, request: DownloadRequest) -> DownloadPlan:
         video_candidate = select_video(
-            episode_data["videos"],
+            resources.videos,
             request.stream.video_quality,
             request.stream.video_download_codec,
             request.stream.video_download_codec_priority,
         )
         audio_candidate = select_audio(
-            episode_data["audios"],
+            resources.audios,
             request.stream.audio_quality,
             request.stream.audio_download_codec,
         )
@@ -131,7 +131,7 @@ class DownloadPlanner:
         paths = resolve_paths(
             request.output.directory,
             request.output.temporary_directory or request.output.directory,
-            episode_data["info"]["path"],
+            path,
             suffix,
         )
 
@@ -148,22 +148,22 @@ class DownloadPlanner:
         )
 
         selected_video_index = (
-            episode_data["videos"].index(video_candidate)
+            resources.videos.index(video_candidate)
             if video_candidate is not None and request.resources.video
             else -1
         )
         selected_audio_index = (
-            episode_data["audios"].index(audio_candidate)
+            resources.audios.index(audio_candidate)
             if audio_candidate is not None and request.resources.audio
             else -1
         )
-        resources = DownloadResources(
-            subtitle_languages=tuple(subtitle["lang"] for subtitle in episode_data["subtitles"]),
-            has_danmaku=bool(episode_data["danmaku"]["data"]),
-            danmaku_save_type=episode_data["danmaku"]["save_type"],
-            has_metadata=episode_data["metadata"] is not None,
-            has_cover=episode_data["cover_data"] is not None,
-            has_chapter_info=bool(episode_data["chapter_info_data"]),
+        resource_plan = DownloadResources(
+            subtitle_languages=tuple(subtitle["lang"] for subtitle in resources.subtitles),
+            has_danmaku=bool(resources.danmaku["data"]),
+            danmaku_save_type=resources.danmaku["save_type"],
+            has_metadata=resources.metadata is not None,
+            has_cover=resources.cover_data is not None,
+            has_chapter_info=bool(resources.chapter_info_data),
             save_cover=request.resources.save_cover,
             danmaku_width=video_candidate["width"] if video_candidate is not None else 1920,
             danmaku_height=video_candidate["height"] if video_candidate is not None else 1080,
@@ -187,7 +187,7 @@ class DownloadPlanner:
             ),
         )
         return DownloadPlan(
-            item=episode_data["info"]["path"].name,
+            item=path.name,
             paths=paths,
             video=freeze_video_stream(video_meta, selected_video_index),
             audio=freeze_audio_stream(audio_meta, selected_audio_index),
@@ -201,7 +201,7 @@ class DownloadPlanner:
             overwrite=request.output.overwrite,
             block_size=request.network.block_size_bytes,
             banned_mirrors_pattern=request.network.banned_mirrors_pattern,
-            resources=resources,
+            resources=resource_plan,
         )
 
 

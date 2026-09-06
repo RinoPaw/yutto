@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -10,21 +11,25 @@ import pytest
 import yutto.downloader.executor as executor_module
 from yutto.core.execution import ExecutionScope
 from yutto.core.request import DownloadRequest
-from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState, ResolvedItem
+from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.downloader import process_download
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.exceptions import PostprocessingError
-from yutto.types import AId, CId
+from yutto.resource import DownloadableEntry
 from yutto.utils.danmaku import write_danmaku
 from yutto.utils.functional import as_sync
+from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
     from yutto.downloader.planner import DownloadPlan
-    from yutto.media.codec import AudioCodec
-    from yutto.types import AudioUrlMeta, EpisodeData
+    from yutto.stream import AudioCodec
+    from yutto.types import AudioUrlMeta
     from yutto.utils.danmaku import DanmakuData, DanmakuOptions
 
 pytestmark = pytest.mark.processor
+
+
+ENTRY_PATH = Path("series/episode")
 
 
 def make_request(
@@ -59,48 +64,25 @@ def make_request(
     )
 
 
-def make_resource_only_episode() -> EpisodeData:
-    planned_path = Path("series/episode")
-    return {
-        "info": {
-            "listing": ResolvedItem(
-                avid=AId("1"),
-                cid=CId("1"),
-                url="https://www.bilibili.com/video/av1?p=1",
-                name="episode",
-                title="episode",
-                cover_url="",
-                planned_path=planned_path,
-            ),
-            "path": planned_path,
-        },
-        "videos": [],
-        "audios": [],
-        "subtitles": [
+def make_resource_only_entry() -> DownloadableEntry:
+    return DownloadableEntry(
+        videos=(),
+        audios=(),
+        subtitles=(
             {
                 "lang": "zh-CN",
                 "lines": [{"content": "测试", "from": 0, "to": 1}],
-            }
-        ],
-        "metadata": {
-            "title": "测试",
-            "show_title": "测试",
-            "plot": "",
-            "thumb": "",
-            "premiered": 0,
-            "dateadded": 0,
-            "actor": [],
-            "genre": [],
-            "tag": [],
-            "source": "",
-            "original_filename": "episode",
-            "website": "",
-            "chapter_info_data": [],
-        },
-        "danmaku": {"source_type": "xml", "save_type": "xml", "data": ["<i />"]},
-        "cover_data": b"cover",
-        "chapter_info_data": [],
-    }
+            },
+        ),
+        metadata=ItemMetaData(
+            title="测试",
+            show_title="测试",
+            original_filename="episode",
+        ),
+        danmaku={"source_type": "xml", "save_type": "xml", "data": ["<i />"]},
+        cover_data=b"cover",
+        chapter_info_data=(),
+    )
 
 
 def make_audio(codec: AudioCodec = "mp4a") -> AudioUrlMeta:
@@ -114,11 +96,12 @@ def make_audio(codec: AudioCodec = "mp4a") -> AudioUrlMeta:
     }
 
 
-def make_media_episode() -> EpisodeData:
-    episode = make_resource_only_episode()
-    episode["audios"] = [make_audio()]
-    episode["chapter_info_data"] = [{"start": 0, "end": 1, "content": "chapter"}]
-    return episode
+def make_media_entry() -> DownloadableEntry:
+    return replace(
+        make_resource_only_entry(),
+        audios=(make_audio(),),
+        chapter_info_data=({"start": 0, "end": 1, "content": "chapter"},),
+    )
 
 
 @pytest.mark.parametrize("cancelled", [False, True], ids=["failure", "cancellation"])
@@ -147,7 +130,8 @@ async def test_interrupted_mux_keeps_resume_inputs(
     execution = asyncio.create_task(
         process_download(
             ExecutionScope(cast("Any", object())),
-            make_media_episode(),
+            make_media_entry(),
+            ENTRY_PATH,
             make_request(tmp_path, audio=True),
         )
     )
@@ -174,7 +158,8 @@ async def test_interrupted_mux_keeps_resume_inputs(
 async def test_resource_only_download_returns_final_artifacts_without_temporary_files(tmp_path: Path):
     result = await process_download(
         ExecutionScope(cast("Any", object())),
-        make_resource_only_episode(),
+        make_resource_only_entry(),
+        ENTRY_PATH,
         make_request(tmp_path),
     )
 
@@ -195,9 +180,11 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
 
 @as_sync
 async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(tmp_path: Path):
-    episode = make_media_episode()
-    episode["metadata"] = None
-    episode["danmaku"] = {"source_type": None, "save_type": None, "data": []}
+    entry = replace(
+        make_media_entry(),
+        metadata=None,
+        danmaku={"source_type": None, "save_type": None, "data": []},
+    )
     output_path = tmp_path / "output/series/episode.m4a"
     subtitle_path = tmp_path / "output/series/episode.zh-CN.srt"
     output_path.parent.mkdir(parents=True)
@@ -206,7 +193,8 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
 
     result = await process_download(
         ExecutionScope(cast("Any", object())),
-        episode,
+        entry,
+        ENTRY_PATH,
         make_request(tmp_path, audio=True),
     )
 
@@ -227,25 +215,28 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
 
 @as_sync
 async def test_missing_requested_audio_does_not_clean_uncreated_video_file(tmp_path: Path):
-    episode = make_resource_only_episode()
-    episode["videos"] = [
-        {
-            "url": "https://example.test/video",
-            "mirrors": [],
-            "codec": "avc",
-            "width": 1920,
-            "height": 1080,
-            "quality": 80,
-        }
-    ]
-    episode["subtitles"] = []
-    episode["metadata"] = None
-    episode["danmaku"] = {"source_type": None, "save_type": None, "data": []}
-    episode["cover_data"] = None
+    entry = replace(
+        make_resource_only_entry(),
+        videos=(
+            {
+                "url": "https://example.test/video",
+                "mirrors": [],
+                "codec": "avc",
+                "width": 1920,
+                "height": 1080,
+                "quality": 80,
+            },
+        ),
+        subtitles=(),
+        metadata=None,
+        danmaku={"source_type": None, "save_type": None, "data": []},
+        cover_data=None,
+    )
 
     result = await process_download(
         ExecutionScope(cast("Any", object())),
-        episode,
+        entry,
+        ENTRY_PATH,
         make_request(tmp_path, audio=True, save_cover=False),
     )
 

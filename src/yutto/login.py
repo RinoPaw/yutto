@@ -11,8 +11,17 @@ from urllib.parse import parse_qs, unquote, urlparse
 import segno
 
 from yutto._native import HttpError
-from yutto.api.user_info import USER_INFO_API, parse_user_info, user_info_matches
-from yutto.auth import AuthInfo, remove_auth, resolve_auth, resolve_auth_file, save_auth, validate_profile
+from yutto.auth import (
+    USER_INFO_API,
+    AuthInfo,
+    parse_user_info,
+    remove_auth,
+    resolve_auth,
+    resolve_auth_file,
+    save_auth,
+    user_info_matches,
+    validate_profile,
+)
 from yutto.exceptions import ErrorCode
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy

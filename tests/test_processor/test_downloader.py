@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import replace
+from typing import Any, cast
 
 import pytest
 from returns.result import Failure, Success
 
 import yutto.downloader.transfer as transfer_module
 from tests.helpers.http_range_server import LocalRangeServer, RangeFault
-from tests.test_processor.test_download_result import make_request, make_resource_only_episode
+from tests.test_processor.test_download_result import ENTRY_PATH, make_request, make_resource_only_entry
 from yutto._native import TransferWorkerLimit
 from yutto.core.events import DownloadEvent, DownloadProgress
 from yutto.core.execution import ExecutionScope
@@ -24,9 +25,6 @@ from yutto.downloader.transfer import (
 from yutto.exceptions import MaxRetryError
 from yutto.utils.fetcher import Fetcher, create_client
 from yutto.utils.functional import as_sync
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 pytestmark = pytest.mark.processor
 
@@ -179,20 +177,22 @@ async def test_known_size_resume_uses_existing_contiguous_prefix(tmp_path):
     page_size = 64 * 1024
     resume_offset = page_size + 7
     payload = b"A" * page_size + b"B" * page_size + b"C" * page_size
-    episode = make_resource_only_episode()
 
     with LocalRangeServer(payload) as server:
-        episode["audios"] = [
-            {
-                "url": server.url,
-                "mirrors": [],
-                "codec": "mp4a",
-                "width": 0,
-                "height": 0,
-                "quality": 30280,
-            }
-        ]
-        plan = DownloadPlanner().plan(episode, make_request(tmp_path, audio=True))
+        entry = replace(
+            make_resource_only_entry(),
+            audios=(
+                {
+                    "url": server.url,
+                    "mirrors": [],
+                    "codec": "mp4a",
+                    "width": 0,
+                    "height": 0,
+                    "quality": 30280,
+                },
+            ),
+        )
+        plan = DownloadPlanner().plan(entry, ENTRY_PATH, make_request(tmp_path, audio=True))
         plan.paths.temporary_dir.mkdir(parents=True)
         plan.paths.audio.write_bytes(payload[:resume_offset])
 
@@ -211,26 +211,28 @@ async def test_known_size_resume_uses_existing_contiguous_prefix(tmp_path):
 async def test_out_of_order_ranges_commit_an_exact_contiguous_file(tmp_path):
     page_size = 64 * 1024
     payload = b"A" * page_size + b"B" * page_size + b"C" * page_size
-    episode = make_resource_only_episode()
     first_range = (0, page_size - 1)
     later_range = (page_size, 2 * page_size - 1)
 
     with LocalRangeServer(payload, release_after={first_range: later_range}) as server:
-        episode["audios"] = [
-            {
-                "url": server.url,
-                "mirrors": [],
-                "codec": "mp4a",
-                "width": 0,
-                "height": 0,
-                "quality": 30280,
-            }
-        ]
+        entry = replace(
+            make_resource_only_entry(),
+            audios=(
+                {
+                    "url": server.url,
+                    "mirrors": [],
+                    "codec": "mp4a",
+                    "width": 0,
+                    "height": 0,
+                    "quality": 30280,
+                },
+            ),
+        )
         base_request = make_request(tmp_path, audio=True)
         request_data = base_request.model_dump()
         request_data["network"]["block_size_bytes"] = page_size
         request = type(base_request).model_validate(request_data)
-        plan = DownloadPlanner().plan(episode, request)
+        plan = DownloadPlanner().plan(entry, ENTRY_PATH, request)
         plan.paths.temporary_dir.mkdir(parents=True)
 
         async with create_client(trust_env=False) as session:
@@ -250,23 +252,25 @@ async def test_out_of_order_ranges_commit_an_exact_contiguous_file(tmp_path):
 async def test_native_transfer_resumes_by_default(tmp_path):
     page_size = 64 * 1024
     payload = b"A" * page_size + b"B" * page_size + b"C" * 17
-    episode = make_resource_only_episode()
 
     with LocalRangeServer(payload) as server:
-        episode["audios"] = [
-            {
-                "url": server.url,
-                "mirrors": [],
-                "codec": "mp4a",
-                "width": 0,
-                "height": 0,
-                "quality": 30280,
-            }
-        ]
+        entry = replace(
+            make_resource_only_entry(),
+            audios=(
+                {
+                    "url": server.url,
+                    "mirrors": [],
+                    "codec": "mp4a",
+                    "width": 0,
+                    "height": 0,
+                    "quality": 30280,
+                },
+            ),
+        )
         base_request = make_request(tmp_path, audio=True)
         request_data = base_request.model_dump()
         request = type(base_request).model_validate(request_data)
-        plan = DownloadPlanner().plan(episode, request)
+        plan = DownloadPlanner().plan(entry, ENTRY_PATH, request)
         plan.paths.temporary_dir.mkdir(parents=True)
         plan.paths.audio.write_bytes(payload[:page_size])
 
@@ -283,25 +287,27 @@ async def test_native_transfer_resumes_by_default(tmp_path):
 async def test_cancelling_rust_backend_stops_the_native_transfer(tmp_path):
     page_size = 64 * 1024
     payload = b"A" * page_size + b"B" * page_size + b"C" * page_size + b"D" * page_size
-    episode = make_resource_only_episode()
     blocker = (page_size, 2 * page_size - 1)
     later_range = f"bytes={2 * page_size}-{3 * page_size - 1}"
 
     with LocalRangeServer(payload, delays={blocker: 0.2}) as server:
-        episode["audios"] = [
-            {
-                "url": server.url,
-                "mirrors": [],
-                "codec": "mp4a",
-                "width": 0,
-                "height": 0,
-                "quality": 30280,
-            }
-        ]
+        entry = replace(
+            make_resource_only_entry(),
+            audios=(
+                {
+                    "url": server.url,
+                    "mirrors": [],
+                    "codec": "mp4a",
+                    "width": 0,
+                    "height": 0,
+                    "quality": 30280,
+                },
+            ),
+        )
         base_request = make_request(tmp_path, audio=True)
         request_data = base_request.model_dump()
         request_data["network"]["block_size_bytes"] = page_size
-        plan = DownloadPlanner().plan(episode, type(base_request).model_validate(request_data))
+        plan = DownloadPlanner().plan(entry, ENTRY_PATH, type(base_request).model_validate(request_data))
         plan.paths.temporary_dir.mkdir(parents=True)
         plan.paths.audio.write_bytes(payload[:page_size])
 
@@ -323,7 +329,7 @@ async def test_cancelling_rust_backend_stops_the_native_transfer(tmp_path):
 @as_sync
 async def test_native_transfer_reuses_the_scope_session_and_maps_workers(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path,
 ):
     captured: dict[str, Any] = {}
 
@@ -365,20 +371,22 @@ async def test_native_transfer_reuses_the_scope_session_and_maps_workers(
     monkeypatch.setattr(Fetcher, "get_size", get_size)
     monkeypatch.setattr(transfer_module, "TransferWorkerLimit", WorkerLimit)
 
-    episode = make_resource_only_episode()
-    episode["audios"] = [
-        {
-            "url": "https://primary.example/media",
-            "mirrors": [
-                "https://blocked.example/media",
-                "https://mirror.example/media",
-            ],
-            "codec": "mp4a",
-            "width": 0,
-            "height": 0,
-            "quality": 30280,
-        }
-    ]
+    entry = replace(
+        make_resource_only_entry(),
+        audios=(
+            {
+                "url": "https://primary.example/media",
+                "mirrors": [
+                    "https://blocked.example/media",
+                    "https://mirror.example/media",
+                ],
+                "codec": "mp4a",
+                "width": 0,
+                "height": 0,
+                "quality": 30280,
+            },
+        ),
+    )
     base_request = make_request(tmp_path, audio=True)
     request_data = base_request.model_dump()
     request_data["network"].update(
@@ -387,7 +395,7 @@ async def test_native_transfer_reuses_the_scope_session_and_maps_workers(
             "block_size_bytes": 64 * 1024,
         }
     )
-    plan = DownloadPlanner().plan(episode, type(base_request).model_validate(request_data))
+    plan = DownloadPlanner().plan(entry, ENTRY_PATH, type(base_request).model_validate(request_data))
 
     session = FakeSession()
     await download_video_and_audio(
@@ -410,7 +418,7 @@ async def test_native_transfer_reuses_the_scope_session_and_maps_workers(
 @as_sync
 async def test_item_transfers_start_together_and_share_one_worker_limit(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path,
 ):
     started: list[tuple[object, dict[str, object]]] = []
     both_started = asyncio.Event()
@@ -454,29 +462,35 @@ async def test_item_transfers_start_together_and_share_one_worker_limit(
     monkeypatch.setattr(Fetcher, "get_size", get_size)
     monkeypatch.setattr(transfer_module, "TransferWorkerLimit", WorkerLimit)
 
-    episode = make_resource_only_episode()
-    episode["videos"] = [
-        {
-            "url": "https://video.example/media",
-            "mirrors": [],
-            "codec": "avc",
-            "width": 1920,
-            "height": 1080,
-            "quality": 80,
-        }
-    ]
-    episode["audios"] = [
-        {
-            "url": "https://audio.example/media",
-            "mirrors": [],
-            "codec": "mp4a",
-            "width": 0,
-            "height": 0,
-            "quality": 30280,
-        }
-    ]
+    entry = replace(
+        make_resource_only_entry(),
+        videos=(
+            {
+                "url": "https://video.example/media",
+                "mirrors": [],
+                "codec": "avc",
+                "width": 1920,
+                "height": 1080,
+                "quality": 80,
+            },
+        ),
+        audios=(
+            {
+                "url": "https://audio.example/media",
+                "mirrors": [],
+                "codec": "mp4a",
+                "width": 0,
+                "height": 0,
+                "quality": 30280,
+            },
+        ),
+    )
     base_request = make_request(tmp_path, video=True, audio=True)
-    plan = DownloadPlanner().plan(episode, type(base_request).model_validate(base_request.model_dump()))
+    plan = DownloadPlanner().plan(
+        entry,
+        ENTRY_PATH,
+        type(base_request).model_validate(base_request.model_dump()),
+    )
 
     await download_video_and_audio(
         ExecutionScope(cast("Any", FakeSession()), download_workers=2),
@@ -494,7 +508,7 @@ async def test_item_transfers_start_together_and_share_one_worker_limit(
 @as_sync
 async def test_one_worker_preserves_serial_transfer_setup(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path,
 ):
     started: list[str] = []
 
@@ -538,29 +552,35 @@ async def test_one_worker_preserves_serial_transfer_setup(
     monkeypatch.setattr(Fetcher, "get_size", get_size)
     monkeypatch.setattr(transfer_module, "TransferWorkerLimit", WorkerLimit)
 
-    episode = make_resource_only_episode()
-    episode["videos"] = [
-        {
-            "url": "video",
-            "mirrors": [],
-            "codec": "avc",
-            "width": 1920,
-            "height": 1080,
-            "quality": 80,
-        }
-    ]
-    episode["audios"] = [
-        {
-            "url": "audio",
-            "mirrors": [],
-            "codec": "mp4a",
-            "width": 0,
-            "height": 0,
-            "quality": 30280,
-        }
-    ]
+    entry = replace(
+        make_resource_only_entry(),
+        videos=(
+            {
+                "url": "video",
+                "mirrors": [],
+                "codec": "avc",
+                "width": 1920,
+                "height": 1080,
+                "quality": 80,
+            },
+        ),
+        audios=(
+            {
+                "url": "audio",
+                "mirrors": [],
+                "codec": "mp4a",
+                "width": 0,
+                "height": 0,
+                "quality": 30280,
+            },
+        ),
+    )
     base_request = make_request(tmp_path, video=True, audio=True)
-    plan = DownloadPlanner().plan(episode, type(base_request).model_validate(base_request.model_dump()))
+    plan = DownloadPlanner().plan(
+        entry,
+        ENTRY_PATH,
+        type(base_request).model_validate(base_request.model_dump()),
+    )
 
     await download_video_and_audio(
         ExecutionScope(cast("Any", FakeSession()), download_workers=1),
@@ -573,7 +593,7 @@ async def test_one_worker_preserves_serial_transfer_setup(
 @as_sync
 async def test_rust_backend_reaps_a_started_handle_when_later_setup_fails(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path,
 ):
     class Handle:
         def __init__(self) -> None:
@@ -610,30 +630,32 @@ async def test_rust_backend_reaps_a_started_handle_when_later_setup_fails(
     monkeypatch.setattr(Fetcher, "get_size", get_size)
     monkeypatch.setattr(transfer_module, "wait_for_transfer", wait_for_transfer)
 
-    episode = make_resource_only_episode()
-    episode["videos"] = [
-        {
-            "url": "https://video.example/media",
-            "mirrors": [],
-            "codec": "avc",
-            "width": 1920,
-            "height": 1080,
-            "quality": 80,
-        }
-    ]
-    episode["audios"] = [
-        {
-            "url": "https://audio.example/media",
-            "mirrors": [],
-            "codec": "mp4a",
-            "width": 0,
-            "height": 0,
-            "quality": 30280,
-        }
-    ]
+    entry = replace(
+        make_resource_only_entry(),
+        videos=(
+            {
+                "url": "https://video.example/media",
+                "mirrors": [],
+                "codec": "avc",
+                "width": 1920,
+                "height": 1080,
+                "quality": 80,
+            },
+        ),
+        audios=(
+            {
+                "url": "https://audio.example/media",
+                "mirrors": [],
+                "codec": "mp4a",
+                "width": 0,
+                "height": 0,
+                "quality": 30280,
+            },
+        ),
+    )
     base_request = make_request(tmp_path, video=True, audio=True)
     request_data = base_request.model_dump()
-    plan = DownloadPlanner().plan(episode, type(base_request).model_validate(request_data))
+    plan = DownloadPlanner().plan(entry, ENTRY_PATH, type(base_request).model_validate(request_data))
 
     with pytest.raises(RuntimeError, match="second setup failed"):
         await download_video_and_audio(
