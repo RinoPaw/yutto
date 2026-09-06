@@ -38,7 +38,6 @@ def test_resolved_item_is_a_typed_immutable_listing_snapshot():
         "title": "标题",
         "cover_url": "https://example.com/cover.jpg",
         "planned_path": Path("标题/P1"),
-        "display_group": "标题",
         "uploader": "某UP主",
         "description": "视频简介",
         "tags": ("标签A", "标签B"),
