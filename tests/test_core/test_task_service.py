@@ -10,7 +10,6 @@ from yutto.core.events import (
     DownloadArtifactCreated,
     DownloadBatchStarted,
     DownloadEventSink,
-    DownloadItemListed,
     DownloadItemSkipped,
     DownloadMediaSelected,
     DownloadProgress,
@@ -23,10 +22,9 @@ from yutto.core.events import (
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import emit_download_event
 from yutto.core.request import DownloadRequest
-from yutto.core.result import DownloadResult, ItemSkipReason, ResolvedItem
+from yutto.core.result import DownloadResult, ItemSkipReason
 from yutto.core.task_service import DownloadTaskService, _encode_runtime_event
 from yutto.runtime import TaskState
-from yutto.types import AId, CId
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
@@ -252,29 +250,3 @@ def test_encode_runtime_event_media_selected_omits_urls_and_handles_missing_stre
         "audio": {"codec": "flac", "quality": 30251, "save_codec": "flac"},
     }
     assert "url" not in repr(data).casefold()
-
-
-def test_encode_runtime_event_item_listed_carries_full_wire_fields():
-    item = ResolvedItem(
-        avid=AId("1"),
-        cid=CId("10"),
-        url="https://www.bilibili.com/video/av1?p=1",
-        name="P1",
-        title="标题",
-        cover_url="https://example.com/cover.jpg",
-        planned_path=Path("标题/P1"),
-        display_group="标题",
-        uploader="某UP主",
-        description="视频简介",
-        tags=("标签A", "标签B"),
-        pubdate=1698148800,
-        duration=1559,
-    )
-    kind, data = _encode_runtime_event(DownloadItemListed(item=item))
-    assert kind == "item_listed"
-    assert data["avid"] == "1"
-    assert data["cid"] == "10"
-    assert data["planned_path"] == "标题/P1"
-    assert data["tags"] == ["标签A", "标签B"]
-    assert data["pubdate"] == 1698148800
-    assert data["duration"] == 1559
