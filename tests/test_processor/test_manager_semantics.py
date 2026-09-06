@@ -9,30 +9,15 @@ import pytest
 from yutto.core.execution import ExecutionScope, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
 from yutto.core.request import DownloadRequest
-from yutto.core.result import DownloadResult, ItemResult, ItemState, ResolvedItem
+from yutto.core.result import DownloadResult, ItemResult, ItemState
 from yutto.download_manager import DownloadManager, ensure_output_path_is_scoped, show_batch_episode_title
 from yutto.exceptions import WrongArgumentError
-from yutto.types import AId, CId
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
     from yutto.auth import AuthInfo
 
 pytestmark = pytest.mark.processor
-
-
-def make_listing(path: str, display_group: str | None = None) -> ResolvedItem:
-    planned_path = Path(path)
-    return ResolvedItem(
-        avid=AId("1"),
-        cid=CId("1"),
-        url="https://www.bilibili.com/video/av1?p=1",
-        name=planned_path.name,
-        title=display_group or planned_path.name,
-        cover_url="",
-        planned_path=planned_path,
-        display_group=display_group,
-    )
 
 
 @as_sync
@@ -262,16 +247,16 @@ def test_show_batch_episode_title_preserves_order_and_group_state():
     current_group: str | None = None
     group_states: list[str | None] = []
     items = [
-        make_listing("投稿 A/P1", "投稿 A"),
-        make_listing("投稿 A/P2", "投稿 A"),
-        make_listing("单集"),
-        make_listing("投稿 B/P1", "投稿 B"),
+        (Path("投稿 A/P1"), "投稿 A"),
+        (Path("投稿 A/P2"), "投稿 A"),
+        (Path("单集"), None),
+        (Path("投稿 B/P1"), "投稿 B"),
     ]
     with bind_download_report_sink(capture_output):
-        for index, item in enumerate(items, start=1):
+        for index, (path, display_group) in enumerate(items, start=1):
             current_group = show_batch_episode_title(
-                item,
-                item.planned_path,
+                display_group,
+                path,
                 index,
                 len(items),
                 current_group,
