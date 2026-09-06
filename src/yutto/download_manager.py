@@ -23,7 +23,14 @@ from yutto.exceptions import (
     WrongArgumentError,
     WrongUrlError,
 )
-from yutto.listing import ProjectedMediaItem, project_media_entries
+from yutto.listing import (
+    MediaAncestry,
+    iter_media_items,
+    media_item_pubdate,
+    project_media_item,
+    resolve_media_path,
+)
+from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_media_item
@@ -32,22 +39,22 @@ from yutto.utils.filter import PublicationTimeFilter
 from yutto.utils.metadata import attach_chapter_info
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.core.request import DownloadRequest
     from yutto.exceptions import YuttoBaseException
+    from yutto.media import Media, MediaItem
     from yutto.source import MediaSource
 
 
 def show_batch_episode_title(
-    item: ResolvedItem,
+    display_group: str | None,
     path: Path,
     index: int,
     total: int,
     current_display_group: str | None,
 ) -> str | None:
-    display_group = item.display_group
     if display_group is not None and display_group != current_display_group:
         emit_download_report(display_group, badge="列表")
         current_display_group = display_group
@@ -59,6 +66,16 @@ def show_batch_episode_title(
         display_name = f"  {display_name}"
     emit_download_report(display_name, badge=f"[{index}/{total}]")
     return current_display_group
+
+
+def _display_group(ancestry: MediaAncestry) -> str | None:
+    if len(ancestry) < 2:
+        return None
+    root = ancestry[-2]
+    video = ancestry[-1]
+    if isinstance(root, UgcFav) and isinstance(video, UgcVideo) and len(video.items) > 1:
+        return video.metadata.title
+    return None
 
 
 def _emit_item_listed(item: ResolvedItem) -> None:
@@ -82,9 +99,25 @@ async def _resolve_source(scope: ExecutionScope, value: str) -> MediaSource:
     raise WrongUrlError(f"无法识别 url（{redirected_value}）")
 
 
+def _iter_request_items(
+    media: Media,
+    request: DownloadRequest,
+) -> Iterator[tuple[MediaAncestry, MediaItem]]:
+    publication_time_filter = PublicationTimeFilter.from_strings(
+        request.selection.start_time,
+        request.selection.end_time,
+    )
+    filter_by_time = request.selection.start_time is not None or request.selection.end_time is not None
+    for ancestry, item in iter_media_items(media):
+        if filter_by_time and not publication_time_filter.matches(media_item_pubdate(ancestry, item)):
+            continue
+        yield ancestry, item
+
+
 @dataclass(frozen=True, slots=True)
 class _ResolvedRequestOutcome:
-    items: tuple[ProjectedMediaItem, ...] = ()
+    source: MediaSource | None = None
+    media: Media | None = None
     failures: tuple[YuttoBaseException, ...] = ()
 
 
@@ -162,10 +195,14 @@ class DownloadManager:
         request: DownloadRequest,
     ) -> _ResolvedItemsOutcome:
         outcome = await self.resolve_request(scope, request)
+        if outcome.source is None or outcome.media is None:
+            return _ResolvedItemsOutcome(items=(), failures=outcome.failures)
+
         items: list[ResolvedItem] = []
-        for entry in outcome.items:
-            items.append(entry.listing)
-            _emit_item_listed(entry.listing)
+        for ancestry, item in _iter_request_items(outcome.media, request):
+            listing = project_media_item(outcome.source, ancestry, item, request)
+            items.append(listing)
+            _emit_item_listed(listing)
             await asyncio.sleep(0)
         return _ResolvedItemsOutcome(items=tuple(items), failures=outcome.failures)
 
@@ -175,20 +212,22 @@ class DownloadManager:
         request: DownloadRequest,
     ) -> tuple[ItemResult, ...]:
         outcome = await self.resolve_request(scope, request)
-        if outcome.failures and not outcome.items:
+        if outcome.source is None or outcome.media is None:
             if len(outcome.failures) == 1:
                 raise outcome.failures[0]
-            raise ResolveFailedError(
-                f"解析未得到任何条目：{len(outcome.failures)} 个来源/条目解析失败（详见 server 日志）"
-            )
-        download_list = outcome.items
+            if outcome.failures:
+                raise ResolveFailedError(
+                    f"解析未得到任何条目：{len(outcome.failures)} 个来源/条目解析失败（详见 server 日志）"
+                )
+            return ()
 
-        prepared: list[tuple[ProjectedMediaItem, Path, str | None]] = []
+        download_list = tuple(_iter_request_items(outcome.media, request))
+        prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
         current_display_group: str | None = None
-        for entry in download_list:
-            path = Path(self.unique_path(str(entry.listing.planned_path)))
-            prepared.append((entry, path, current_display_group))
-            current_display_group = entry.listing.display_group
+        for ancestry, item in download_list:
+            path = Path(self.unique_path(str(resolve_media_path(outcome.source, ancestry, item, request))))
+            prepared.append((ancestry, item, path, current_display_group))
+            current_display_group = _display_group(ancestry)
 
         if request.network.download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {request.network.download_interval} 秒")
@@ -201,7 +240,8 @@ class DownloadManager:
 
         async def run_item(
             index: int,
-            entry: ProjectedMediaItem,
+            ancestry: MediaAncestry,
+            item: MediaItem,
             path: Path,
             previous_display_group: str | None,
         ) -> None:
@@ -215,11 +255,13 @@ class DownloadManager:
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
+                if not ancestry:
+                    raise TypeError(f"downloadable media item has no parent: {type(item).__name__}")
                 try:
                     resources = await resolve_media_item(
                         scope,
-                        entry.parent,
-                        entry.item,
+                        ancestry[-1],
+                        item,
                         resource_options,
                     )
                 except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError) as error:
@@ -240,7 +282,7 @@ class DownloadManager:
                     )
                 if request.scope.batch:
                     show_batch_episode_title(
-                        entry.listing,
+                        _display_group(ancestry),
                         path,
                         index + 1,
                         len(download_list),
@@ -258,10 +300,10 @@ class DownloadManager:
 
         tasks = [
             asyncio.create_task(
-                run_item(index, entry, path, previous_display_group),
+                run_item(index, ancestry, item, path, previous_display_group),
                 name=f"yutto-item-{index}",
             )
-            for index, (entry, path, previous_display_group) in enumerate(prepared)
+            for index, (ancestry, item, path, previous_display_group) in enumerate(prepared)
         ]
         await _gather_cancelling(tasks)
         emit_download_report("", ReportLevel.PLAIN)
@@ -272,13 +314,9 @@ class DownloadManager:
         scope: ExecutionScope,
         request: DownloadRequest,
     ) -> _ResolvedRequestOutcome:
-        """Resolve Parser -> MediaSource -> Media -> listing without the legacy Extractor layer."""
+        """Resolve Parser -> MediaSource -> Media without flattening the media tree."""
         source = await _resolve_source(scope, request.source.url)
         source_options = source_options_from_request(request)
-        publication_time_filter = PublicationTimeFilter.from_strings(
-            request.selection.start_time,
-            request.selection.end_time,
-        )
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
 
         if not await validate_user_info(
@@ -291,12 +329,9 @@ class DownloadManager:
             media = await source.resolve(scope, source_options)
         except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError, NotLoginError) as error:
             emit_download_report(error.message, ReportLevel.ERROR)
-            return _ResolvedRequestOutcome(failures=(error,))
+            return _ResolvedRequestOutcome(source=source, failures=(error,))
 
-        items = project_media_entries(source, media, request)
-        if request.selection.start_time is not None or request.selection.end_time is not None:
-            items = tuple(item for item in items if publication_time_filter.matches(item.listing.pubdate))
-        return _ResolvedRequestOutcome(items=items)
+        return _ResolvedRequestOutcome(source=source, media=media)
 
 
 def ensure_output_path_is_scoped(path: Path, output_root: Path, temporary_root: Path) -> None:
