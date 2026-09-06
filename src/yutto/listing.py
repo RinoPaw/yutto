@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
-from yutto.core.result import ResolvedItem
 from yutto.media import (
     BangumiEpisode,
     BangumiSeason,
@@ -26,6 +26,8 @@ from yutto.source import AmbiguousSource, BangumiEpisodeSource, CheeseEpisodeSou
 from yutto.types import EpisodeId
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from yutto.core.request import DownloadRequest
     from yutto.path_templates import PathTemplateVariableDict
     from yutto.source import MediaSource
@@ -46,6 +48,24 @@ def iter_media_items(
     if isinstance(media, MediaItem):
         yield ancestry, media
         return
+    raise TypeError(f"unsupported media: {type(media).__name__}")
+
+
+def filter_media_tree(
+    media: Media,
+    predicate: Callable[[MediaAncestry, MediaItem], bool],
+    ancestry: MediaAncestry = (),
+) -> Media | None:
+    if isinstance(media, MediaContainer):
+        child_ancestry = (*ancestry, media)
+        items = [
+            filtered
+            for child in media.items
+            if (filtered := filter_media_tree(child, predicate, child_ancestry)) is not None
+        ]
+        return replace(media, items=items) if items else None
+    if isinstance(media, MediaItem):
+        return media if predicate(ancestry, media) else None
     raise TypeError(f"unsupported media: {type(media).__name__}")
 
 
@@ -212,78 +232,3 @@ def resolve_media_path(
             variables,
         )
     )
-
-
-def project_media_item(
-    source: MediaSource,
-    ancestry: MediaAncestry,
-    item: MediaItem,
-    request: DownloadRequest,
-) -> ResolvedItem:
-    planned_path = resolve_media_path(source, ancestry, item, request)
-
-    if isinstance(item, UgcPage):
-        video, _auto_path, name, title, _username, _series_title = _ugc_context(source, request, ancestry, item)
-        return ResolvedItem(
-            avid=video.avid,
-            cid=item.cid,
-            url=f"{video.avid.to_url()}?p={item.page}",
-            name=name,
-            title=title,
-            cover_url=item.metadata.thumb or video.metadata.thumb,
-            planned_path=planned_path,
-            uploader=item.metadata.owner or video.metadata.owner,
-            description=video.metadata.plot or item.metadata.plot,
-            tags=tuple(item.metadata.tag or video.metadata.tag or video.metadata.genre),
-            pubdate=media_item_pubdate(ancestry, item),
-            duration=item.metadata.duration,
-        )
-
-    if isinstance(item, BangumiEpisode):
-        if not ancestry or not isinstance(ancestry[-1], BangumiSeason):
-            raise TypeError("BangumiEpisode parent must be BangumiSeason")
-        parent = ancestry[-1]
-        url = f"https://www.bilibili.com/bangumi/play/ep{item.episode_id}"
-    elif isinstance(item, CheeseEpisode):
-        if not ancestry or not isinstance(ancestry[-1], CheeseSeason):
-            raise TypeError("CheeseEpisode parent must be CheeseSeason")
-        parent = ancestry[-1]
-        url = f"https://www.bilibili.com/cheese/play/ep{item.episode_id}"
-    else:
-        raise TypeError(f"unsupported media item: {type(item).__name__}")
-
-    return ResolvedItem(
-        avid=item.avid,
-        cid=item.cid,
-        url=url,
-        name=_episode_name(item),
-        title=parent.metadata.title,
-        cover_url=item.metadata.thumb or parent.metadata.thumb,
-        planned_path=planned_path,
-        uploader=item.metadata.owner or parent.metadata.owner,
-        description=parent.metadata.plot or item.metadata.plot,
-        tags=tuple(item.metadata.tag or parent.metadata.tag or parent.metadata.genre),
-        pubdate=media_item_pubdate(ancestry, item),
-        duration=item.metadata.duration,
-    )
-
-
-def project_media_items(
-    source: MediaSource,
-    media: Media,
-    request: DownloadRequest,
-) -> tuple[ResolvedItem, ...]:
-    return tuple(
-        project_media_item(source, ancestry, item, request)
-        for ancestry, item in iter_media_items(media)
-    )
-
-
-__all__ = [
-    "MediaAncestry",
-    "iter_media_items",
-    "media_item_pubdate",
-    "project_media_item",
-    "project_media_items",
-    "resolve_media_path",
-]
