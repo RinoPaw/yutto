@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 import yutto.core.execution as execution_module
 from yutto.auth import load_auth
-from yutto.core.events import DownloadItemListed
 from yutto.core.execution import RequestExecutionScopeFactory
 from yutto.core.request import DownloadRequest
 from yutto.core.result import (
@@ -20,10 +19,9 @@ from yutto.core.result import (
     DownloadResult,
     ItemResult,
     ItemState,
-    ResolvedItem,
     ResolveResult,
 )
-from yutto.core.task_service import _encode_runtime_event
+from yutto.media import UgcPage, UgcVideo
 from yutto.runtime import EventReplay, TaskError, TaskEvent, TaskSnapshot, TaskState
 from yutto.server.service import (
     ServerPolicy,
@@ -34,8 +32,9 @@ from yutto.server.service import (
     snapshot_summary_to_json,
     snapshot_to_json,
 )
-from yutto.types import AId, CId
+from yutto.types import BvId, CId
 from yutto.utils.functional import as_sync
+from yutto.utils.metadata import ItemMetaData
 
 pytestmark = pytest.mark.processor
 
@@ -402,100 +401,50 @@ def test_download_result_serializes_paths_enums_and_tuples():
     }
 
 
-def test_listing_event_and_result_share_jsonrpc_wire_shape():
+def test_resolve_result_serializes_media_tree():
     created_at = datetime(2026, 7, 12, 11, 12, 13, tzinfo=UTC)
-
-    def serialize_both(item: ResolvedItem) -> tuple[dict[str, object], dict[str, object]]:
-        kind, data = _encode_runtime_event(DownloadItemListed(item=item))
-        event = TaskEvent(
-            task_id="task-listing",
-            seq=1,
-            kind=kind,
-            state=TaskState.RUNNING,
-            created_at=created_at,
-            data=data,
-        )
-        snapshot = TaskSnapshot[DownloadRequest, ResolveResult](
-            task_id="task-listing",
-            state=TaskState.COMPLETED,
-            payload=make_request(),
-            result=ResolveResult(items=(item,)),
-            error=None,
-            created_at=created_at,
-            started_at=created_at,
-            finished_at=created_at,
-            last_event_seq=1,
-        )
-        event_wire = cast("dict[str, object]", event_to_json(event)["data"])
-        result = cast("dict[str, object]", snapshot_to_json(snapshot)["result"])
-        result_wire = cast("list[dict[str, object]]", result["items"])[0]
-        return event_wire, result_wire
-
-    item = ResolvedItem(
-        avid=AId("1"),
+    page = UgcPage(
+        page=2,
         cid=CId("10"),
-        url="https://www.bilibili.com/video/av1?p=1",
-        name="P1",
-        title="标题",
-        cover_url="https://example.com/cover.jpg",
-        planned_path=Path("标题/P1"),
-        display_group="标题",
-        uploader="某UP主",
-        description="视频简介",
-        tags=("标签A", "标签B"),
-        pubdate=1698148800,
-        duration=1559,
+        metadata=ItemMetaData(title="P2", duration=1559),
     )
-    expected = {
-        "avid": "1",
-        "cid": "10",
-        "url": "https://www.bilibili.com/video/av1?p=1",
-        "name": "P1",
-        "title": "标题",
-        "cover_url": "https://example.com/cover.jpg",
-        "planned_path": "标题/P1",
-        "display_group": "标题",
-        "uploader": "某UP主",
-        "description": "视频简介",
-        "tags": ["标签A", "标签B"],
-        "pubdate": 1698148800,
-        "duration": 1559,
-    }
-    event_wire, result_wire = serialize_both(item)
-
-    assert event_wire == result_wire == expected
-    assert type(event_wire["avid"]) is str
-    assert type(event_wire["planned_path"]) is str
-    assert type(event_wire["tags"]) is list
-    assert type(event_wire["pubdate"]) is int
-    assert type(event_wire["duration"]) is int
-
-    default_item = ResolvedItem(
-        avid=AId("2"),
-        cid=CId("20"),
-        url="https://www.bilibili.com/video/av2?p=1",
-        name="单集",
-        title="单集",
-        cover_url="",
-        planned_path=Path("单集"),
+    video = UgcVideo(
+        avid=BvId("BV1D84y1t76J"),
+        metadata=ItemMetaData(title="标题", owner="某UP主", tag=["标签A", "标签B"]),
+        items=[page],
     )
-    default_expected = {
-        "avid": "2",
-        "cid": "20",
-        "url": "https://www.bilibili.com/video/av2?p=1",
-        "name": "单集",
-        "title": "单集",
-        "cover_url": "",
-        "planned_path": "单集",
-        "display_group": None,
-        "uploader": "",
-        "description": "",
-        "tags": [],
-        "pubdate": 0,
-        "duration": 0,
-    }
+    snapshot = TaskSnapshot[DownloadRequest, ResolveResult](
+        task_id="task-listing",
+        state=TaskState.COMPLETED,
+        payload=make_request(),
+        result=ResolveResult(items=(video,)),
+        error=None,
+        created_at=created_at,
+        started_at=created_at,
+        finished_at=created_at,
+        last_event_seq=1,
+    )
 
-    assert serialize_both(default_item) == (default_expected, default_expected)
+    result = cast("dict[str, object]", snapshot_to_json(snapshot)["result"])
+    media = cast("list[dict[str, object]]", result["items"])
+    video_wire = media[0]
+    page_wire = cast("list[dict[str, object]]", video_wire["items"])[0]
+    video_metadata = cast("dict[str, object]", video_wire["metadata"])
+    page_metadata = cast("dict[str, object]", page_wire["metadata"])
+
+    assert result["failures"] == []
+    assert video_wire["type"] == "UgcVideo"
+    assert video_wire["avid"] == "BV1D84y1t76J"
+    assert video_metadata["title"] == "标题"
+    assert video_metadata["owner"] == "某UP主"
+    assert video_metadata["tag"] == ["标签A", "标签B"]
+    assert page_wire["type"] == "UgcPage"
+    assert page_wire["page"] == 2
+    assert page_wire["cid"] == "10"
+    assert page_metadata["title"] == "P2"
+    assert page_metadata["duration"] == 1559
+    assert "planned_path" not in video_wire
+    json.dumps(result)
 
 
 def test_event_and_replay_serialization_use_enum_values_iso_dates_and_redaction():
