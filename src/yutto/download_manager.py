@@ -49,26 +49,26 @@ if TYPE_CHECKING:
 
 
 def show_batch_episode_title(
-    display_group: str | None,
+    group_title: str | None,
     path: Path,
     index: int,
     total: int,
-    current_display_group: str | None,
+    current_group_title: str | None,
 ) -> str | None:
-    if display_group is not None and display_group != current_display_group:
-        emit_download_report(display_group, badge="列表")
-        current_display_group = display_group
-    elif display_group is None:
-        current_display_group = None
+    if group_title is not None and group_title != current_group_title:
+        emit_download_report(group_title, badge="列表")
+        current_group_title = group_title
+    elif group_title is None:
+        current_group_title = None
 
     display_name = path.name
-    if display_group is not None:
+    if group_title is not None:
         display_name = f"  {display_name}"
     emit_download_report(display_name, badge=f"[{index}/{total}]")
-    return current_display_group
+    return current_group_title
 
 
-def _display_group(ancestry: MediaAncestry) -> str | None:
+def _batch_group_title(ancestry: MediaAncestry) -> str | None:
     if len(ancestry) < 2:
         return None
     root = ancestry[-2]
@@ -223,11 +223,11 @@ class DownloadManager:
 
         download_list = tuple(_iter_request_items(outcome.media, request))
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
-        current_display_group: str | None = None
+        current_group_title: str | None = None
         for ancestry, item in download_list:
             path = Path(self.unique_path(str(resolve_media_path(outcome.source, ancestry, item, request))))
-            prepared.append((ancestry, item, path, current_display_group))
-            current_display_group = _display_group(ancestry)
+            prepared.append((ancestry, item, path, current_group_title))
+            current_group_title = _batch_group_title(ancestry)
 
         if request.network.download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {request.network.download_interval} 秒")
@@ -243,7 +243,7 @@ class DownloadManager:
             ancestry: MediaAncestry,
             item: MediaItem,
             path: Path,
-            previous_display_group: str | None,
+            previous_group_title: str | None,
         ) -> None:
             if index > 0 and request.network.download_interval > 0:
                 await asyncio.sleep(index * request.network.download_interval)
@@ -282,11 +282,11 @@ class DownloadManager:
                     )
                 if request.scope.batch:
                     show_batch_episode_title(
-                        _display_group(ancestry),
+                        _batch_group_title(ancestry),
                         path,
                         index + 1,
                         len(download_list),
-                        previous_display_group,
+                        previous_group_title,
                     )
                 if index + 1 < len(start_turns):
                     start_turns[index + 1].set()
@@ -300,10 +300,10 @@ class DownloadManager:
 
         tasks = [
             asyncio.create_task(
-                run_item(index, ancestry, item, path, previous_display_group),
+                run_item(index, ancestry, item, path, previous_group_title),
                 name=f"yutto-item-{index}",
             )
-            for index, (ancestry, item, path, previous_display_group) in enumerate(prepared)
+            for index, (ancestry, item, path, previous_group_title) in enumerate(prepared)
         ]
         await _gather_cancelling(tasks)
         emit_download_report("", ReportLevel.PLAIN)
