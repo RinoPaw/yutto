@@ -192,7 +192,7 @@ class DownloadManager:
             ResolveFailure(type=type(error).__name__, message=error.message, code=error.code.value)
             for error in failures
         )
-        return ResolveResult(media=tuple(media), failures=resolved_failures)
+        return ResolveResult(items=tuple(media), failures=resolved_failures)
 
     async def process_request(
         self,
