@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from yutto.core.result import ResolvedItem
 from yutto.media import (
@@ -10,6 +10,9 @@ from yutto.media import (
     BangumiSeason,
     CheeseEpisode,
     CheeseSeason,
+    Media,
+    MediaContainer,
+    MediaItem,
     UgcCollection,
     UgcFav,
     UgcPage,
@@ -24,17 +27,26 @@ from yutto.types import EpisodeId
 
 if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
-    from yutto.media import MediaContainer, MediaItem
     from yutto.path_templates import PathTemplateVariableDict
     from yutto.source import MediaSource
     from yutto.types import AvId
 
+MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
 
-@dataclass(frozen=True, slots=True)
-class ProjectedMediaItem:
-    parent: MediaContainer
-    item: MediaItem
-    listing: ResolvedItem
+
+def iter_media_items(
+    media: Media,
+    ancestry: MediaAncestry = (),
+) -> Iterator[tuple[MediaAncestry, MediaItem]]:
+    if isinstance(media, MediaContainer):
+        child_ancestry = (*ancestry, media)
+        for child in media.items:
+            yield from iter_media_items(child, child_ancestry)
+        return
+    if isinstance(media, MediaItem):
+        yield ancestry, media
+        return
+    raise TypeError(f"unsupported media: {type(media).__name__}")
 
 
 def _owner(media: MediaItem, parent: BangumiSeason | CheeseSeason | UgcVideo) -> tuple[str, str]:
@@ -90,193 +102,188 @@ def _auto_path_template(
     return "{title}/{name}"
 
 
-def _project_item(
+def _ugc_context(
     source: MediaSource,
     request: DownloadRequest,
-    parent: BangumiSeason | CheeseSeason | UgcVideo,
-    item: BangumiEpisode | CheeseEpisode | UgcPage,
-) -> ResolvedItem:
-    if isinstance(item, UgcPage):
-        if not isinstance(parent, UgcVideo):
-            raise TypeError("UgcPage parent must be UgcVideo")
-        return _project_ugc_page(
-            request,
-            parent,
-            item,
-            auto_path_template=_auto_path_template(source, request, parent),
+    ancestry: MediaAncestry,
+    page: UgcPage,
+) -> tuple[UgcVideo, str, str, str, str | None, str | None]:
+    if not ancestry or not isinstance(ancestry[-1], UgcVideo):
+        raise TypeError("UgcPage parent must be UgcVideo")
+
+    video = ancestry[-1]
+    name = page.metadata.title
+    title = video.metadata.title
+    username: str | None = None
+    series_title: str | None = None
+
+    if len(ancestry) == 1:
+        return video, _auto_path_template(source, request, video), name, title, username, series_title
+
+    root = ancestry[-2]
+    if isinstance(root, UgcSeries):
+        auto_path = "{series_title}/{title}/{name}"
+        username = root.metadata.owner or video.metadata.owner
+        series_title = root.metadata.title
+    elif isinstance(root, UgcCollection):
+        multi_page = len(video.items) > 1
+        auto_path = "{series_title}/{title}/{name}" if multi_page else "{series_title}/{title}"
+        username = root.metadata.owner or video.metadata.owner
+        series_title = root.metadata.title
+    elif isinstance(root, UgcFav):
+        multi_page = len(video.items) > 1
+        auto_path = (
+            "{username}的收藏夹/{series_title}/{title}/{name}"
+            if multi_page
+            else "{username}的收藏夹/{series_title}/{title}"
         )
+        username = root.metadata.owner or video.metadata.owner
+        series_title = root.metadata.title
+        if not multi_page:
+            name = video.metadata.title
+    elif isinstance(root, UgcSpace):
+        auto_path = "{username}的全部投稿视频/{title}/{name}"
+        username = root.metadata.owner or root.metadata.title
+    elif isinstance(root, UgcWatchLater):
+        auto_path = "稍后再看/{title}/{name}"
+        username = ""
+        series_title = root.metadata.title
+    else:
+        raise TypeError(f"unsupported UGC parent: {type(root).__name__}")
+
+    return video, auto_path, name, title, username, series_title
+
+
+def _episode_name(item: BangumiEpisode | CheeseEpisode) -> str:
     name = item.metadata.title
+    if isinstance(item, BangumiEpisode) and item.is_preview:
+        return f"【预告】{name}"
+    return name
+
+
+def media_item_pubdate(ancestry: MediaAncestry, item: MediaItem) -> int:
+    if item.metadata.premiered:
+        return item.metadata.premiered
+    if ancestry:
+        return ancestry[-1].metadata.premiered
+    return 0
+
+
+def resolve_media_path(
+    source: MediaSource,
+    ancestry: MediaAncestry,
+    item: MediaItem,
+    request: DownloadRequest,
+) -> Path:
+    if isinstance(item, UgcPage):
+        video, auto_path, name, title, username, series_title = _ugc_context(source, request, ancestry, item)
+        variables = _path_variables(
+            video,
+            item,
+            video.avid,
+            index=item.page,
+            name=name,
+            title=title,
+            username=username,
+            series_title=series_title,
+        )
+        return Path(resolve_path_template(request.output.subpath_template, auto_path, variables))
+
     if isinstance(item, BangumiEpisode):
+        if not ancestry or not isinstance(ancestry[-1], BangumiSeason):
+            raise TypeError("BangumiEpisode parent must be BangumiSeason")
+        parent = ancestry[-1]
         avid = item.avid
         index = item.index
-        url = f"https://www.bilibili.com/bangumi/play/ep{item.episode_id}"
-        if item.is_preview:
-            name = f"【预告】{name}"
     elif isinstance(item, CheeseEpisode):
+        if not ancestry or not isinstance(ancestry[-1], CheeseSeason):
+            raise TypeError("CheeseEpisode parent must be CheeseSeason")
+        parent = ancestry[-1]
         avid = item.avid
         index = item.index
+    else:
+        raise TypeError(f"unsupported media item: {type(item).__name__}")
+
+    variables = _path_variables(parent, item, avid, index=index, name=_episode_name(item))
+    return Path(
+        resolve_path_template(
+            request.output.subpath_template,
+            _auto_path_template(source, request, parent),
+            variables,
+        )
+    )
+
+
+def project_media_item(
+    source: MediaSource,
+    ancestry: MediaAncestry,
+    item: MediaItem,
+    request: DownloadRequest,
+) -> ResolvedItem:
+    planned_path = resolve_media_path(source, ancestry, item, request)
+
+    if isinstance(item, UgcPage):
+        video, _auto_path, name, title, _username, _series_title = _ugc_context(source, request, ancestry, item)
+        return ResolvedItem(
+            avid=video.avid,
+            cid=item.cid,
+            url=f"{video.avid.to_url()}?p={item.page}",
+            name=name,
+            title=title,
+            cover_url=item.metadata.thumb or video.metadata.thumb,
+            planned_path=planned_path,
+            uploader=item.metadata.owner or video.metadata.owner,
+            description=video.metadata.plot or item.metadata.plot,
+            tags=tuple(item.metadata.tag or video.metadata.tag or video.metadata.genre),
+            pubdate=media_item_pubdate(ancestry, item),
+            duration=item.metadata.duration,
+        )
+
+    if isinstance(item, BangumiEpisode):
+        if not ancestry or not isinstance(ancestry[-1], BangumiSeason):
+            raise TypeError("BangumiEpisode parent must be BangumiSeason")
+        parent = ancestry[-1]
+        url = f"https://www.bilibili.com/bangumi/play/ep{item.episode_id}"
+    elif isinstance(item, CheeseEpisode):
+        if not ancestry or not isinstance(ancestry[-1], CheeseSeason):
+            raise TypeError("CheeseEpisode parent must be CheeseSeason")
+        parent = ancestry[-1]
         url = f"https://www.bilibili.com/cheese/play/ep{item.episode_id}"
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
-    variables = _path_variables(parent, item, avid, index=index, name=name)
-    path = resolve_path_template(
-        request.output.subpath_template,
-        _auto_path_template(source, request, parent),
-        variables,
-    )
-    uploader = item.metadata.owner or parent.metadata.owner
-    description = parent.metadata.plot or item.metadata.plot
-    tags = item.metadata.tag or parent.metadata.tag or parent.metadata.genre
-    cover_url = item.metadata.thumb or parent.metadata.thumb
-
     return ResolvedItem(
-        avid=avid,
+        avid=item.avid,
         cid=item.cid,
         url=url,
-        name=name,
+        name=_episode_name(item),
         title=parent.metadata.title,
-        cover_url=cover_url,
-        planned_path=Path(path),
-        uploader=uploader,
-        description=description,
-        tags=tuple(tags),
-        pubdate=item.metadata.premiered or parent.metadata.premiered,
+        cover_url=item.metadata.thumb or parent.metadata.thumb,
+        planned_path=planned_path,
+        uploader=item.metadata.owner or parent.metadata.owner,
+        description=parent.metadata.plot or item.metadata.plot,
+        tags=tuple(item.metadata.tag or parent.metadata.tag or parent.metadata.genre),
+        pubdate=media_item_pubdate(ancestry, item),
         duration=item.metadata.duration,
     )
 
 
-def _project_ugc_page(
-    request: DownloadRequest,
-    video: UgcVideo,
-    page: UgcPage,
-    *,
-    auto_path_template: str,
-    username: str | None = None,
-    series_title: str | None = None,
-    name: str | None = None,
-    title: str | None = None,
-    display_group: str | None = None,
-) -> ResolvedItem:
-    name = page.metadata.title if name is None else name
-    title = video.metadata.title if title is None else title
-    variables = _path_variables(
-        video,
-        page,
-        video.avid,
-        index=page.page,
-        name=name,
-        title=title,
-        username=username,
-        series_title=series_title,
-    )
-    path = resolve_path_template(request.output.subpath_template, auto_path_template, variables)
-    return ResolvedItem(
-        avid=video.avid,
-        cid=page.cid,
-        url=f"{video.avid.to_url()}?p={page.page}",
-        name=name,
-        title=title,
-        cover_url=page.metadata.thumb or video.metadata.thumb,
-        planned_path=Path(path),
-        display_group=display_group,
-        uploader=page.metadata.owner or video.metadata.owner,
-        description=video.metadata.plot or page.metadata.plot,
-        tags=tuple(page.metadata.tag or video.metadata.tag or video.metadata.genre),
-        pubdate=page.metadata.premiered or video.metadata.premiered,
-        duration=page.metadata.duration,
-    )
-
-
-def _project_nested_ugc(
-    request: DownloadRequest,
-    root: UgcCollection | UgcFav | UgcSeries | UgcSpace | UgcWatchLater,
-) -> tuple[ProjectedMediaItem, ...]:
-    entries: list[ProjectedMediaItem] = []
-    for video in root.items:
-        if isinstance(root, UgcSeries):
-            auto_path = "{series_title}/{title}/{name}"
-            username = root.metadata.owner or video.metadata.owner
-            series_title = root.metadata.title
-            single_name = None
-            display_group = None
-        elif isinstance(root, UgcCollection):
-            multi_page = len(video.items) > 1
-            auto_path = "{series_title}/{title}/{name}" if multi_page else "{series_title}/{title}"
-            username = root.metadata.owner or video.metadata.owner
-            series_title = root.metadata.title
-            single_name = None
-            display_group = None
-        elif isinstance(root, UgcFav):
-            multi_page = len(video.items) > 1
-            auto_path = (
-                "{username}的收藏夹/{series_title}/{title}/{name}"
-                if multi_page
-                else "{username}的收藏夹/{series_title}/{title}"
-            )
-            username = root.metadata.owner or video.metadata.owner
-            series_title = root.metadata.title
-            single_name = None if multi_page else video.metadata.title
-            display_group = video.metadata.title if multi_page else None
-        elif isinstance(root, UgcSpace):
-            auto_path = "{username}的全部投稿视频/{title}/{name}"
-            username = root.metadata.owner or root.metadata.title
-            series_title = None
-            single_name = None
-            display_group = None
-        else:
-            auto_path = "稍后再看/{title}/{name}"
-            username = ""
-            series_title = root.metadata.title
-            single_name = None
-            display_group = None
-
-        for page in video.items:
-            listing = _project_ugc_page(
-                request,
-                video,
-                page,
-                auto_path_template=auto_path,
-                username=username,
-                series_title=series_title,
-                name=single_name,
-                display_group=display_group,
-            )
-            entries.append(ProjectedMediaItem(parent=video, item=page, listing=listing))
-    return tuple(entries)
-
-
-def project_media_entries(
-    source: MediaSource,
-    media: MediaContainer,
-    request: DownloadRequest,
-) -> tuple[ProjectedMediaItem, ...]:
-    if isinstance(media, BangumiSeason):
-        return tuple(
-            ProjectedMediaItem(parent=media, item=item, listing=_project_item(source, request, media, item))
-            for item in media.items
-        )
-    if isinstance(media, CheeseSeason):
-        return tuple(
-            ProjectedMediaItem(parent=media, item=item, listing=_project_item(source, request, media, item))
-            for item in media.items
-        )
-    if isinstance(media, UgcVideo):
-        return tuple(
-            ProjectedMediaItem(parent=media, item=item, listing=_project_item(source, request, media, item))
-            for item in media.items
-        )
-    if isinstance(media, (UgcCollection, UgcFav, UgcSeries, UgcSpace, UgcWatchLater)):
-        return _project_nested_ugc(request, media)
-    raise TypeError(f"unsupported top-level media: {type(media).__name__}")
-
-
 def project_media_items(
     source: MediaSource,
-    media: MediaContainer,
+    media: Media,
     request: DownloadRequest,
 ) -> tuple[ResolvedItem, ...]:
-    return tuple(entry.listing for entry in project_media_entries(source, media, request))
+    return tuple(
+        project_media_item(source, ancestry, item, request)
+        for ancestry, item in iter_media_items(media)
+    )
 
 
-__all__ = ["ProjectedMediaItem", "project_media_entries", "project_media_items"]
+__all__ = [
+    "MediaAncestry",
+    "iter_media_items",
+    "media_item_pubdate",
+    "project_media_item",
+    "project_media_items",
+    "resolve_media_path",
+]
