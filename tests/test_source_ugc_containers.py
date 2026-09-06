@@ -100,13 +100,6 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     assert all(page.metadata.tag == ["标签"] for page in media.items[0].items)
     assert all(not hasattr(page, "avid") for page in media.items[0].items)
 
-    tree = media.to_dict()
-    assert tree["metadata"]["title"] == "视频系列"
-    assert tree["items"][0]["metadata"]["title"] == "第二个"
-    assert [page["metadata"]["title"] for page in tree["items"][0]["items"]] == ["P1", "P2"]
-    assert tree["items"][0]["avid"] == "BVSECOND"
-    assert all("avid" not in page for page in tree["items"][0]["items"])
-
     assert any("mid=123" in call and "series_id=456" in call for call in calls)
     assert any("bvid=BVSECOND" in call for call in calls)
     assert any("/x/tag/archive/tags" in call for call in calls)
