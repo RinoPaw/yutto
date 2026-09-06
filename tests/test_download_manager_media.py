@@ -8,6 +8,7 @@ from returns.result import Success
 
 from yutto.core.request import DownloadRequest
 from yutto.download_manager import DownloadManager
+from yutto.media import UgcVideo
 
 
 def _ugc_response() -> dict[str, Any]:
@@ -28,7 +29,7 @@ def _ugc_response() -> dict[str, Any]:
     }
 
 
-def test_manager_resolves_source_media_listing_and_deduplicates_selection(
+def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
@@ -40,7 +41,6 @@ def test_manager_resolves_source_media_listing_and_deduplicates_selection(
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
     monkeypatch.setattr("yutto.download_manager.validate_user_info", fake_validate_user_info)
     monkeypatch.setattr("yutto.download_manager.emit_download_event", lambda event: None)
-    monkeypatch.setattr("yutto.download_manager._emit_item_listed", lambda item: None)
 
     request = DownloadRequest.model_validate(
         {
@@ -49,10 +49,9 @@ def test_manager_resolves_source_media_listing_and_deduplicates_selection(
         }
     )
 
-    outcome = asyncio.run(DownloadManager().resolve_items(cast(Any, None), request))
+    outcome = asyncio.run(DownloadManager().resolve_request(cast(Any, None), request))
 
-    assert [item.url for item in outcome.items] == [
-        "https://www.bilibili.com/video/BV1D84y1t76J?p=3",
-        "https://www.bilibili.com/video/BV1D84y1t76J?p=1",
-    ]
-    assert [item.planned_path.as_posix() for item in outcome.items] == ["投稿/P3", "投稿/P1"]
+    assert isinstance(outcome.media, UgcVideo)
+    assert outcome.media.metadata.title == "投稿"
+    assert [page.page for page in outcome.media.items] == [3, 1]
+    assert [page.metadata.title for page in outcome.media.items] == ["P3", "P1"]
