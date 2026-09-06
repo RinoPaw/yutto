@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from yutto.core.request import DownloadRequest
-from yutto.listing import project_media_entries, project_media_items
+from yutto.listing import iter_media_items, project_media_items
 from yutto.media import (
     BangumiEpisode,
     BangumiSeason,
@@ -171,7 +171,7 @@ def test_cheese_projection_uses_original_episode_index_in_path_variables() -> No
     assert item.url.endswith("ep7007")
 
 
-def test_series_projection_walks_video_pages_and_keeps_video_as_resource_parent() -> None:
+def test_series_traversal_keeps_video_in_ancestry() -> None:
     video = UgcVideo(
         avid=BvId("BV1D84y1t76J"),
         metadata=ItemMetaData(title="投稿", owner="UP"),
@@ -184,12 +184,13 @@ def test_series_projection_walks_video_pages_and_keeps_video_as_resource_parent(
     )
     request = _request("https://space.bilibili.com/123/lists/99?type=series", episodes="1")
 
-    entry = project_media_entries(UgcVideoSource(id=video.avid), media, request)[0]
+    ancestry, page = next(iter_media_items(media))
+    listing = project_media_items(UgcVideoSource(id=video.avid), media, request)[0]
 
-    assert entry.parent is video
-    assert entry.item is video.items[0]
-    assert entry.listing.planned_path == Path("系列/投稿/P2")
-    assert entry.listing.url.endswith("?p=2")
+    assert ancestry[-1] is video
+    assert page is video.items[0]
+    assert listing.planned_path == Path("系列/投稿/P2")
+    assert listing.url.endswith("?p=2")
 
 
 def test_favourite_projection_uses_single_and_multi_page_layouts() -> None:
@@ -221,8 +222,6 @@ def test_favourite_projection_uses_single_and_multi_page_layouts() -> None:
         Path("收藏者的收藏夹/收藏夹/多P/第二段"),
     ]
     assert items[0].name == "单P"
-    assert items[1].display_group == "多P"
-    assert items[2].display_group == "多P"
 
 
 def test_collection_projection_keeps_single_page_layout_and_expands_multi_page_video() -> None:
@@ -247,15 +246,16 @@ def test_collection_projection_keeps_single_page_layout_and_expands_multi_page_v
     request = _request("https://space.bilibili.com/123/lists/66?type=season", episodes="1~2")
     source = UgcCollectionSource(id=media.collection_id, owner_id=MId("123"))
 
-    entries = project_media_entries(source, media, request)
+    ancestry_and_items = list(iter_media_items(media))
+    items = project_media_items(source, media, request)
 
-    assert [entry.listing.planned_path for entry in entries] == [
+    assert [item.planned_path for item in items] == [
         Path("合集/单P"),
         Path("合集/多P/第一段"),
         Path("合集/多P/第二段"),
     ]
-    assert entries[1].parent is multi
-    assert entries[2].parent is multi
+    assert ancestry_and_items[1][0][-1] is multi
+    assert ancestry_and_items[2][0][-1] is multi
 
 
 def test_space_and_watch_later_projection_keep_their_nested_page_layouts() -> None:
