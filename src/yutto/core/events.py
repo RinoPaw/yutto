@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from yutto.core.result import ItemSkipReason, ResolvedItem
+    from yutto.core.result import ItemSkipReason
     from yutto.media.codec import AudioCodec, VideoCodec
     from yutto.media.quality import AudioQuality, VideoQuality
 
@@ -86,13 +86,6 @@ class DownloadArtifactCreated:
     path: Path
 
 
-@dataclass(frozen=True, slots=True)
-class DownloadItemListed:
-    """One episode enumerated during a resolve run."""
-
-    item: ResolvedItem
-
-
 DownloadEvent: TypeAlias = (
     DownloadBatchStarted
     | DownloadRequestQueued
@@ -101,7 +94,6 @@ DownloadEvent: TypeAlias = (
     | DownloadMediaSelected
     | DownloadItemSkipped
     | DownloadArtifactCreated
-    | DownloadItemListed
 )
 
 
