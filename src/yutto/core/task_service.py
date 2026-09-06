@@ -7,7 +7,6 @@ from yutto.core.events import (
     DownloadBatchStarted,
     DownloadEvent,
     DownloadEventSink,
-    DownloadItemListed,
     DownloadItemSkipped,
     DownloadMediaSelected,
     DownloadProgress,
@@ -16,7 +15,6 @@ from yutto.core.events import (
 )
 from yutto.core.request import DownloadRequest
 from yutto.core.result import DownloadResult, ResolveResult
-from yutto.core.serialization import listing_item_to_wire
 from yutto.runtime import TaskRuntime
 
 if TYPE_CHECKING:
@@ -229,7 +227,5 @@ def _encode_runtime_event(event: DownloadEvent) -> tuple[str, dict[str, object]]
             return "item_skipped", {"item": item, "reason": reason.value}
         case DownloadArtifactCreated(item=item, path=path):
             return "artifact_created", {"path": path.as_posix(), "item": item}
-        case DownloadItemListed(item=item):
-            return "item_listed", listing_item_to_wire(item)
         case _ as unreachable:
             assert_never(unreachable)
