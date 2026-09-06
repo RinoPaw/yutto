@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
 
-from tests.test_processor.test_download_result import make_audio, make_request, make_resource_only_episode
+from tests.test_processor.test_download_result import make_audio, make_request, make_resource_only_entry
 from yutto.core.events import DownloadMediaSelected, SelectedAudioStream, SelectedVideoStream
 from yutto.core.operation import bind_download_event_sink
 from yutto.downloader.executor import emit_streams_selected
@@ -13,8 +14,9 @@ from yutto.downloader.planner import DownloadPlan, DownloadPlanner
 
 if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.types import EpisodeData, VideoUrlMeta
+    from yutto.resource import DownloadableEntry
+    from yutto.stream import AudioCodec, VideoCodec
+    from yutto.types import VideoUrlMeta
 
 pytestmark = pytest.mark.processor
 
@@ -42,11 +44,12 @@ def make_plan(
     audio_only_format: AudioOnlyFormat = "infer",
     path: Path = Path("series/episode"),
     use_output_as_temporary: bool = False,
-) -> tuple[EpisodeData, DownloadRequest, DownloadPlan]:
-    episode = make_resource_only_episode()
-    episode["info"]["path"] = path
-    episode["videos"] = [make_video(video_codec)] if video_codec is not None else []
-    episode["audios"] = [make_audio(audio_codec)] if audio_codec is not None else []
+) -> tuple[DownloadableEntry, DownloadRequest, DownloadPlan]:
+    entry = replace(
+        make_resource_only_entry(),
+        videos=(make_video(video_codec),) if video_codec is not None else (),
+        audios=(make_audio(audio_codec),) if audio_codec is not None else (),
+    )
     request = make_request(
         tmp_path,
         video=video_codec is not None,
@@ -61,7 +64,7 @@ def make_plan(
     if use_output_as_temporary:
         request.output.temporary_directory = None
     request.danmaku.block_keyword_patterns = ["original-pattern"]
-    return episode, request, DownloadPlanner().plan(episode, request)
+    return entry, request, DownloadPlanner().plan(entry, path, request)
 
 
 @pytest.mark.parametrize(
@@ -96,9 +99,9 @@ def test_planner_resolves_output_without_io(
 
 
 def test_planner_snapshots_inputs_without_exposing_signed_urls(tmp_path: Path):
-    episode, request, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
-    episode["videos"][0]["mirrors"].append("https://later.example.test/video")
-    episode["audios"][0]["mirrors"].append("https://later.example.test/audio")
+    entry, request, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
+    entry.videos[0]["mirrors"].append("https://later.example.test/video")
+    entry.audios[0]["mirrors"].append("https://later.example.test/audio")
     request.danmaku.block_keyword_patterns.append("later-pattern")
 
     assert plan.video is not None
@@ -111,7 +114,7 @@ def test_planner_snapshots_inputs_without_exposing_signed_urls(tmp_path: Path):
 
 
 def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_path: Path):
-    episode, _, plan = make_plan(tmp_path, video_codec="av1", audio_codec="mp4a")
+    entry, _, plan = make_plan(tmp_path, video_codec="av1", audio_codec="mp4a")
     events = []
 
     class Sink:
@@ -119,7 +122,7 @@ def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_pa
             events.append(event)
 
     with bind_download_event_sink(Sink()):
-        emit_streams_selected(episode, plan)
+        emit_streams_selected(entry, plan)
 
     assert events == [
         DownloadMediaSelected(

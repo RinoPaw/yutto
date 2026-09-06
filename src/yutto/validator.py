@@ -8,8 +8,7 @@ import biliass
 
 from yutto.auth import format_auth_inline, resolve_auth
 from yutto.exceptions import ErrorCode
-from yutto.input_parser import validate_batch_selection
-from yutto.media.codec import audio_codec_priority_default, video_codec_priority_default
+from yutto.stream import audio_codec_priority_default, video_codec_priority_default
 from yutto.utils.console.colorful import set_no_color
 from yutto.utils.console.logger import Logger, set_logger_debug
 from yutto.utils.fetcher import resolve_proxy
@@ -19,7 +18,7 @@ if TYPE_CHECKING:
     import argparse
 
     from yutto.auth import AuthInfo
-    from yutto.media.codec import VideoCodec
+    from yutto.stream import VideoCodec
 
 
 def hydrate_auth(args: argparse.Namespace) -> AuthInfo | None:
@@ -148,8 +147,3 @@ def validate_basic_arguments(args: argparse.Namespace):
     if not args.require_cover and args.save_cover:
         Logger.warning("没有下载封面的情况下是无法保留封面的哦～")
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
-
-
-def validate_batch_arguments(args: argparse.Namespace):
-    """检查批量下载相关选项"""
-    validate_batch_selection(args.episodes)

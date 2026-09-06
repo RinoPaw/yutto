@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.downloader.planner import DownloadPlan
-    from yutto.types import EpisodeData
+    from yutto.resource import DownloadableEntry
     from yutto.utils.danmaku import DanmakuOptions
 
 
@@ -33,13 +33,13 @@ class WrittenResource:
 class ArtifactWriter:
     """Own resource sidecars and temporary muxing resources."""
 
-    def write(self, episode_data: EpisodeData, plan: DownloadPlan) -> Iterator[WrittenResource]:
+    def write(self, entry: DownloadableEntry, plan: DownloadPlan) -> Iterator[WrittenResource]:
         resources = plan.resources
 
         if resources.subtitle_languages:
             paths = tuple(
                 write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
-                for subtitle in episode_data["subtitles"]
+                for subtitle in entry.subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
@@ -50,7 +50,7 @@ class ArtifactWriter:
         if resources.has_danmaku:
             paths = tuple(
                 write_danmaku(
-                    episode_data["danmaku"],
+                    entry.danmaku,
                     plan.paths.output,
                     resources.danmaku_height,
                     resources.danmaku_width,
@@ -64,7 +64,7 @@ class ArtifactWriter:
             )
 
         if resources.has_metadata:
-            metadata = episode_data["metadata"]
+            metadata = entry.metadata
             assert metadata is not None
             path = write_metadata(
                 metadata,
@@ -77,7 +77,7 @@ class ArtifactWriter:
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
         if resources.has_cover:
-            cover_data = episode_data["cover_data"]
+            cover_data = entry.cover_data
             assert cover_data is not None
             plan.paths.cover.write_bytes(cover_data)
             if resources.save_cover:
@@ -87,7 +87,7 @@ class ArtifactWriter:
         if resources.has_chapter_info:
             write_chapter_info(
                 plan.item,
-                episode_data["chapter_info_data"],
+                list(entry.chapter_info_data),
                 plan.paths.chapter_info,
             )
 

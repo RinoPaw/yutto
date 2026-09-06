@@ -125,7 +125,7 @@ def _download_request_defaults_from_settings(settings: YuttoSettings) -> dict[st
         },
         "scope": {"batch": False, "with_extra_episodes": settings.batch.with_extra_episodes},
         "selection": {
-            "episodes": "1~-1",
+            "episodes": None,
             "skip_preview": settings.batch.skip_preview,
             "start_time": settings.batch.batch_filter_start_time,
             "end_time": settings.batch.batch_filter_end_time,

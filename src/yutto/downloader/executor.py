@@ -21,26 +21,26 @@ from yutto.media.quality import audio_quality_map, video_quality_map
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.downloader.planner import DownloadPlan
-    from yutto.types import EpisodeData
+    from yutto.resource import DownloadableEntry
 
 
 class DownloadExecutor:
-    """Execute one immutable decision plan against its extractor payload."""
+    """Execute one immutable decision plan against resolved resources."""
 
     async def execute(
         self,
         scope: ExecutionScope,
-        episode_data: EpisodeData,
+        entry: DownloadableEntry,
         plan: DownloadPlan,
     ) -> ItemResult:
         plan.paths.output_dir.mkdir(parents=True, exist_ok=True)
         plan.paths.temporary_dir.mkdir(parents=True, exist_ok=True)
-        emit_streams_selected(episode_data, plan)
+        emit_streams_selected(entry, plan)
 
         artifacts: list[Artifact] = []
         artifact_writer = ArtifactWriter()
         emit_download_event(DownloadStageChanged(name=DownloadStage.WRITING_RESOURCES, item=plan.item))
-        for resource in artifact_writer.write(episode_data, plan):
+        for resource in artifact_writer.write(entry, plan):
             artifacts.extend(resource.artifacts)
             if resource.kind is ArtifactKind.SUBTITLE:
                 emit_download_report(f"{', '.join(resource.labels)} 字幕已全部生成", badge="字幕")
@@ -114,7 +114,7 @@ class DownloadExecutor:
         )
 
 
-def emit_streams_selected(episode_data: EpisodeData, plan: DownloadPlan) -> None:
+def emit_streams_selected(entry: DownloadableEntry, plan: DownloadPlan) -> None:
     emit_download_event(
         DownloadMediaSelected(
             item=plan.item,
@@ -140,7 +140,7 @@ def emit_streams_selected(episode_data: EpisodeData, plan: DownloadPlan) -> None
             ),
         )
     )
-    videos = episode_data["videos"]
+    videos = entry.videos
     selected_video_index = plan.video.index if plan.video is not None else -1
     if not videos:
         emit_download_report("不包含任何视频流")
@@ -159,7 +159,7 @@ def emit_streams_selected(episode_data: EpisodeData, plan: DownloadPlan) -> None
             )
             emit_download_report(message, color=ReportColor.BLUE if selected else None)
 
-    audios = episode_data["audios"]
+    audios = entry.audios
     selected_audio_index = plan.audio.index if plan.audio is not None else -1
     if not audios:
         emit_download_report("不包含任何音频流")

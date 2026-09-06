@@ -2,40 +2,22 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import pytest
 from returns.result import Success
 
 import yutto.__main__ as main_module
 import yutto.download_manager as download_manager_module
-import yutto.extractor.bangumi as bangumi_module
-import yutto.extractor.cheese as cheese_module
 from yutto._native import InvalidUrlError
 from yutto.core.execution import ExecutionScope
 from yutto.core.request import DownloadRequest
 from yutto.download_manager import DownloadManager
-from yutto.exceptions import (
-    EpisodeNotFoundError,
-    ErrorCode,
-    NotLoginError,
-    WrongArgumentError,
-    WrongUrlError,
-    YuttoBaseException,
-)
-from yutto.extractor.bangumi import BangumiExtractor
-from yutto.extractor.cheese import CheeseExtractor
-from yutto.input_parser import parse_episodes_selection
-from yutto.types import SeasonId
+from yutto.exceptions import ErrorCode, NotLoginError, WrongUrlError, YuttoBaseException
 from yutto.utils.fetcher import Fetcher
-from yutto.utils.filter import PublicationTimeFilter
 from yutto.utils.functional import as_sync
-from yutto.validator import validate_batch_selection
 
 pytestmark = pytest.mark.processor
-
-if TYPE_CHECKING:
-    from yutto.types import ExtractorOptions
 
 
 def make_request(url: str = "BV1structured") -> DownloadRequest:
@@ -48,34 +30,6 @@ def assert_error(error: YuttoBaseException, message: str, code: ErrorCode) -> No
     assert error.code is code
 
 
-@pytest.mark.processor
-def test_selection_validation_raises_structured_argument_errors():
-    with pytest.raises(WrongArgumentError) as exc_info:
-        validate_batch_selection("1,,2")
-    assert_error(
-        exc_info.value,
-        "选集参数（1,,2）格式不正确呀～重新检查一下下～",
-        ErrorCode.WRONG_ARGUMENT_ERROR,
-    )
-
-    with pytest.raises(WrongArgumentError) as exc_info:
-        parse_episodes_selection("0", 12)
-    assert_error(
-        exc_info.value,
-        "不可使用 0 作为剧集号（剧集号从 1 开始计算）",
-        ErrorCode.WRONG_ARGUMENT_ERROR,
-    )
-
-    with pytest.raises(WrongArgumentError) as exc_info:
-        parse_episodes_selection("4~2", 12)
-    assert_error(
-        exc_info.value,
-        "终点值（2）应不小于起点值（4）",
-        ErrorCode.WRONG_ARGUMENT_ERROR,
-    )
-
-
-@pytest.mark.processor
 @as_sync
 async def test_manager_raises_login_error(monkeypatch: pytest.MonkeyPatch):
     async def reject_login(scope: ExecutionScope, requirements: dict[str, bool]) -> bool:
@@ -95,16 +49,11 @@ async def test_manager_raises_login_error(monkeypatch: pytest.MonkeyPatch):
     )
 
 
-@pytest.mark.processor
 @as_sync
 async def test_manager_raises_url_errors_without_network(monkeypatch: pytest.MonkeyPatch):
-    async def accept_login(scope: ExecutionScope, requirements: dict[str, bool]) -> bool:
-        return True
-
     async def reject_url(scope: ExecutionScope, url: str):
         raise InvalidUrlError("invalid")
 
-    monkeypatch.setattr(download_manager_module, "validate_user_info", accept_login)
     monkeypatch.setattr(Fetcher, "get_redirected_url", reject_url)
     with pytest.raises(WrongUrlError) as exc_info:
         await DownloadManager().process_request(
@@ -119,16 +68,11 @@ async def test_manager_raises_url_errors_without_network(monkeypatch: pytest.Mon
     )
 
 
-@pytest.mark.processor
 @as_sync
 async def test_manager_reports_unmatched_url_as_structured_error(monkeypatch: pytest.MonkeyPatch):
-    async def accept_login(scope: ExecutionScope, requirements: dict[str, bool]) -> bool:
-        return True
-
     async def keep_url(scope: ExecutionScope, url: str):
         return Success(url)
 
-    monkeypatch.setattr(download_manager_module, "validate_user_info", accept_login)
     monkeypatch.setattr(Fetcher, "get_redirected_url", keep_url)
 
     with pytest.raises(WrongUrlError) as exc_info:
@@ -139,63 +83,9 @@ async def test_manager_reports_unmatched_url_as_structured_error(monkeypatch: py
 
     assert_error(
         exc_info.value,
-        "url 不正确，也许该 url 仅支持批量下载，如果是这样，请使用参数 -b～",
+        "无法识别 url（https://example.com/unsupported）",
         ErrorCode.WRONG_URL_ERROR,
     )
-
-
-EMPTY_EXTRACTOR_OPTIONS: ExtractorOptions = {
-    "episodes": "1",
-    "with_extra_episodes": False,
-    "skip_preview": False,
-    "require_video": True,
-    "require_audio": True,
-    "require_danmaku": True,
-    "require_subtitle": True,
-    "require_metadata": False,
-    "require_cover": True,
-    "require_chapter_info": True,
-    "danmaku_format": "ass",
-    "subpath_template": "{auto}",
-    "ai_translation_language": None,
-    "publication_time_filter": PublicationTimeFilter.from_strings(),
-}
-
-
-@pytest.mark.processor
-@pytest.mark.parametrize(
-    ("module", "extractor_type", "list_getter_name", "url"),
-    [
-        (bangumi_module, BangumiExtractor, "get_bangumi_list", "https://www.bilibili.com/bangumi/play/ep1"),
-        (cheese_module, CheeseExtractor, "get_cheese_list", "https://www.bilibili.com/cheese/play/ep1"),
-    ],
-)
-@as_sync
-async def test_single_extractors_raise_when_episode_is_missing(
-    monkeypatch: pytest.MonkeyPatch,
-    module: Any,
-    extractor_type: type[BangumiExtractor | CheeseExtractor],
-    list_getter_name: str,
-    url: str,
-):
-    async def get_season(scope: ExecutionScope, episode_id: Any) -> SeasonId:
-        return SeasonId("1")
-
-    async def get_empty_list(scope: ExecutionScope, season_id: SeasonId):
-        return {"title": "空列表", "pages": []}
-
-    monkeypatch.setattr(module, "get_season_id_by_episode_id", get_season)
-    monkeypatch.setattr(module, list_getter_name, get_empty_list)
-    extractor = extractor_type()
-    assert extractor.match(url)
-
-    with pytest.raises(EpisodeNotFoundError) as exc_info:
-        await extractor.extract(
-            ExecutionScope(cast("Any", object())),
-            EMPTY_EXTRACTOR_OPTIONS,
-        )
-
-    assert_error(exc_info.value, "在列表中未找到该剧集", ErrorCode.EPISODE_NOT_FOUND_ERROR)
 
 
 def configure_download_cli(
@@ -236,7 +126,6 @@ def configure_download_cli(
     return rendered_errors, rendered_info
 
 
-@pytest.mark.processor
 def test_download_cli_renders_structured_error_once(monkeypatch: pytest.MonkeyPatch):
     message = "url 不正确呦～"
     rendered_errors, rendered_info = configure_download_cli(monkeypatch, WrongUrlError(message))
@@ -249,7 +138,6 @@ def test_download_cli_renders_structured_error_once(monkeypatch: pytest.MonkeyPa
     assert rendered_info == []
 
 
-@pytest.mark.processor
 def test_download_cli_renders_error_badge_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -267,7 +155,6 @@ def test_download_cli_renders_error_badge_without_traceback(
     assert "Traceback" not in captured.out + captured.err
 
 
-@pytest.mark.processor
 def test_download_cli_does_not_treat_system_exit_as_pause(monkeypatch: pytest.MonkeyPatch):
     rendered_errors, rendered_info = configure_download_cli(
         monkeypatch,
@@ -282,7 +169,6 @@ def test_download_cli_does_not_treat_system_exit_as_pause(monkeypatch: pytest.Mo
     assert rendered_info == []
 
 
-@pytest.mark.processor
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt(), asyncio.CancelledError()])
 def test_download_cli_keeps_pause_mapping(monkeypatch: pytest.MonkeyPatch, interruption: BaseException):
     rendered_errors, rendered_info = configure_download_cli(monkeypatch, interruption)
