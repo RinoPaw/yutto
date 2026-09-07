@@ -24,7 +24,13 @@ class MediaMuxer:
     def __init__(self, ffmpeg: FFmpegRunner | None = None):
         self._ffmpeg = ffmpeg
 
-    async def mux(self, plan: DownloadPlan) -> None:
+    async def mux(
+        self,
+        plan: DownloadPlan,
+        *,
+        has_cover: bool = False,
+        has_chapter_info: bool = False,
+    ) -> None:
         command_builder = FFmpegCommandBuilder()
         output = command_builder.add_output(plan.paths.output)
         emit_download_report("开始合并……")
@@ -41,12 +47,12 @@ class MediaMuxer:
             output.use(audio_input)
             output.set_acodec(plan.audio_save_codec)
 
-        if plan.video is not None and plan.resources.has_cover:
+        if plan.video is not None and has_cover:
             cover_input = command_builder.add_video_input(plan.paths.cover)
             output.use(cover_input)
             output.set_cover(cover_input)
 
-        if plan.video is not None and plan.resources.has_chapter_info:
+        if plan.video is not None and has_chapter_info:
             metadata_input = command_builder.add_metadata_input(plan.paths.chapter_info)
             output.use(metadata_input)
 
