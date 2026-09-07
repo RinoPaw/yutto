@@ -15,22 +15,24 @@ if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
     from yutto.core.result import ItemResult
     from yutto.downloader.path_leases import DownloadPathLeasePool
-    from yutto.resource import DownloadableEntry
+    from yutto.resource import ResourceManifest
+    from yutto.utils.metadata import ItemMetaData
 
 
 async def process_download(
     scope: ExecutionScope,
-    entry: DownloadableEntry,
+    manifest: ResourceManifest,
+    metadata: ItemMetaData,
     path: Path,
     request: DownloadRequest,
     *,
     path_leases: DownloadPathLeasePool | None = None,
 ) -> ItemResult:
-    """Plan and execute one resolved media item while keeping planning side-effect free."""
+    """Plan and execute one MediaItem from its resolved resource manifest."""
     item = path.name
     emit_download_report(f"开始处理视频 {item}")
     emit_download_event(DownloadStageChanged(name=DownloadStage.PREPARING, item=item))
-    plan = DownloadPlanner().plan(entry, path, request)
+    plan = DownloadPlanner().plan(manifest, path, request)
     lease = (
         path_leases.lease(
             (
@@ -42,4 +44,4 @@ async def process_download(
         else nullcontext()
     )
     async with lease:
-        return await DownloadExecutor().execute(scope, entry, plan)
+        return await DownloadExecutor().execute(scope, manifest, metadata, plan)
