@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from yutto.core.events import (
@@ -15,32 +16,42 @@ from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, 
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.artifact_writer import ArtifactWriter
 from yutto.downloader.media_muxer import MediaMuxer
+from yutto.downloader.resource_fetcher import fetch_resources
 from yutto.downloader.transfer import cleanup_temporary_media, download_video_and_audio
 from yutto.media.quality import audio_quality_map, video_quality_map
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.downloader.planner import DownloadPlan
-    from yutto.resource import DownloadableEntry
+    from yutto.resource import ResourceManifest
+    from yutto.utils.metadata import ItemMetaData
 
 
 class DownloadExecutor:
-    """Execute one immutable decision plan against resolved resources."""
+    """Execute one immutable DownloadPlan and fetch the resources it references."""
 
     async def execute(
         self,
         scope: ExecutionScope,
-        entry: DownloadableEntry,
+        manifest: ResourceManifest,
+        metadata: ItemMetaData,
         plan: DownloadPlan,
     ) -> ItemResult:
         plan.paths.output_dir.mkdir(parents=True, exist_ok=True)
         plan.paths.temporary_dir.mkdir(parents=True, exist_ok=True)
-        emit_streams_selected(entry, plan)
+        emit_streams_selected(manifest, plan)
+
+        fetched = await fetch_resources(scope, manifest)
+        metadata_for_write = (
+            replace(metadata, chapter_info_data=list(fetched.chapter_info_data))
+            if fetched.chapter_info_data
+            else metadata
+        )
 
         artifacts: list[Artifact] = []
         artifact_writer = ArtifactWriter()
         emit_download_event(DownloadStageChanged(name=DownloadStage.WRITING_RESOURCES, item=plan.item))
-        for resource in artifact_writer.write(entry, plan):
+        for resource in artifact_writer.write(fetched, metadata_for_write, plan):
             artifacts.extend(resource.artifacts)
             if resource.kind is ArtifactKind.SUBTITLE:
                 emit_download_report(f"{', '.join(resource.labels)} 字幕已全部生成", badge="字幕")
@@ -101,7 +112,11 @@ class DownloadExecutor:
                 f"输出容器 {plan.paths.output.suffix} 无法直接封装 {plan.audio.codec} 音频，"
                 f"将自动转码为 {plan.audio_save_codec}",
             )
-        await MediaMuxer().mux(plan)
+        await MediaMuxer().mux(
+            plan,
+            has_cover=fetched.cover_data is not None,
+            has_chapter_info=bool(fetched.chapter_info_data),
+        )
 
         cleanup_temporary_media(plan)
         artifact_writer.cleanup_temporary(plan)
@@ -114,7 +129,7 @@ class DownloadExecutor:
         )
 
 
-def emit_streams_selected(entry: DownloadableEntry, plan: DownloadPlan) -> None:
+def emit_streams_selected(manifest: ResourceManifest, plan: DownloadPlan) -> None:
     emit_download_event(
         DownloadMediaSelected(
             item=plan.item,
@@ -140,7 +155,7 @@ def emit_streams_selected(entry: DownloadableEntry, plan: DownloadPlan) -> None:
             ),
         )
     )
-    videos = entry.videos
+    videos = manifest.videos
     selected_video_index = plan.video.index if plan.video is not None else -1
     if not videos:
         emit_download_report("不包含任何视频流")
@@ -159,7 +174,7 @@ def emit_streams_selected(entry: DownloadableEntry, plan: DownloadPlan) -> None:
             )
             emit_download_report(message, color=ReportColor.BLUE if selected else None)
 
-    audios = entry.audios
+    audios = manifest.audios
     selected_audio_index = plan.audio.index if plan.audio is not None else -1
     if not audios:
         emit_download_report("不包含任何音频流")
