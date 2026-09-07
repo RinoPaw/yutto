@@ -15,8 +15,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.downloader.planner import DownloadPlan
-    from yutto.resource import DownloadableEntry
+    from yutto.downloader.resource_fetcher import FetchedResources
     from yutto.utils.danmaku import DanmakuOptions
+    from yutto.utils.metadata import ItemMetaData
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,24 +34,29 @@ class WrittenResource:
 class ArtifactWriter:
     """Own resource sidecars and temporary muxing resources."""
 
-    def write(self, entry: DownloadableEntry, plan: DownloadPlan) -> Iterator[WrittenResource]:
+    def write(
+        self,
+        fetched: FetchedResources,
+        metadata: ItemMetaData,
+        plan: DownloadPlan,
+    ) -> Iterator[WrittenResource]:
         resources = plan.resources
 
-        if resources.subtitle_languages:
+        if fetched.subtitles:
             paths = tuple(
                 write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
-                for subtitle in entry.subtitles
+                for subtitle in fetched.subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
                 paths=paths,
-                labels=resources.subtitle_languages,
+                labels=tuple(subtitle["lang"] for subtitle in fetched.subtitles),
             )
 
-        if resources.has_danmaku:
+        if fetched.danmaku["data"]:
             paths = tuple(
                 write_danmaku(
-                    entry.danmaku,
+                    fetched.danmaku,
                     plan.paths.output,
                     resources.danmaku_height,
                     resources.danmaku_width,
@@ -60,12 +66,10 @@ class ArtifactWriter:
             yield WrittenResource(
                 kind=ArtifactKind.DANMAKU,
                 paths=paths,
-                labels=(str(resources.danmaku_save_type),),
+                labels=(str(fetched.danmaku["save_type"]),),
             )
 
         if resources.has_metadata:
-            metadata = entry.metadata
-            assert metadata is not None
             path = write_metadata(
                 metadata,
                 plan.paths.output,
@@ -76,26 +80,22 @@ class ArtifactWriter:
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
-        if resources.has_cover:
-            cover_data = entry.cover_data
-            assert cover_data is not None
-            plan.paths.cover.write_bytes(cover_data)
+        if fetched.cover_data is not None:
+            plan.paths.cover.write_bytes(fetched.cover_data)
             if resources.save_cover:
-                plan.paths.saved_cover.write_bytes(cover_data)
+                plan.paths.saved_cover.write_bytes(fetched.cover_data)
                 yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
-        if resources.has_chapter_info:
+        if fetched.chapter_info_data:
             write_chapter_info(
                 plan.item,
-                list(entry.chapter_info_data),
+                list(fetched.chapter_info_data),
                 plan.paths.chapter_info,
             )
 
     def cleanup_temporary(self, plan: DownloadPlan) -> None:
-        if plan.resources.has_chapter_info:
-            plan.paths.chapter_info.unlink(missing_ok=True)
-        if plan.resources.has_cover:
-            plan.paths.cover.unlink(missing_ok=True)
+        plan.paths.chapter_info.unlink(missing_ok=True)
+        plan.paths.cover.unlink(missing_ok=True)
 
 
 def create_danmaku_options(plan: DownloadPlan) -> DanmakuOptions:
