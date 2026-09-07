@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 class FetchedResources:
     """Transient resource bodies fetched from a ResourceManifest during execution."""
 
-    subtitles: tuple[MultiLangSubtitle, ...] = ()
     danmaku: DanmakuData
+    subtitles: tuple[MultiLangSubtitle, ...] = ()
     cover_data: bytes | None = None
     chapter_info_data: tuple[ChapterInfoData, ...] = ()
 
@@ -47,9 +47,7 @@ async def _fetch_danmaku(scope: ExecutionScope, manifest: ResourceManifest) -> D
         assert all(item is not None for item in data)
         return {"source_type": source_type, "save_type": save_type, "data": data}
 
-    data = await asyncio.gather(
-        *(Fetcher.fetch_bin(scope, url) for url in manifest.danmaku_urls)
-    )
+    data = await asyncio.gather(*(Fetcher.fetch_bin(scope, url) for url in manifest.danmaku_urls))
     values = [unwrap_fetch_result(result) for result in data]
     assert all(item is not None for item in values)
     return {"source_type": source_type, "save_type": save_type, "data": values}
@@ -73,9 +71,7 @@ async def _fetch_chapter_info(scope: ExecutionScope, url: str | None) -> tuple[C
 async def fetch_resources(scope: ExecutionScope, manifest: ResourceManifest) -> FetchedResources:
     """Fetch every body referenced by a ResourceManifest; do not make download-policy decisions."""
 
-    subtitle_results = await asyncio.gather(
-        *(_fetch_subtitle(scope, lang, url) for lang, url in manifest.subtitles)
-    )
+    subtitle_results = await asyncio.gather(*(_fetch_subtitle(scope, lang, url) for lang, url in manifest.subtitles))
     subtitles = tuple(subtitle for subtitle in subtitle_results if subtitle is not None)
     danmaku = await _fetch_danmaku(scope, manifest)
     cover_data = (
@@ -85,8 +81,8 @@ async def fetch_resources(scope: ExecutionScope, manifest: ResourceManifest) -> 
     )
     chapter_info_data = await _fetch_chapter_info(scope, manifest.chapter_info_url)
     return FetchedResources(
-        subtitles=subtitles,
         danmaku=danmaku,
+        subtitles=subtitles,
         cover_data=cover_data,
         chapter_info_data=chapter_info_data,
     )
