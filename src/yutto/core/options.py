@@ -23,7 +23,6 @@ class ResourceOptions:
     audio: bool = True
     danmaku: bool = True
     subtitle: bool = True
-    metadata: bool = False
     cover: bool = True
     chapter_info: bool = True
     ai_translation_language: str | None = None
@@ -51,7 +50,6 @@ def resource_options_from_request(request: DownloadRequest) -> ResourceOptions:
         audio=resources.audio,
         danmaku=resources.danmaku,
         subtitle=resources.subtitle,
-        metadata=resources.metadata,
         cover=resources.cover,
         chapter_info=resources.chapter_info,
         ai_translation_language=resources.ai_translation_language,
