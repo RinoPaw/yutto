@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.core.request import DownloadRequest
-    from yutto.resource import DownloadableEntry
+    from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
@@ -72,7 +72,7 @@ class MetadataPlan:
 
 @dataclass(frozen=True, slots=True)
 class DownloadResources:
-    """Frozen write policy; resolved payloads stay in DownloadableEntry."""
+    """Frozen write policy derived from the request and ResourceManifest."""
 
     subtitle_languages: tuple[str, ...]
     has_danmaku: bool
@@ -111,9 +111,9 @@ class DownloadPlan:
 
 
 class DownloadPlanner:
-    """Turn resolved resources plus a path and request into a pure download plan."""
+    """Turn a ResourceManifest plus a path and request into a pure download plan."""
 
-    def plan(self, resources: DownloadableEntry, path: Path, request: DownloadRequest) -> DownloadPlan:
+    def plan(self, resources: ResourceManifest, path: Path, request: DownloadRequest) -> DownloadPlan:
         video_candidate = select_video(
             resources.videos,
             request.stream.video_quality,
@@ -158,12 +158,12 @@ class DownloadPlanner:
             else -1
         )
         resource_plan = DownloadResources(
-            subtitle_languages=tuple(subtitle["lang"] for subtitle in resources.subtitles),
-            has_danmaku=bool(resources.danmaku["data"]),
-            danmaku_save_type=resources.danmaku["save_type"],
-            has_metadata=resources.metadata is not None,
-            has_cover=resources.cover_data is not None,
-            has_chapter_info=bool(resources.chapter_info_data),
+            subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
+            has_danmaku=bool(resources.danmaku_urls),
+            danmaku_save_type=resources.danmaku_save_type,
+            has_metadata=request.resources.metadata,
+            has_cover=resources.cover_url is not None,
+            has_chapter_info=resources.chapter_info_url is not None,
             save_cover=request.resources.save_cover,
             danmaku_width=video_candidate["width"] if video_candidate is not None else 1920,
             danmaku_height=video_candidate["height"] if video_candidate is not None else 1080,
