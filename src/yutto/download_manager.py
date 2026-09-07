@@ -33,13 +33,12 @@ from yutto.listing import (
 from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
-from yutto.resource import resolve_media_item
+from yutto.resource import resolve_resource_manifest
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.filter import PublicationTimeFilter
-from yutto.utils.metadata import attach_chapter_info
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.core.request import DownloadRequest
@@ -93,21 +92,6 @@ async def _resolve_source(scope: ExecutionScope, value: str) -> MediaSource:
     if source := parse(redirected_value):
         return source
     raise WrongUrlError(f"无法识别 url（{redirected_value}）")
-
-
-def _iter_request_items(
-    media: Media,
-    request: DownloadRequest,
-) -> Iterator[tuple[MediaAncestry, MediaItem]]:
-    publication_time_filter = PublicationTimeFilter.from_strings(
-        request.selection.start_time,
-        request.selection.end_time,
-    )
-    filter_by_time = request.selection.start_time is not None or request.selection.end_time is not None
-    for ancestry, item in iter_media_items(media):
-        if filter_by_time and not publication_time_filter.matches(media_item_pubdate(ancestry, item)):
-            continue
-        yield ancestry, item
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,21 +152,8 @@ class DownloadManager:
             async with scope_factory.open(request) as scope:
                 outcome = await self.resolve_request(scope, request)
                 failures.extend(outcome.failures)
-                if outcome.media is None:
-                    continue
-
-                publication_time_filter = PublicationTimeFilter.from_strings(
-                    request.selection.start_time,
-                    request.selection.end_time,
-                )
-                filter_by_time = request.selection.start_time is not None or request.selection.end_time is not None
-                selected_media = filter_media_tree(
-                    outcome.media,
-                    lambda ancestry, item: not filter_by_time
-                    or publication_time_filter.matches(media_item_pubdate(ancestry, item)),
-                )
-                if selected_media is not None:
-                    media.append(selected_media)
+                if outcome.media is not None:
+                    media.append(outcome.media)
 
         if failures and not media:
             if len(failures) == 1:
@@ -209,7 +180,7 @@ class DownloadManager:
                 )
             return ()
 
-        download_list = tuple(_iter_request_items(outcome.media, request))
+        download_list = tuple(iter_media_items(outcome.media))
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
         current_display_group: str | None = None
         for ancestry, item in download_list:
@@ -246,7 +217,7 @@ class DownloadManager:
                 if not ancestry:
                     raise TypeError(f"downloadable media item has no parent: {type(item).__name__}")
                 try:
-                    resources = await resolve_media_item(
+                    manifest = await resolve_resource_manifest(
                         scope,
                         ancestry[-1],
                         item,
@@ -257,10 +228,6 @@ class DownloadManager:
                     if index + 1 < len(start_turns):
                         start_turns[index + 1].set()
                     return
-
-                metadata = resources.metadata
-                if metadata is not None and resources.chapter_info_data:
-                    attach_chapter_info(metadata, list(resources.chapter_info_data))
 
                 if request.output.enforce_directory_boundary:
                     ensure_output_path_is_scoped(
@@ -280,7 +247,8 @@ class DownloadManager:
                     start_turns[index + 1].set()
                 results[index] = await process_download(
                     scope,
-                    resources,
+                    manifest,
+                    item.metadata,
                     path,
                     request,
                     path_leases=self.path_leases,
@@ -302,7 +270,7 @@ class DownloadManager:
         scope: ExecutionScope,
         request: DownloadRequest,
     ) -> _ResolvedRequestOutcome:
-        """Resolve Parser -> MediaSource -> Media without flattening the media tree."""
+        """Resolve Parser -> MediaSource -> Media and apply generic Media filters."""
         source = await _resolve_source(scope, request.source.url)
         source_options = source_options_from_request(request)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
@@ -318,6 +286,17 @@ class DownloadManager:
         except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError, NotLoginError) as error:
             emit_download_report(error.message, ReportLevel.ERROR)
             return _ResolvedRequestOutcome(source=source, failures=(error,))
+
+        filter_by_time = request.selection.start_time is not None or request.selection.end_time is not None
+        if filter_by_time:
+            publication_time_filter = PublicationTimeFilter.from_strings(
+                request.selection.start_time,
+                request.selection.end_time,
+            )
+            media = filter_media_tree(
+                media,
+                lambda ancestry, item: publication_time_filter.matches(media_item_pubdate(ancestry, item)),
+            )
 
         return _ResolvedRequestOutcome(source=source, media=media)
 
