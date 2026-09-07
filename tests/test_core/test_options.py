@@ -26,7 +26,6 @@ def test_request_defaults_follow_internal_defaults() -> None:
     assert request.resources.audio == DEFAULT_RESOURCE_OPTIONS.audio
     assert request.resources.danmaku == DEFAULT_RESOURCE_OPTIONS.danmaku
     assert request.resources.subtitle == DEFAULT_RESOURCE_OPTIONS.subtitle
-    assert request.resources.metadata == DEFAULT_RESOURCE_OPTIONS.metadata
     assert request.resources.cover == DEFAULT_RESOURCE_OPTIONS.cover
     assert request.resources.chapter_info == DEFAULT_RESOURCE_OPTIONS.chapter_info
     assert request.resources.ai_translation_language == DEFAULT_RESOURCE_OPTIONS.ai_translation_language
@@ -36,7 +35,7 @@ def test_request_defaults_follow_internal_defaults() -> None:
     assert resource_options_from_request(request) == DEFAULT_RESOURCE_OPTIONS
 
 
-def test_metadata_resource_requests_tags() -> None:
+def test_metadata_resource_requests_tags_without_entering_resource_resolve_options() -> None:
     request = DownloadRequest.model_validate(
         {
             "source": {"url": "BV1D84y1t76J"},
@@ -45,6 +44,7 @@ def test_metadata_resource_requests_tags() -> None:
     )
 
     assert source_options_from_request(request).fetch_tags is True
+    assert not hasattr(resource_options_from_request(request), "metadata")
 
 
 def test_source_selection_is_parsed_at_request_boundary() -> None:
