@@ -14,8 +14,9 @@ from yutto.core.request import DownloadRequest
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.downloader import process_download
 from yutto.downloader.media_muxer import MediaMuxer
+from yutto.downloader.resource_fetcher import FetchedResources
 from yutto.exceptions import PostprocessingError
-from yutto.resource import DownloadableEntry
+from yutto.resource import ResourceManifest
 from yutto.utils.danmaku import write_danmaku
 from yutto.utils.functional import as_sync
 from yutto.utils.metadata import ItemMetaData
@@ -38,6 +39,8 @@ def make_request(
     video: bool = False,
     audio: bool = False,
     save_cover: bool = True,
+    metadata: bool = True,
+    chapter_info: bool = False,
 ) -> DownloadRequest:
     return DownloadRequest.model_validate(
         {
@@ -45,7 +48,8 @@ def make_request(
             "resources": {
                 "video": video,
                 "audio": audio,
-                "chapter_info": False,
+                "metadata": metadata,
+                "chapter_info": chapter_info,
                 "save_cover": save_cover,
             },
             "stream": {
@@ -64,24 +68,21 @@ def make_request(
     )
 
 
-def make_resource_only_entry() -> DownloadableEntry:
-    return DownloadableEntry(
-        videos=(),
-        audios=(),
-        subtitles=(
-            {
-                "lang": "zh-CN",
-                "lines": [{"content": "测试", "from": 0, "to": 1}],
-            },
-        ),
-        metadata=ItemMetaData(
-            title="测试",
-            show_title="测试",
-            original_filename="episode",
-        ),
-        danmaku={"source_type": "xml", "save_type": "xml", "data": ["<i />"]},
-        cover_data=b"cover",
-        chapter_info_data=(),
+def make_metadata() -> ItemMetaData:
+    return ItemMetaData(
+        title="测试",
+        show_title="测试",
+        original_filename="episode",
+    )
+
+
+def make_resource_only_entry() -> ResourceManifest:
+    return ResourceManifest(
+        subtitles=(("zh-CN", "https://example.test/subtitle.json"),),
+        danmaku_source_type="xml",
+        danmaku_save_type="xml",
+        danmaku_urls=("https://example.test/danmaku.xml",),
+        cover_url="https://example.test/cover.jpg",
     )
 
 
@@ -96,12 +97,45 @@ def make_audio(codec: AudioCodec = "mp4a") -> AudioUrlMeta:
     }
 
 
-def make_media_entry() -> DownloadableEntry:
+def make_media_entry() -> ResourceManifest:
     return replace(
         make_resource_only_entry(),
         audios=(make_audio(),),
-        chapter_info_data=({"start": 0, "end": 1, "content": "chapter"},),
+        chapter_info_url="https://example.test/chapters.json",
     )
+
+
+@pytest.fixture(autouse=True)
+def stub_fetched_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fetch_resources(_scope: ExecutionScope, manifest: ResourceManifest) -> FetchedResources:
+        subtitles = (
+            (
+                {
+                    "lang": "zh-CN",
+                    "lines": [{"content": "测试", "from": 0, "to": 1}],
+                },
+            )
+            if manifest.subtitles
+            else ()
+        )
+        danmaku = (
+            {"source_type": "xml", "save_type": manifest.danmaku_save_type, "data": ["<i />"]}
+            if manifest.danmaku_urls
+            else {"source_type": None, "save_type": None, "data": []}
+        )
+        chapters = (
+            ({"start": 0, "end": 1, "content": "chapter"},)
+            if manifest.chapter_info_url is not None
+            else ()
+        )
+        return FetchedResources(
+            danmaku=cast("DanmakuData", danmaku),
+            subtitles=cast("Any", subtitles),
+            cover_data=b"cover" if manifest.cover_url is not None else None,
+            chapter_info_data=chapters,
+        )
+
+    monkeypatch.setattr(executor_module, "fetch_resources", fetch_resources)
 
 
 @pytest.mark.parametrize("cancelled", [False, True], ids=["failure", "cancellation"])
@@ -131,8 +165,9 @@ async def test_interrupted_mux_keeps_resume_inputs(
         process_download(
             ExecutionScope(cast("Any", object())),
             make_media_entry(),
+            make_metadata(),
             ENTRY_PATH,
-            make_request(tmp_path, audio=True),
+            make_request(tmp_path, audio=True, chapter_info=True),
         )
     )
     if cancelled:
@@ -159,6 +194,7 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
     result = await process_download(
         ExecutionScope(cast("Any", object())),
         make_resource_only_entry(),
+        make_metadata(),
         ENTRY_PATH,
         make_request(tmp_path),
     )
@@ -182,8 +218,9 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
 async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(tmp_path: Path):
     entry = replace(
         make_media_entry(),
-        metadata=None,
-        danmaku={"source_type": None, "save_type": None, "data": []},
+        danmaku_source_type=None,
+        danmaku_save_type=None,
+        danmaku_urls=(),
     )
     output_path = tmp_path / "output/series/episode.m4a"
     subtitle_path = tmp_path / "output/series/episode.zh-CN.srt"
@@ -194,8 +231,9 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
     result = await process_download(
         ExecutionScope(cast("Any", object())),
         entry,
+        make_metadata(),
         ENTRY_PATH,
-        make_request(tmp_path, audio=True),
+        make_request(tmp_path, audio=True, metadata=False, chapter_info=True),
     )
 
     assert result == ItemResult(
@@ -215,8 +253,7 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
 
 @as_sync
 async def test_missing_requested_audio_does_not_clean_uncreated_video_file(tmp_path: Path):
-    entry = replace(
-        make_resource_only_entry(),
+    entry = ResourceManifest(
         videos=(
             {
                 "url": "https://example.test/video",
@@ -227,17 +264,14 @@ async def test_missing_requested_audio_does_not_clean_uncreated_video_file(tmp_p
                 "quality": 80,
             },
         ),
-        subtitles=(),
-        metadata=None,
-        danmaku={"source_type": None, "save_type": None, "data": []},
-        cover_data=None,
     )
 
     result = await process_download(
         ExecutionScope(cast("Any", object())),
         entry,
+        make_metadata(),
         ENTRY_PATH,
-        make_request(tmp_path, audio=True, save_cover=False),
+        make_request(tmp_path, audio=True, save_cover=False, metadata=False),
     )
 
     assert result == ItemResult(
