@@ -242,30 +242,30 @@ async def get_cheese_playurl(
     return _video_streams(dash.get("video") or []), _audio_streams(dash.get("audio") or [])
 
 
-def _absolute_subtitle_url(url: str) -> str:
-    return url if url.startswith(("http://", "https://")) else f"https:{url}"
-
-
-async def _get_subtitle_urls(
+async def _resolve_subtitles(
     scope: ExecutionScope,
-    url: str,
+    item: MediaItem,
     avid: AvId,
     cid: CId,
-    *,
-    warn_missing: bool,
 ) -> list[SubtitleResource]:
+    params = avid.to_dict()
+    if isinstance(item, CheeseEpisode):
+        url = f"https://api.bilibili.com/x/player/v2?cid={cid}&aid={params['aid']}&bvid={params['bvid']}"
+    else:
+        url = f"https://api.bilibili.com/x/player/wbi/v2?aid={params['aid']}&bvid={params['bvid']}&cid={cid}"
+
     resp_json = (await Fetcher.fetch_json(scope, url)).value_or(None)
     if resp_json is None:
         return []
     if not data_has_chained_keys(resp_json, ["data", "subtitle", "subtitles"]):
-        if warn_missing:
+        if not isinstance(item, UgcPage):
             emit_download_report(
                 f"无法获取该视频的字幕（{format_ids(avid, cid)}），原因：{resp_json.get('message')}",
                 ReportLevel.WARNING,
             )
         return []
 
-    results: list[SubtitleResource] = []
+    subtitles: list[SubtitleResource] = []
     for sub_info in resp_json["data"]["subtitle"]["subtitles"]:
         subtitle_url = sub_info["subtitle_url"]
         if subtitle_url is None or not subtitle_url.strip():
@@ -274,42 +274,24 @@ async def _get_subtitle_urls(
                 ReportLevel.WARNING,
             )
             continue
-        results.append((sub_info["lan_doc"], _absolute_subtitle_url(subtitle_url)))
-    return results
+        if not subtitle_url.startswith(("http://", "https://")):
+            subtitle_url = f"https:{subtitle_url}"
+        subtitles.append((sub_info["lan_doc"], subtitle_url))
+    return subtitles
 
 
-async def get_ugc_video_subtitle_urls(scope: ExecutionScope, avid: AvId, cid: CId) -> list[SubtitleResource]:
-    params = avid.to_dict()
-    url = f"https://api.bilibili.com/x/player/wbi/v2?aid={params['aid']}&bvid={params['bvid']}&cid={cid}"
-    return await _get_subtitle_urls(scope, url, avid, cid, warn_missing=False)
+async def _resolve_danmaku(
+    scope: ExecutionScope,
+    avid: AvId,
+    cid: CId,
+    save_type: DanmakuSaveType,
+) -> tuple[DanmakuSourceType, list[str]]:
+    source_type: DanmakuSourceType = (
+        "xml" if save_type == "xml" or not (await get_user_info(scope))["is_login"] else "protobuf"
+    )
+    if source_type == "xml":
+        return source_type, [f"http://comment.bilibili.com/{cid}.xml"]
 
-
-async def get_bangumi_subtitle_urls(scope: ExecutionScope, avid: AvId, cid: CId) -> list[SubtitleResource]:
-    params = avid.to_dict()
-    url = f"https://api.bilibili.com/x/player/wbi/v2?aid={params['aid']}&bvid={params['bvid']}&cid={cid}"
-    return await _get_subtitle_urls(scope, url, avid, cid, warn_missing=True)
-
-
-async def get_cheese_subtitle_urls(scope: ExecutionScope, avid: AvId, cid: CId) -> list[SubtitleResource]:
-    params = avid.to_dict()
-    url = f"https://api.bilibili.com/x/player/v2?cid={cid}&aid={params['aid']}&bvid={params['bvid']}"
-    return await _get_subtitle_urls(scope, url, avid, cid, warn_missing=True)
-
-
-def get_ugc_video_chapter_info_url(avid: AvId, cid: CId) -> str:
-    params = avid.to_dict()
-    return f"https://api.bilibili.com/x/player/v2?aid={params['aid']}&bvid={params['bvid']}&cid={cid}"
-
-
-def get_xml_danmaku_url(cid: CId) -> str:
-    return f"http://comment.bilibili.com/{cid}.xml"
-
-
-def get_protobuf_danmaku_segment_url(cid: CId, segment_id: int) -> str:
-    return f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"
-
-
-async def get_protobuf_danmaku_urls(scope: ExecutionScope, avid: AvId, cid: CId) -> list[str]:
     aid = avid.as_aid()
     meta = unwrap_fetch_result(
         await Fetcher.fetch_bin(
@@ -318,21 +300,10 @@ async def get_protobuf_danmaku_urls(scope: ExecutionScope, avid: AvId, cid: CId)
         )
     )
     size = get_danmaku_meta_size(meta)
-    return [get_protobuf_danmaku_segment_url(cid, segment_id) for segment_id in range(1, size + 1)]
-
-
-async def resolve_danmaku_urls(
-    scope: ExecutionScope,
-    cid: CId,
-    avid: AvId,
-    save_type: DanmakuSaveType,
-) -> tuple[DanmakuSourceType, list[str]]:
-    source_type: DanmakuSourceType = (
-        "xml" if save_type == "xml" or not (await get_user_info(scope))["is_login"] else "protobuf"
-    )
-    if source_type == "xml":
-        return source_type, [get_xml_danmaku_url(cid)]
-    return source_type, await get_protobuf_danmaku_urls(scope, avid, cid)
+    return source_type, [
+        f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"
+        for segment_id in range(1, size + 1)
+    ]
 
 
 async def resolve_resource_manifest(
@@ -359,25 +330,24 @@ async def resolve_resource_manifest(
                 item.cid,
                 options.ai_translation_language,
             )
-        if options.subtitle:
-            subtitles = await get_ugc_video_subtitle_urls(scope, avid, item.cid)
         if options.chapter_info:
-            chapter_info_url = get_ugc_video_chapter_info_url(avid, item.cid)
+            params = avid.to_dict()
+            chapter_info_url = (
+                f"https://api.bilibili.com/x/player/v2?aid={params['aid']}&bvid={params['bvid']}&cid={item.cid}"
+            )
     elif isinstance(item, BangumiEpisode):
         avid = item.avid
         if options.video or options.audio:
             videos, audios = await get_bangumi_playurl(scope, avid, item.cid)
-        if options.subtitle:
-            subtitles = await get_bangumi_subtitle_urls(scope, avid, item.cid)
     elif isinstance(item, CheeseEpisode):
         avid = item.avid
         if options.video or options.audio:
             videos, audios = await get_cheese_playurl(scope, avid, item.episode_id, item.cid)
-        if options.subtitle:
-            subtitles = await get_cheese_subtitle_urls(scope, avid, item.cid)
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
+    if options.subtitle:
+        subtitles = await _resolve_subtitles(scope, item, avid, item.cid)
     if not options.video:
         videos = []
     if not options.audio:
@@ -386,14 +356,13 @@ async def resolve_resource_manifest(
     danmaku_source_type: DanmakuSourceType | None = None
     danmaku_urls: list[str] = []
     if options.danmaku:
-        danmaku_source_type, danmaku_urls = await resolve_danmaku_urls(
+        danmaku_source_type, danmaku_urls = await _resolve_danmaku(
             scope,
-            item.cid,
             avid,
+            item.cid,
             options.danmaku_format,
         )
 
-    cover_url = item.metadata.thumb if options.cover and item.metadata.thumb else None
     return ResourceManifest(
         videos=tuple(videos),
         audios=tuple(audios),
@@ -401,6 +370,6 @@ async def resolve_resource_manifest(
         danmaku_source_type=danmaku_source_type,
         danmaku_save_type=options.danmaku_format if danmaku_urls else None,
         danmaku_urls=tuple(danmaku_urls),
-        cover_url=cover_url,
+        cover_url=item.metadata.thumb if options.cover and item.metadata.thumb else None,
         chapter_info_url=chapter_info_url,
     )

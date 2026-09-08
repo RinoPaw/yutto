@@ -10,6 +10,7 @@ from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 
 if TYPE_CHECKING:
     import subprocess
+    from pathlib import Path
     from typing import Protocol
 
     from yutto.downloader.planner import DownloadPlan
@@ -28,6 +29,8 @@ class MediaMuxer:
         self,
         plan: DownloadPlan,
         *,
+        video_path: Path | None = None,
+        audio_path: Path | None = None,
         has_cover: bool = False,
         has_chapter_info: bool = False,
     ) -> None:
@@ -36,14 +39,18 @@ class MediaMuxer:
         emit_download_report("开始合并……")
 
         if plan.video is not None:
-            video_input = command_builder.add_video_input(plan.paths.video)
+            if video_path is None:
+                raise PostprocessingError("缺少已下载的视频流文件")
+            video_input = command_builder.add_video_input(video_path)
             output.use(video_input)
             output.set_vcodec(plan.video_save_codec)
             if plan.attach_hvc1_tag:
                 output.with_extra_options([f"-tag:v:{video_input.stream_id}", "hvc1"])
 
         if plan.audio is not None:
-            audio_input = command_builder.add_audio_input(plan.paths.audio)
+            if audio_path is None:
+                raise PostprocessingError("缺少已下载的音频流文件")
+            audio_input = command_builder.add_audio_input(audio_path)
             output.use(audio_input)
             output.set_acodec(plan.audio_save_codec)
 

@@ -25,12 +25,12 @@ def test_ugc_resource_manifest_uses_parent_video_avid(monkeypatch: pytest.Monkey
         calls.append(args)
         return [], []
 
-    async def fake_danmaku_urls(*args: Any) -> tuple[str, list[str]]:
+    async def fake_danmaku(*args: Any) -> tuple[str, list[str]]:
         calls.append(args)
         return "xml", ["https://example.test/danmaku.xml"]
 
     monkeypatch.setattr("yutto.resource.get_ugc_video_playurl", fake_playurl)
-    monkeypatch.setattr("yutto.resource.resolve_danmaku_urls", fake_danmaku_urls)
+    monkeypatch.setattr("yutto.resource._resolve_danmaku", fake_danmaku)
 
     options = ResourceOptions(
         subtitle=False,
@@ -43,8 +43,8 @@ def test_ugc_resource_manifest_uses_parent_video_avid(monkeypatch: pytest.Monkey
     assert not hasattr(page, "avid")
     assert calls[0][1] == video.avid
     assert calls[0][2] == page.cid
-    assert calls[1][1] == page.cid
-    assert calls[1][2] == video.avid
+    assert calls[1][1] == video.avid
+    assert calls[1][2] == page.cid
     assert manifest.danmaku_urls == ("https://example.test/danmaku.xml",)
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from returns.result import Success
 
 import yutto.downloader.executor as executor_module
 from yutto.core.execution import ExecutionScope
@@ -14,7 +15,6 @@ from yutto.core.request import DownloadRequest
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.downloader import process_download
 from yutto.downloader.media_muxer import MediaMuxer
-from yutto.downloader.resource_fetcher import FetchedResources
 from yutto.exceptions import PostprocessingError
 from yutto.resource import ResourceManifest
 from yutto.utils.danmaku import write_danmaku
@@ -22,7 +22,6 @@ from yutto.utils.functional import as_sync
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
-    from yutto.downloader.planner import DownloadPlan
     from yutto.stream import AudioCodec
     from yutto.types import AudioUrlMeta
     from yutto.utils.danmaku import DanmakuData, DanmakuOptions
@@ -106,46 +105,34 @@ def make_media_entry() -> ResourceManifest:
 
 
 @pytest.fixture(autouse=True)
-def stub_fetched_resources(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fetch_resources(_scope: ExecutionScope, manifest: ResourceManifest) -> FetchedResources:
-        subtitles = (
-            (
-                {
-                    "lang": "zh-CN",
-                    "lines": [{"content": "测试", "from": 0, "to": 1}],
-                },
-            )
-            if manifest.subtitles
-            else ()
-        )
-        danmaku = (
-            {"source_type": "xml", "save_type": manifest.danmaku_save_type, "data": ["<i />"]}
-            if manifest.danmaku_urls
-            else {"source_type": None, "save_type": None, "data": []}
-        )
-        chapters = (
-            ({"start": 0, "end": 1, "content": "chapter"},)
-            if manifest.chapter_info_url is not None
-            else ()
-        )
-        return FetchedResources(
-            danmaku=cast("DanmakuData", danmaku),
-            subtitles=cast("Any", subtitles),
-            cover_data=b"cover" if manifest.cover_url is not None else None,
-            chapter_info_data=chapters,
-        )
+def stub_resource_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fetch_json(_scope: ExecutionScope, url: str):
+        if "subtitle" in url:
+            return Success({"body": [{"content": "测试", "from": 0, "to": 1}]})
+        if "chapters" in url:
+            return Success({"data": {"view_points": [{"from": 0, "to": 1, "content": "chapter"}]}})
+        return Success({})
 
-    monkeypatch.setattr(executor_module, "fetch_resources", fetch_resources)
+    async def fetch_text(_scope: ExecutionScope, _url: str, *, encoding: str | None = None):
+        return Success("<i />")
+
+    async def fetch_bin(_scope: ExecutionScope, _url: str):
+        return Success(b"cover")
+
+    monkeypatch.setattr(executor_module.Fetcher, "fetch_json", fetch_json)
+    monkeypatch.setattr(executor_module.Fetcher, "fetch_text", fetch_text)
+    monkeypatch.setattr(executor_module.Fetcher, "fetch_bin", fetch_bin)
 
 
 @pytest.mark.parametrize("cancelled", [False, True], ids=["failure", "cancellation"])
 @as_sync
-async def test_interrupted_mux_keeps_resume_inputs(
+async def test_interrupted_mux_cleans_transfer_owned_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     cancelled: bool,
 ):
     started = asyncio.Event()
+    transfer_directory = tmp_path / "transfer-owned"
 
     class InterruptedFFmpeg:
         async def exec_async(self, args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -155,11 +142,20 @@ async def test_interrupted_mux_keeps_resume_inputs(
                 await asyncio.Event().wait()
             return subprocess.CompletedProcess(args, 1, b"", b"ffmpeg failed")
 
-    async def write_audio_fragment(_scope: ExecutionScope, plan: DownloadPlan) -> None:
-        plan.paths.audio.write_bytes(b"resumable audio")
+    async def download_files(
+        _scope: ExecutionScope,
+        _sources,
+        *,
+        block_size: int,
+        banned_mirrors_pattern: str | None,
+    ) -> tuple[Path, ...]:
+        transfer_directory.mkdir(parents=True, exist_ok=True)
+        path = transfer_directory / "00.m4s.part"
+        path.write_bytes(b"downloaded audio")
+        return (path,)
 
     muxer = MediaMuxer(InterruptedFFmpeg())
-    monkeypatch.setattr(executor_module, "download_video_and_audio", write_audio_fragment)
+    monkeypatch.setattr(executor_module, "download_files", download_files)
     monkeypatch.setattr(executor_module, "MediaMuxer", lambda: muxer)
     execution = asyncio.create_task(
         process_download(
@@ -183,7 +179,7 @@ async def test_interrupted_mux_keeps_resume_inputs(
     output_dir = tmp_path / "output/series"
     temporary_dir = tmp_path / "temporary/series"
     assert (output_dir / "episode.zh-CN.srt").exists()
-    assert (temporary_dir / "episode_audio.m4s").read_bytes() == b"resumable audio"
+    assert not transfer_directory.exists()
     assert (temporary_dir / "episode_cover.jpg").exists()
     assert (temporary_dir / "episode_chapter_info.ini").exists()
     assert not (output_dir / "episode.m4a").exists()
@@ -252,7 +248,10 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
 
 
 @as_sync
-async def test_missing_requested_audio_does_not_clean_uncreated_video_file(tmp_path: Path):
+async def test_missing_requested_audio_does_not_start_media_transfer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
     entry = ResourceManifest(
         videos=(
             {
@@ -266,6 +265,10 @@ async def test_missing_requested_audio_does_not_clean_uncreated_video_file(tmp_p
         ),
     )
 
+    async def unexpected_download(*_args: object, **_kwargs: object) -> tuple[Path, ...]:
+        raise AssertionError("media transfer must not start")
+
+    monkeypatch.setattr(executor_module, "download_files", unexpected_download)
     result = await process_download(
         ExecutionScope(cast("Any", object())),
         entry,

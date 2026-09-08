@@ -15,9 +15,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.downloader.planner import DownloadPlan
-    from yutto.downloader.resource_fetcher import FetchedResources
-    from yutto.utils.danmaku import DanmakuOptions
-    from yutto.utils.metadata import ItemMetaData
+    from yutto.types import MultiLangSubtitle
+    from yutto.utils.danmaku import DanmakuData, DanmakuOptions
+    from yutto.utils.metadata import ChapterInfoData, ItemMetaData
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,31 +32,35 @@ class WrittenResource:
 
 
 class ArtifactWriter:
-    """Own resource sidecars and temporary muxing resources."""
+    """Write fetched resource bodies according to a DownloadPlan."""
 
     def write(
         self,
-        fetched: FetchedResources,
         metadata: ItemMetaData,
         plan: DownloadPlan,
+        *,
+        subtitles: tuple[MultiLangSubtitle, ...] = (),
+        danmaku: DanmakuData | None = None,
+        cover_data: bytes | None = None,
+        chapter_info_data: tuple[ChapterInfoData, ...] = (),
     ) -> Iterator[WrittenResource]:
         resources = plan.resources
 
-        if fetched.subtitles:
+        if subtitles:
             paths = tuple(
                 write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
-                for subtitle in fetched.subtitles
+                for subtitle in subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
                 paths=paths,
-                labels=tuple(subtitle["lang"] for subtitle in fetched.subtitles),
+                labels=tuple(subtitle["lang"] for subtitle in subtitles),
             )
 
-        if fetched.danmaku["data"]:
+        if danmaku is not None and danmaku["data"]:
             paths = tuple(
                 write_danmaku(
-                    fetched.danmaku,
+                    danmaku,
                     plan.paths.output,
                     resources.danmaku_height,
                     resources.danmaku_width,
@@ -66,7 +70,7 @@ class ArtifactWriter:
             yield WrittenResource(
                 kind=ArtifactKind.DANMAKU,
                 paths=paths,
-                labels=(str(fetched.danmaku["save_type"]),),
+                labels=(str(danmaku["save_type"]),),
             )
 
         if resources.has_metadata:
@@ -80,16 +84,16 @@ class ArtifactWriter:
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
-        if fetched.cover_data is not None:
-            plan.paths.cover.write_bytes(fetched.cover_data)
+        if cover_data is not None:
+            plan.paths.cover.write_bytes(cover_data)
             if resources.save_cover:
-                plan.paths.saved_cover.write_bytes(fetched.cover_data)
+                plan.paths.saved_cover.write_bytes(cover_data)
                 yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
-        if fetched.chapter_info_data:
+        if chapter_info_data:
             write_chapter_info(
                 plan.item,
-                list(fetched.chapter_info_data),
+                list(chapter_info_data),
                 plan.paths.chapter_info,
             )
 
