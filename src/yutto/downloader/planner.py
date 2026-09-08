@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from yutto.downloader.selector import select_audio, select_video
@@ -21,8 +21,6 @@ class DownloadPaths:
     output_dir: Path
     temporary_dir: Path
     output: Path
-    video: Path
-    audio: Path
     cover: Path
     saved_cover: Path
     chapter_info: Path
@@ -31,8 +29,6 @@ class DownloadPaths:
 @dataclass(frozen=True, slots=True)
 class VideoStream:
     index: int
-    url: str = field(repr=False)
-    mirrors: tuple[str, ...] = field(repr=False)
     codec: VideoCodec
     width: int
     height: int
@@ -42,8 +38,6 @@ class VideoStream:
 @dataclass(frozen=True, slots=True)
 class AudioStream:
     index: int
-    url: str = field(repr=False)
-    mirrors: tuple[str, ...] = field(repr=False)
     codec: AudioCodec
     quality: AudioQuality
 
@@ -89,7 +83,7 @@ class DownloadResources:
 
 @dataclass(frozen=True, slots=True)
 class DownloadPlan:
-    """A side-effect-free description of one download."""
+    """A side-effect-free description of one download; resource URLs stay in ResourceManifest."""
 
     item: str
     paths: DownloadPaths
@@ -222,8 +216,6 @@ def resolve_paths(
         output_dir=output_dir,
         temporary_dir=temporary_dir,
         output=output_dir / f"{filename}{output_suffix}",
-        video=temporary_dir / f"{filename}_video.m4s",
-        audio=temporary_dir / f"{filename}_audio.m4s",
         cover=temporary_dir / f"{filename}_cover.jpg",
         saved_cover=output_dir / f"{filename}-poster.jpg",
         chapter_info=temporary_dir / f"{filename}_chapter_info.ini",
@@ -256,8 +248,6 @@ def freeze_video_stream(video: VideoUrlMeta | None, index: int) -> VideoStream |
         return None
     return VideoStream(
         index=index,
-        url=video["url"],
-        mirrors=tuple(video["mirrors"]),
         codec=video["codec"],
         width=video["width"],
         height=video["height"],
@@ -270,8 +260,6 @@ def freeze_audio_stream(audio: AudioUrlMeta | None, index: int) -> AudioStream |
         return None
     return AudioStream(
         index=index,
-        url=audio["url"],
-        mirrors=tuple(audio["mirrors"]),
         codec=audio["codec"],
         quality=audio["quality"],
     )

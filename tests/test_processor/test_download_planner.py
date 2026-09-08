@@ -98,19 +98,18 @@ def test_planner_resolves_output_without_io(
     assert not (tmp_path / "temporary").exists()
 
 
-def test_planner_snapshots_inputs_without_exposing_signed_urls(tmp_path: Path):
+def test_plan_selects_manifest_entries_without_copying_resource_urls(tmp_path: Path):
     manifest, request, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
-    manifest.videos[0]["mirrors"].append("https://later.example.test/video")
-    manifest.audios[0]["mirrors"].append("https://later.example.test/audio")
     request.danmaku.block_keyword_patterns.append("later-pattern")
 
-    assert plan.video is not None
-    assert plan.video.mirrors == ("https://mirror.example.test/video?token=mirror-secret",)
-    assert plan.audio is not None
-    assert plan.audio.mirrors == ("https://mirror.example.test/audio?token=mirror-secret",)
+    assert plan.video is not None and plan.video.index == 0
+    assert plan.audio is not None and plan.audio.index == 0
+    assert not hasattr(plan.video, "url") and not hasattr(plan.video, "mirrors")
+    assert not hasattr(plan.audio, "url") and not hasattr(plan.audio, "mirrors")
     assert plan.resources.danmaku.block_keyword_patterns == ("original-pattern",)
     assert "signed.example.test" not in repr(plan)
     assert "mirror.example.test" not in repr(plan)
+    assert manifest.videos[0]["url"].startswith("https://signed.example.test/")
 
 
 def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_path: Path):
@@ -151,7 +150,8 @@ def test_planner_resolves_nested_temporary_paths_and_forced_transcode(tmp_path: 
     )
 
     assert plan.paths.temporary_dir == tmp_path / "output/nested/series"
-    assert plan.paths.audio == tmp_path / "output/nested/series/episode_audio.m4s"
+    assert not hasattr(plan.paths, "audio")
+    assert not hasattr(plan.paths, "video")
     assert plan.paths.saved_cover == tmp_path / "output/nested/series/episode-poster.jpg"
     assert plan.audio_save_codec == "mp3"
     assert plan.requires_audio_transcode_notice is True
