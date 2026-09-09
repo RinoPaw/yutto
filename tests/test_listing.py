@@ -31,15 +31,23 @@ def _paths(media: Media, *, template: str = "{auto}") -> list[Path]:
     return [entry.path for entry in resolve_media_paths(media, PathOptions(subpath_template=template))]
 
 
-def test_root_ugc_path_uses_media_tree_shape() -> None:
+def test_root_ugc_path_uses_original_page_count() -> None:
     avid = BvId("BV1D84y1t76J")
-    single = UgcVideo(
+    single_page = UgcVideo(
         avid=avid,
+        page_count=1,
+        metadata=ItemMetaData(title="投稿", owner="UP"),
+        items=[UgcPage(avid=avid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1"))],
+    )
+    selected_from_multi_page = UgcVideo(
+        avid=avid,
+        page_count=3,
         metadata=ItemMetaData(title="投稿", owner="UP"),
         items=[UgcPage(avid=avid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3"))],
     )
-    multi = UgcVideo(
+    multi_selection = UgcVideo(
         avid=avid,
+        page_count=3,
         metadata=ItemMetaData(title="投稿", owner="UP"),
         items=[
             UgcPage(avid=avid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
@@ -47,8 +55,9 @@ def test_root_ugc_path_uses_media_tree_shape() -> None:
         ],
     )
 
-    assert _paths(single) == [Path("投稿")]
-    assert _paths(multi) == [Path("投稿/P1"), Path("投稿/P3")]
+    assert _paths(single_page) == [Path("投稿")]
+    assert _paths(selected_from_multi_page) == [Path("投稿/P3")]
+    assert _paths(multi_selection) == [Path("投稿/P1"), Path("投稿/P3")]
 
 
 def test_direct_episode_and_season_tree_shapes_choose_different_auto_paths() -> None:
