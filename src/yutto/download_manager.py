@@ -27,7 +27,6 @@ from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
-from yutto.source import MediaResolveFailure, MediaResolveResult
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
@@ -36,6 +35,7 @@ if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.core.request import DownloadRequest
     from yutto.media import Media, MediaItem
+    from yutto.source import MediaResolveFailure, MediaResolveResult
 
 
 def show_batch_episode_title(
