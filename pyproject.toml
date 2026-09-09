@@ -1,6 +1,6 @@
 [project]
 name = "yutto"
-version = "2.3.0"
+version = "2.3.1"
 description = "🧊 一个可爱且任性的 B 站视频下载器"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,11 +43,11 @@ yutto = "yutto.__main__:main"
 [dependency-groups]
 dev = [
   "aiofiles>=25.1.0",
-  "ty>=0.0.75",
-  "ruff>=0.16.4",
-  "typos>=1.49.0",
+  "ty>=0.0.78",
+  "ruff>=0.16.6",
+  "typos>=1.50.1",
   "pytest>=9.1.1",
-  "pytest-rerunfailures>=16.6",
+  "pytest-rerunfailures>=16.6.1",
   "syrupy>=6.0.0",
   "pytest-codspeed>=5.0.3",
 ]
