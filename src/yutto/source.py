@@ -23,6 +23,7 @@ from yutto.media import (
     CheeseEpisode,
     CheeseSeason,
     Media,
+    UgcAllFavourites,
     UgcCollection,
     UgcFav,
     UgcPage,
@@ -83,6 +84,12 @@ class _ResolvedUgcVideo:
     index: int
     source: AvId
     media: UgcVideo
+
+
+@dataclass(frozen=True, slots=True)
+class _FilteredUgcVideo:
+    index: int
+    source: AvId
 
 
 @dataclass(slots=True, kw_only=True)
@@ -541,7 +548,7 @@ async def resolve_ugc_videos(
     options: SourceOptions,
 ) -> tuple[tuple[_ResolvedUgcVideo, ...], tuple[MediaResolveFailure, ...]]:
     page_options = replace(options, selection=Selection((Range(None, None),)))
-    results: list[_ResolvedUgcVideo | MediaResolveFailure | None] = [None] * len(indexed_avids)
+    results: list[_ResolvedUgcVideo | _FilteredUgcVideo | MediaResolveFailure | None] = [None] * len(indexed_avids)
 
     async def resolve_one(order: int, index: int, avid: AvId) -> None:
         try:
@@ -561,6 +568,15 @@ async def resolve_ugc_videos(
             return
         if not isinstance(result.media, UgcVideo):
             raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
+
+        publication_time_filter = options.publication_time_filter
+        if publication_time_filter is not None and not publication_time_filter.matches(result.media.metadata.premiered):
+            emit_download_report(
+                f"因为发布时间为 {result.media.metadata.premiered}，跳过 {result.media.metadata.title}",
+                ReportLevel.DEBUG,
+            )
+            results[order] = _FilteredUgcVideo(index=index, source=avid)
+            return
         results[order] = _ResolvedUgcVideo(index=index, source=avid, media=result.media)
 
     try:
@@ -695,6 +711,43 @@ class UgcFavSource(MediaSource):
         )
 
 
+class UgcAllFavouritesSource(MediaSource):
+    id: MId
+
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
+        api = f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={self.id}"
+        response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
+        data = response.get("data") or {}
+        folders: list[dict[str, Any]] = data.get("list") or []
+
+        all_items_options = replace(options, selection=Selection((Range(None, None),)))
+        favourites: list[UgcFav] = []
+        failures: list[MediaResolveFailure] = []
+        for folder in folders:
+            fid = folder.get("id")
+            if fid is None:
+                continue
+            result = await UgcFavSource(id=FId(str(fid))).resolve(scope, all_items_options)
+            if not isinstance(result.media, UgcFav):
+                raise TypeError("UgcFavSource returned unsupported media")
+            favourites.append(result.media)
+            failures.extend(result.failures)
+
+        owner = next((favourite.metadata.owner for favourite in favourites if favourite.metadata.owner), "")
+        return MediaResolveResult(
+            media=UgcAllFavourites(
+                mid=self.id,
+                metadata=ItemMetaData(
+                    title=f"{owner}的收藏夹" if owner else "用户收藏夹",
+                    mid=self.id,
+                    owner=owner,
+                ),
+                items=favourites,
+            ),
+            failures=tuple(failures),
+        )
+
+
 class UgcSeriesSource(MediaSource):
     id: SeriesId
 
@@ -762,6 +815,7 @@ class UgcSpaceSource(MediaSource):
         page_size = 30
         page_num = 1
         archives: list[dict[str, Any]] = []
+        publication_time_filter = options.publication_time_filter
         while True:
             payload = await self._fetch_payload(
                 scope,
@@ -781,7 +835,19 @@ class UgcSpaceSource(MediaSource):
                 ),
             )
             page_archives: list[dict[str, Any]] = payload.get("list", {}).get("vlist") or []
-            archives.extend(item for item in page_archives if item.get("bvid"))
+            for item in page_archives:
+                if not item.get("bvid"):
+                    continue
+                created = item.get("created")
+                if publication_time_filter is None or created is None or publication_time_filter.matches(int(created)):
+                    archives.append(item)
+
+            if publication_time_filter is not None and any(
+                item.get("created") is not None
+                and int(item["created"]) < publication_time_filter.start_timestamp
+                for item in page_archives
+            ):
+                break
 
             total = payload.get("page", {}).get("count")
             if isinstance(total, int):
@@ -847,6 +913,7 @@ __all__ = [
     "MediaResolveFailure",
     "MediaResolveResult",
     "MediaSource",
+    "UgcAllFavouritesSource",
     "UgcCollectionSource",
     "UgcFavSource",
     "UgcSeriesSource",
