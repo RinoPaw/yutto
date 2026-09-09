@@ -9,7 +9,7 @@ from returns.result import Success
 
 from yutto.core.options import SourceOptions
 from yutto.exceptions import WrongArgumentError
-from yutto.media import BangumiSeason, CheeseSeason
+from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeason, UgcVideo
 from yutto.parser import parse
 from yutto.selection import parse_selection
 from yutto.source import (
@@ -124,60 +124,64 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
     source = parse("https://www.bilibili.com/video/BV1D84y1t76J?p=2")
     assert isinstance(source, UgcVideoSource)
 
-    media = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
-    assert [page.metadata.title for page in media.items] == ["P2"]
-    assert [page.page for page in media.items] == [2]
+    result = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
+    assert isinstance(result.media, UgcVideo)
+    assert [page.metadata.title for page in result.media.items] == ["P2"]
+    assert [page.page for page in result.media.items] == [2]
 
-    media = asyncio.run(
+    result = asyncio.run(
         source.resolve(
             cast(Any, None),
             replace(_DEFAULT_OPTIONS, selection=parse_selection("3,1,3")),
         )
     )
-    assert [page.metadata.title for page in media.items] == ["P3", "P1"]
-    assert [page.page for page in media.items] == [3, 1]
+    assert isinstance(result.media, UgcVideo)
+    assert [page.metadata.title for page in result.media.items] == ["P3", "P1"]
+    assert [page.page for page in result.media.items] == [3, 1]
 
 
-def test_bangumi_ep_defaults_to_anchor_but_explicit_selection_targets_season(
+def test_bangumi_ep_defaults_to_direct_episode_but_explicit_selection_targets_season(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fetcher_stub(monkeypatch, _bangumi_response())
     source = BangumiEpisodeSource(id=EpisodeId("102"))
 
-    media = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
-    assert isinstance(media, BangumiSeason)
-    assert [item.episode_id for item in media.items] == [EpisodeId("102")]
-    assert [item.index for item in media.items] == [2]
+    result = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
+    assert isinstance(result.media, BangumiEpisode)
+    assert result.media.episode_id == EpisodeId("102")
+    assert result.media.index == 2
 
-    media = asyncio.run(
+    result = asyncio.run(
         source.resolve(
             cast(Any, None),
             replace(_DEFAULT_OPTIONS, selection=parse_selection("3,1,3")),
         )
     )
-    assert [item.episode_id for item in media.items] == [EpisodeId("103"), EpisodeId("101")]
-    assert [item.index for item in media.items] == [3, 1]
+    assert isinstance(result.media, BangumiSeason)
+    assert [item.episode_id for item in result.media.items] == [EpisodeId("103"), EpisodeId("101")]
+    assert [item.index for item in result.media.items] == [3, 1]
 
 
-def test_cheese_ep_defaults_to_anchor_but_explicit_selection_targets_season(
+def test_cheese_ep_defaults_to_direct_episode_but_explicit_selection_targets_season(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fetcher_stub(monkeypatch, _cheese_response())
     source = CheeseEpisodeSource(id=EpisodeId("102"))
 
-    media = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
-    assert isinstance(media, CheeseSeason)
-    assert [item.episode_id for item in media.items] == [EpisodeId("102")]
-    assert [item.index for item in media.items] == [2]
+    result = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
+    assert isinstance(result.media, CheeseEpisode)
+    assert result.media.episode_id == EpisodeId("102")
+    assert result.media.index == 2
 
-    media = asyncio.run(
+    result = asyncio.run(
         source.resolve(
             cast(Any, None),
             replace(_DEFAULT_OPTIONS, selection=parse_selection("3,1,3")),
         )
     )
-    assert [item.episode_id for item in media.items] == [EpisodeId("103"), EpisodeId("101")]
-    assert [item.index for item in media.items] == [3, 1]
+    assert isinstance(result.media, CheeseSeason)
+    assert [item.episode_id for item in result.media.items] == [EpisodeId("103"), EpisodeId("101")]
+    assert [item.index for item in result.media.items] == [3, 1]
 
 
 def test_season_source_defaults_to_first_episode(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,6 +189,7 @@ def test_season_source_defaults_to_first_episode(monkeypatch: pytest.MonkeyPatch
     source = parse("https://www.bilibili.com/bangumi/play/ss456")
     assert isinstance(source, BangumiSeasonSource)
 
-    media = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
-    assert [item.episode_id for item in media.items] == [EpisodeId("101")]
-    assert [item.index for item in media.items] == [1]
+    result = asyncio.run(source.resolve(cast(Any, None), _DEFAULT_OPTIONS))
+    assert isinstance(result.media, BangumiSeason)
+    assert [item.episode_id for item in result.media.items] == [EpisodeId("101")]
+    assert [item.index for item in result.media.items] == [1]
