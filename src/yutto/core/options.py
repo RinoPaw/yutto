@@ -35,6 +35,11 @@ DEFAULT_RESOURCE_OPTIONS = ResourceOptions()
 
 def source_options_from_request(request: DownloadRequest) -> SourceOptions:
     expression = request.selection.episodes
+    if expression is None and request.scope.batch:
+        # Legacy compatibility only: old CLI usage treated `-b` without `-p`
+        # as selecting the whole top-level collection. New callers should use
+        # an explicit selection (for example `-p "~"`) and do not need `-b`.
+        expression = "~"
     return SourceOptions(
         selection=parse_selection(expression) if expression is not None else None,
         with_extra_episodes=request.scope.with_extra_episodes,
