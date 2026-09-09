@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.auth import validate_user_info
@@ -25,15 +24,16 @@ from yutto.exceptions import (
 )
 from yutto.listing import (
     MediaAncestry,
-    filter_media_tree,
+    PathOptions,
+    filter_media_by_publication_time,
     iter_media_items,
-    media_item_pubdate,
-    resolve_media_path,
+    resolve_media_paths,
 )
-from yutto.media import UgcFav, UgcVideo
+from yutto.media import MediaContainer, UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
+from yutto.source import MediaResolveFailure, MediaResolveResult
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.filter import PublicationTimeFilter
 
@@ -42,9 +42,7 @@ if TYPE_CHECKING:
 
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.core.request import DownloadRequest
-    from yutto.exceptions import YuttoBaseException
     from yutto.media import Media, MediaItem
-    from yutto.source import MediaSource
 
 
 def show_batch_episode_title(
@@ -77,28 +75,22 @@ def _display_group(ancestry: MediaAncestry) -> str | None:
     return None
 
 
-async def _resolve_source(scope: ExecutionScope, value: str) -> MediaSource:
-    value = value.strip()
-    if source := parse(value):
-        return source
-
-    try:
-        redirected_value = unwrap_fetch_result(await Fetcher.get_redirected_url(scope, value))
-    except InvalidUrlError:
-        raise WrongUrlError(f"无效的 url({value})～请检查一下链接是否正确～") from None
-    except UnsupportedProtocolError:
-        raise WrongUrlError(f"无效的 url 协议（{value}）～请检查一下链接协议是否正确") from None
-
-    if source := parse(redirected_value):
-        return source
-    raise WrongUrlError(f"无法识别 url（{redirected_value}）")
+def _has_media_items(media: Media | None) -> bool:
+    return media is not None and next(iter_media_items(media), None) is not None
 
 
-@dataclass(frozen=True, slots=True)
-class _ResolvedRequestOutcome:
-    source: MediaSource | None = None
-    media: Media | None = None
-    failures: tuple[YuttoBaseException, ...] = ()
+def _report_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
+    for failure in failures:
+        emit_download_report(
+            f"第 {failure.index} 项 {failure.source}：{failure.error.message}",
+            ReportLevel.ERROR,
+        )
+
+
+def _raise_all_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
+    if len(failures) == 1:
+        raise failures[0].error
+    raise ResolveFailedError(f"解析未得到任何条目：{len(failures)} 个子项解析失败（详见日志）")
 
 
 class DownloadManager:
@@ -147,21 +139,21 @@ class DownloadManager:
         requests: Sequence[DownloadRequest],
     ) -> ResolveResult:
         media: list[Media] = []
-        failures: list[YuttoBaseException] = []
+        failures: list[MediaResolveFailure] = []
         for request in requests:
             async with scope_factory.open(request) as scope:
-                outcome = await self.resolve_request(scope, request)
-                failures.extend(outcome.failures)
-                if outcome.media is not None:
-                    media.append(outcome.media)
+                result = await self.resolve_request(scope, request)
+                failures.extend(result.failures)
+                if result.media is not None:
+                    media.append(result.media)
 
-        if failures and not media:
-            if len(failures) == 1:
-                raise failures[0]
-            raise ResolveFailedError(f"解析未得到任何条目：{len(failures)} 个来源/条目解析失败（详见 server 日志）")
         resolved_failures = tuple(
-            ResolveFailure(type=type(error).__name__, message=error.message, code=error.code.value)
-            for error in failures
+            ResolveFailure(
+                type=type(failure.error).__name__,
+                message=failure.error.message,
+                code=failure.error.code.value,
+            )
+            for failure in failures
         )
         return ResolveResult(items=tuple(media), failures=resolved_failures)
 
@@ -170,23 +162,21 @@ class DownloadManager:
         scope: ExecutionScope,
         request: DownloadRequest,
     ) -> tuple[ItemResult, ...]:
-        outcome = await self.resolve_request(scope, request)
-        if outcome.source is None or outcome.media is None:
-            if len(outcome.failures) == 1:
-                raise outcome.failures[0]
-            if outcome.failures:
-                raise ResolveFailedError(
-                    f"解析未得到任何条目：{len(outcome.failures)} 个来源/条目解析失败（详见 server 日志）"
-                )
+        result = await self.resolve_request(scope, request)
+        if result.media is None:
             return ()
 
-        download_list = tuple(iter_media_items(outcome.media))
+        path_entries = resolve_media_paths(
+            result.media,
+            PathOptions(subpath_template=request.output.subpath_template),
+        )
+        download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
         current_display_group: str | None = None
-        for ancestry, item in download_list:
-            path = Path(self.unique_path(str(resolve_media_path(outcome.source, ancestry, item, request))))
-            prepared.append((ancestry, item, path, current_display_group))
-            current_display_group = _display_group(ancestry)
+        for entry in path_entries:
+            path = Path(self.unique_path(str(entry.path)))
+            prepared.append((entry.ancestry, entry.item, path, current_display_group))
+            current_display_group = _display_group(entry.ancestry)
 
         if request.network.download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {request.network.download_interval} 秒")
@@ -214,12 +204,11 @@ class DownloadManager:
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-                if not ancestry:
-                    raise TypeError(f"downloadable media item has no parent: {type(item).__name__}")
+                parent = ancestry[-1] if ancestry else None
                 try:
                     manifest = await resolve_resource_manifest(
                         scope,
-                        ancestry[-1],
+                        cast(MediaContainer, parent),
                         item,
                         resource_options,
                     )
@@ -235,7 +224,7 @@ class DownloadManager:
                         request.output.directory,
                         request.output.temporary_directory or request.output.directory,
                     )
-                if request.scope.batch:
+                if len(download_list) > 1:
                     show_batch_episode_title(
                         _display_group(ancestry),
                         path,
@@ -269,9 +258,22 @@ class DownloadManager:
         self,
         scope: ExecutionScope,
         request: DownloadRequest,
-    ) -> _ResolvedRequestOutcome:
+    ) -> MediaResolveResult:
         """Resolve Parser -> MediaSource -> Media and apply generic Media filters."""
-        source = await _resolve_source(scope, request.source.url)
+        value = request.source.url.strip()
+        source = parse(value)
+        if source is None:
+            try:
+                redirected_value = unwrap_fetch_result(await Fetcher.get_redirected_url(scope, value))
+            except InvalidUrlError:
+                raise WrongUrlError(f"无效的 url({value})～请检查一下链接是否正确～") from None
+            except UnsupportedProtocolError:
+                raise WrongUrlError(f"无效的 url 协议（{value}）～请检查一下链接协议是否正确") from None
+
+            source = parse(redirected_value)
+            if source is None:
+                raise WrongUrlError(f"无法识别 url（{redirected_value}）")
+
         source_options = source_options_from_request(request)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
 
@@ -281,24 +283,24 @@ class DownloadManager:
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-        try:
-            media = await source.resolve(scope, source_options)
-        except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError, NotLoginError) as error:
-            emit_download_report(error.message, ReportLevel.ERROR)
-            return _ResolvedRequestOutcome(source=source, failures=(error,))
+        result = await source.resolve(scope, source_options)
+        if result.media is None:
+            raise TypeError(f"{type(source).__name__}.resolve() returned no media")
 
-        filter_by_time = request.selection.start_time is not None or request.selection.end_time is not None
-        if filter_by_time:
+        _report_resolve_failures(result.failures)
+        if result.failures and not _has_media_items(result.media):
+            _raise_all_resolve_failures(result.failures)
+
+        if request.selection.start_time is not None or request.selection.end_time is not None:
             publication_time_filter = PublicationTimeFilter.from_strings(
                 request.selection.start_time,
                 request.selection.end_time,
             )
-            media = filter_media_tree(
-                media,
-                lambda ancestry, item: publication_time_filter.matches(media_item_pubdate(ancestry, item)),
+            return MediaResolveResult(
+                media=filter_media_by_publication_time(result.media, publication_time_filter),
+                failures=result.failures,
             )
-
-        return _ResolvedRequestOutcome(source=source, media=media)
+        return result
 
 
 def ensure_output_path_is_scoped(path: Path, output_root: Path, temporary_root: Path) -> None:
