@@ -47,11 +47,13 @@ def test_resolve_result_keeps_media_tree_without_flat_projection():
     result = ResolveResult(items=(video,))
 
     assert result.items == (video,)
-    assert result.items[0].items == [page]
-    assert result.items[0] is video
+    root = result.items[0]
+    assert isinstance(root, UgcVideo)
+    assert root.items == [page]
+    assert root is video
 
     with pytest.raises(FrozenInstanceError):
-        result.items = ()  # type: ignore[misc]
+        result.items = ()  # ty: ignore[invalid-assignment]
 
 
 def test_item_result_validates_skip_reason_without_requiring_artifacts():

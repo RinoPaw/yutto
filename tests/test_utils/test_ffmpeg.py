@@ -10,17 +10,16 @@ import pytest
 
 import yutto.utils.ffmpeg as ffmpeg_module
 from yutto.core.request import DownloadRequest
-from yutto.core.result import ResolvedItem
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner, should_attach_hvc1_tag
 from yutto.exceptions import PostprocessingError, WrongArgumentError
-from yutto.types import AId, CId
+from yutto.resource import ResourceManifest
 from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 from yutto.utils.functional import Singleton, as_sync
 
 if TYPE_CHECKING:
     from yutto.media.codec import VideoCodec
-    from yutto.types import AudioUrlMeta, EpisodeData, VideoUrlMeta
+    from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
 def make_ffmpeg(path: str) -> FFmpeg:
@@ -92,30 +91,7 @@ def make_audio_plan(
     audio_save_codec: str = "copy",
 ) -> DownloadPlan:
     path = Path("output")
-    episode = cast(
-        "EpisodeData",
-        {
-            "info": {
-                "listing": ResolvedItem(
-                    avid=AId("1"),
-                    cid=CId("1"),
-                    url="https://www.bilibili.com/video/av1?p=1",
-                    name=path.name,
-                    title=path.name,
-                    cover_url="",
-                    planned_path=path,
-                ),
-                "path": path,
-            },
-            "videos": [],
-            "audios": [make_audio()],
-            "subtitles": [],
-            "metadata": None,
-            "danmaku": {"source_type": None, "save_type": None, "data": []},
-            "cover_data": None,
-            "chapter_info_data": [],
-        },
-    )
+    resources = ResourceManifest(audios=(make_audio(),))
     request = DownloadRequest.model_validate(
         {
             "source": {"url": "BV1muxer"},
@@ -138,7 +114,7 @@ def make_audio_plan(
             },
         }
     )
-    return DownloadPlanner().plan(episode, request)
+    return DownloadPlanner().plan(resources, path, request)
 
 
 @pytest.mark.parametrize(

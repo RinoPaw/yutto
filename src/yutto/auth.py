@@ -107,7 +107,7 @@ async def get_wbi_img(scope: ExecutionScope) -> WbiImg:
                 img_key=_get_key_from_url(res_json["data"]["wbi_img"]["img_url"]),
                 sub_key=_get_key_from_url(res_json["data"]["wbi_img"]["sub_url"]),
             )
-            scope.wbi_img_cache = dict(wbi_img)
+            scope.wbi_img_cache = cast("dict[str, str]", dict(wbi_img))
         return cast("WbiImg", scope.wbi_img_cache)
 
 
