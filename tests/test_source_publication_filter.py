@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from returns.result import Success
 
 from yutto.core.options import SourceOptions, source_options_from_request
@@ -14,6 +13,9 @@ from yutto.selection import parse_selection
 from yutto.source import UgcSeriesSource, UgcSpaceSource
 from yutto.types import MId, SeriesId
 from yutto.utils.filter import PublicationTimeFilter
+
+if TYPE_CHECKING:
+    import pytest
 
 _SCOPE = cast("Any", None)
 
