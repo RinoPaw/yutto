@@ -30,7 +30,6 @@ def test_default_namespace_maps_to_grouped_core_request():
 
     assert request.source.url == "BV1xx411c7mD"
     assert request.access.auth_profile == "default"
-    assert request.scope.batch is False
     assert request.selection.episodes is None
     assert request.selection.skip_preview is False
     assert request.resources.video is True
@@ -45,8 +44,14 @@ def test_default_namespace_maps_to_grouped_core_request():
 def test_selection_is_explicit_without_batch():
     request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD", "-p", "1~-1"]))
 
-    assert request.scope.batch is False
     assert request.selection.episodes == "1~-1"
+
+
+def test_legacy_batch_without_selection_normalizes_to_full_selection():
+    request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD", "-b"]))
+
+    assert request.selection.episodes == "~"
+    assert request.scope.model_dump() == {"batch": False, "with_extra_episodes": False}
 
 
 def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
@@ -143,7 +148,7 @@ def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
         "login_strict": True,
         "vip_strict": True,
     }
-    assert request.scope.model_dump() == {"batch": True, "with_extra_episodes": True}
+    assert request.scope.model_dump() == {"batch": False, "with_extra_episodes": True}
     assert request.selection.model_dump() == {
         "episodes": "2,4~6",
         "skip_preview": True,
