@@ -22,20 +22,13 @@ from yutto.exceptions import (
     WrongArgumentError,
     WrongUrlError,
 )
-from yutto.listing import (
-    MediaAncestry,
-    PathOptions,
-    filter_media_by_publication_time,
-    iter_media_items,
-    resolve_media_paths,
-)
+from yutto.listing import MediaAncestry, PathOptions, iter_media_items, resolve_media_paths
 from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
 from yutto.source import MediaResolveFailure, MediaResolveResult
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
-from yutto.utils.filter import PublicationTimeFilter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -259,7 +252,7 @@ class DownloadManager:
         scope: ExecutionScope,
         request: DownloadRequest,
     ) -> MediaResolveResult:
-        """Resolve Parser -> MediaSource -> Media and apply generic Media filters."""
+        """Resolve Parser -> MediaSource -> Media."""
         value = request.source.url.strip()
         source = parse(value)
         if source is None:
@@ -288,18 +281,6 @@ class DownloadManager:
             raise TypeError(f"{type(source).__name__}.resolve() returned no media")
 
         _report_resolve_failures(result.failures)
-        if result.media is None:
-            return result
-
-        if request.selection.start_time is not None or request.selection.end_time is not None:
-            publication_time_filter = PublicationTimeFilter.from_strings(
-                request.selection.start_time,
-                request.selection.end_time,
-            )
-            return MediaResolveResult(
-                media=filter_media_by_publication_time(result.media, publication_time_filter),
-                failures=result.failures,
-            )
         return result
 
 
