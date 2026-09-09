@@ -18,7 +18,11 @@ async def fetch_payload(
     *,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    result = await Fetcher.fetch_json(scope, url) if params is None else await Fetcher.fetch_json(scope, url, params=params)
+    result = (
+        await Fetcher.fetch_json(scope, url)
+        if params is None
+        else await Fetcher.fetch_json(scope, url, params=params)
+    )
     response = unwrap_fetch_result(result)
     if response.get("code") == -404:
         raise NotFoundError(f"未找到{description}（{identifier}）")
