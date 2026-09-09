@@ -74,6 +74,7 @@ class UgcVideo(MediaContainer):
     """一个 UGC 投稿，拥有一个或多个分 P。"""
 
     avid: AvId
+    page_count: int = 1
     items: list[UgcPage] = field(default_factory=list)
 
 
