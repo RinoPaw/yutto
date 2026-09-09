@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from yutto.selection import Selection, parse_selection
+from yutto.utils.filter import PublicationTimeFilter
 
 if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
@@ -15,6 +16,7 @@ class SourceOptions:
     with_extra_episodes: bool = False
     skip_preview: bool = False
     fetch_tags: bool = False
+    publication_time_filter: PublicationTimeFilter | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -43,11 +45,18 @@ def source_options_from_request(request: DownloadRequest) -> SourceOptions:
         request.selection.episodes,
         batch=request.scope.batch,
     )
+    publication_time_filter = None
+    if request.selection.start_time is not None or request.selection.end_time is not None:
+        publication_time_filter = PublicationTimeFilter.from_strings(
+            request.selection.start_time,
+            request.selection.end_time,
+        )
     return SourceOptions(
         selection=parse_selection(expression) if expression is not None else None,
         with_extra_episodes=request.scope.with_extra_episodes,
         skip_preview=request.selection.skip_preview,
         fetch_tags=request.resources.metadata,
+        publication_time_filter=publication_time_filter,
     )
 
 
