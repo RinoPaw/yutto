@@ -5,9 +5,19 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from returns.result import Failure
-
-from yutto.auth import encode_wbi, get_wbi_img
+from yutto.api.bangumi import (
+    get_season as get_bangumi_season,
+    get_season_by_episode as get_bangumi_season_by_episode,
+    get_season_id_by_media,
+)
+from yutto.api.cheese import get_season as get_cheese_season
+from yutto.api.cheese import get_season_by_episode as get_cheese_season_by_episode
+from yutto.api.collection import get_collection
+from yutto.api.favourite import get_all_favourite_folders, get_favourite_info, get_favourite_medias
+from yutto.api.series import get_series_archives, get_series_info
+from yutto.api.space import get_space_profile_and_archives
+from yutto.api.ugc import get_ugc_video_info, get_ugc_video_tags
+from yutto.api.watch_later import get_watch_later_entries
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.exceptions import (
     HttpStatusError,
@@ -47,7 +57,6 @@ from yutto.types import (
     SeasonId,
     SeriesId,
 )
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.metadata import Actor, ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
@@ -132,28 +141,6 @@ class MediaSource(ABC):
     def _parse_genre_info(video_info: dict[str, Any]) -> list[str]:
         genre = video_info.get("tname")
         return [genre] if isinstance(genre, str) and genre else []
-
-    @staticmethod
-    async def _fetch_payload(
-        scope: ExecutionScope,
-        url: str,
-        description: str,
-        identifier: str,
-        data_key: str,
-        *,
-        params: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        if params is None:
-            result = await Fetcher.fetch_json(scope, url)
-        else:
-            result = await Fetcher.fetch_json(scope, url, params=params)
-        response = unwrap_fetch_result(result)
-        if response.get("code") == -404:
-            raise NotFoundError(f"未找到{description}（{identifier}）")
-        payload = response.get(data_key)
-        if payload is None:
-            raise NoAccessPermissionError(f"无法解析{description}（{identifier}），原因：{response.get('message')}")
-        return payload
 
 
 @dataclass(slots=True, kw_only=True)
@@ -277,10 +264,9 @@ class BangumiEpisodeSource(MediaSource):
     id: EpisodeId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        api = f"https://api.bilibili.com/pgc/view/web/season?ep_id={self.id}"
-        res = await self._fetch_payload(scope, api, "该番剧", f"episode_id: {self.id}", "result")
+        result = await get_bangumi_season_by_episode(scope, self.id)
 
-        all_episode_items = list(enumerate(bangumi_episode_items(res), start=1))
+        all_episode_items = list(enumerate(bangumi_episode_items(result), start=1))
         anchor_item = next(
             ((index, entry) for index, entry in all_episode_items if entry["id"] == int(self.id.value)),
             None,
@@ -288,21 +274,21 @@ class BangumiEpisodeSource(MediaSource):
         if anchor_item is None:
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
 
-        season_metadata = make_bangumi_season_metadata(res)
+        season_metadata = make_bangumi_season_metadata(result)
         if options.selection is None:
             index, item = anchor_item
             episode = parse_bangumi_episode(index, item)
             _apply_container_metadata_to_episode(episode, season_metadata)
             return MediaResolveResult(media=episode)
 
-        episode_items = indexed_bangumi_episode_items(res, with_extra_episodes=options.with_extra_episodes)
+        episode_items = indexed_bangumi_episode_items(result, with_extra_episodes=options.with_extra_episodes)
         if options.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
         indexes = _resolve_selection_indexes(options.selection, len(episode_items))
         episode_items = [episode_items[index - 1] for index in indexes]
         return MediaResolveResult(
             media=BangumiSeason(
-                season_id=SeasonId(str(res["season_id"])),
+                season_id=SeasonId(str(result["season_id"])),
                 metadata=season_metadata,
                 items=[parse_bangumi_episode(index, item) for index, item in episode_items],
             )
@@ -313,11 +299,10 @@ class BangumiSeasonSource(MediaSource):
     id: SeasonId | MediaId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        season_id = await self._get_season_id(scope, self.id) if isinstance(self.id, MediaId) else self.id
-        api = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
-        res = await self._fetch_payload(scope, api, "该番剧列表", f"season_id: {season_id}", "result")
+        season_id = await get_season_id_by_media(scope, self.id) if isinstance(self.id, MediaId) else self.id
+        result = await get_bangumi_season(scope, season_id)
 
-        episode_items = indexed_bangumi_episode_items(res, with_extra_episodes=options.with_extra_episodes)
+        episode_items = indexed_bangumi_episode_items(result, with_extra_episodes=options.with_extra_episodes)
         if options.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
         if options.selection is None:
@@ -329,16 +314,10 @@ class BangumiSeasonSource(MediaSource):
         return MediaResolveResult(
             media=BangumiSeason(
                 season_id=season_id,
-                metadata=make_bangumi_season_metadata(res),
+                metadata=make_bangumi_season_metadata(result),
                 items=[parse_bangumi_episode(index, item) for index, item in episode_items],
             )
         )
-
-    @staticmethod
-    async def _get_season_id(scope: ExecutionScope, media_id: MediaId) -> SeasonId:
-        media_api = f"https://api.bilibili.com/pgc/review/user?media_id={media_id}"
-        res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, media_api))
-        return SeasonId(str(res_json["result"]["media"]["season_id"]))
 
 
 def parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
@@ -364,16 +343,15 @@ class CheeseEpisodeSource(MediaSource):
     id: EpisodeId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        api = f"https://api.bilibili.com/pugv/view/web/season?ep_id={self.id}"
-        res = await self._fetch_payload(scope, api, "该课程", f"episode_id: {self.id}", "data")
+        result = await get_cheese_season_by_episode(scope, self.id)
 
-        indexed_items = list(enumerate(res["episodes"], start=1))
+        indexed_items = list(enumerate(result["episodes"], start=1))
         anchor_item = next(
             ((index, entry) for index, entry in indexed_items if entry["id"] == int(self.id.value)),
             None,
         )
         if anchor_item is None:
-            raise NotFoundError(f"无法在课程 {res['title']} 中找到剧集 ep{self.id}")
+            raise NotFoundError(f"无法在课程 {result['title']} 中找到剧集 ep{self.id}")
 
         if options.selection is None:
             index, item = anchor_item
@@ -381,11 +359,11 @@ class CheeseEpisodeSource(MediaSource):
 
         indexes = _resolve_selection_indexes(options.selection, len(indexed_items))
         episode_items = [indexed_items[index - 1] for index in indexes]
-        season_id = res.get("season_id", self.id.value)
+        season_id = result.get("season_id", self.id.value)
         return MediaResolveResult(
             media=CheeseSeason(
                 season_id=SeasonId(str(season_id)),
-                metadata=ItemMetaData(title=str(res.get("title", ""))),
+                metadata=ItemMetaData(title=str(result.get("title", ""))),
                 items=[parse_cheese_episode(index, item) for index, item in episode_items],
             )
         )
@@ -395,9 +373,8 @@ class CheeseSeasonSource(MediaSource):
     id: SeasonId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        api = f"https://api.bilibili.com/pugv/view/web/season?season_id={self.id}"
-        res = await self._fetch_payload(scope, api, "该课程列表", f"season_id: {self.id}", "data")
-        episode_items = list(enumerate(res["episodes"], start=1))
+        result = await get_cheese_season(scope, self.id)
+        episode_items = list(enumerate(result["episodes"], start=1))
         if options.selection is None:
             episode_items = episode_items[:1]
         else:
@@ -407,7 +384,7 @@ class CheeseSeasonSource(MediaSource):
         return MediaResolveResult(
             media=CheeseSeason(
                 season_id=self.id,
-                metadata=ItemMetaData(title=str(res.get("title", ""))),
+                metadata=ItemMetaData(title=str(result.get("title", ""))),
                 items=[parse_cheese_episode(index, item) for index, item in episode_items],
             )
         )
@@ -428,8 +405,8 @@ class UgcVideoSource(MediaSource):
             )
 
     async def _resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        resolved_avid, video_info = await self.get_ugc_video_info(scope, self.id)
-        tags = await self.get_ugc_video_tag(scope, resolved_avid) if options.fetch_tags else []
+        resolved_avid, video_info = await get_ugc_video_info(scope, self.id)
+        tags = await get_ugc_video_tags(scope, resolved_avid) if options.fetch_tags else []
         dateadded = get_time_stamp_by_now()
 
         page_items: list[dict[str, Any]] = list(video_info["pages"])
@@ -497,42 +474,6 @@ class UgcVideoSource(MediaSource):
             tag=list(tags),
             website=BvId(video_info["bvid"]).to_url(),
         )
-
-    async def get_ugc_video_info(
-        self,
-        scope: ExecutionScope,
-        avid: AvId,
-    ) -> tuple[AvId, dict[str, Any]]:
-        api = f"https://api.bilibili.com/x/web-interface/view?{avid.to_param()}"
-        res = await Fetcher.fetch_json(scope, api)
-        if isinstance(res, Failure):
-            raise NotFoundError(f"无法获取该视频 {avid} 信息") from res.failure()
-
-        res_json = res.unwrap()
-        res_json_data = res_json.get("data")
-        if res_json["code"] == 62002:
-            raise NotFoundError(f"无法下载该视频 {avid}，原因：{res_json['message']}")
-        if res_json["code"] == 62012:
-            raise NoAccessPermissionError(
-                f"无法获取该视频 {avid} 信息，原因：{res_json['message']}（当前稿件UP主设置为仅自己可见）"
-            )
-        if res_json["code"] == -404:
-            raise NotFoundError(f"哔咔！视频 {avid} 不见了诶")
-        assert res_json_data is not None, "响应数据无 data 域"
-
-        if res_json_data.get("forward"):
-            forward_avid = AId(res_json_data["forward"])
-            emit_download_report(f"视频 {avid} 撞车了哦！正在跳转到原视频 {forward_avid}～")
-            return await self.get_ugc_video_info(scope, forward_avid)
-
-        return avid, res_json_data
-
-    async def get_ugc_video_tag(self, scope: ExecutionScope, avid: AvId) -> list[str]:
-        api = f"https://api.bilibili.com/x/tag/archive/tags?{avid.to_param()}"
-        res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
-        if res_json["code"] != 0:
-            raise NotFoundError(f"无法获取视频 {avid} 标签")
-        return [tag["tag_name"] for tag in res_json["data"]]
 
 
 def _select_indexed(items: list[T], selection: Selection | None) -> list[tuple[int, T]]:
@@ -604,38 +545,7 @@ class UgcCollectionSource(MediaSource):
     owner_id: MId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        page_size = 30
-        page_num = 1
-        archives: list[dict[str, Any]] = []
-        title = ""
-
-        while True:
-            list_api = (
-                "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list"
-                f"?mid={self.owner_id}&season_id={self.id}&sort_reverse=false"
-                f"&page_num={page_num}&page_size={page_size}"
-            )
-            payload = await self._fetch_payload(
-                scope,
-                list_api,
-                "视频合集",
-                f"collection_id: {self.id}",
-                "data",
-            )
-            if page_num == 1:
-                title = payload.get("meta", {}).get("name", "")
-
-            page_archives: list[dict[str, Any]] = payload.get("archives") or []
-            archives.extend(item for item in page_archives if item.get("bvid"))
-
-            total = payload.get("page", {}).get("total")
-            if isinstance(total, int):
-                if page_num * page_size >= total:
-                    break
-            elif len(page_archives) < page_size:
-                break
-            page_num += 1
-
+        title, archives = await get_collection(scope, self.id, self.owner_id)
         selected_archives = _select_indexed(archives, options.selection)
         resolved, failures = await resolve_ugc_videos(
             scope,
@@ -656,29 +566,10 @@ class UgcFavSource(MediaSource):
     id: FId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        info_api = f"https://api.bilibili.com/x/v3/fav/folder/info?media_id={self.id}"
-        info = await self._fetch_payload(scope, info_api, "收藏夹", f"fid: {self.id}", "data")
-
-        page_size = 20
-        page_num = 1
-        medias: list[dict[str, Any]] = []
-        while True:
-            list_api = (
-                f"https://api.bilibili.com/x/v3/fav/resource/list?media_id={self.id}"
-                f"&pn={page_num}&ps={page_size}&platform=web"
-            )
-            payload = await self._fetch_payload(scope, list_api, "收藏夹", f"fid: {self.id}", "data")
-            page_medias: list[dict[str, Any]] = payload.get("medias") or []
-            medias.extend(item for item in page_medias if item.get("bvid"))
-
-            has_more = payload.get("has_more")
-            if has_more is not None:
-                if not has_more:
-                    break
-            elif len(page_medias) < page_size:
-                break
-            page_num += 1
-
+        info, medias = await asyncio.gather(
+            get_favourite_info(scope, self.id),
+            get_favourite_medias(scope, self.id),
+        )
         selected_medias = _select_indexed(medias, options.selection)
         resolved, failures = await resolve_ugc_videos(
             scope,
@@ -716,10 +607,7 @@ class UgcAllFavouritesSource(MediaSource):
     id: MId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        api = f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={self.id}"
-        response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
-        data = response.get("data") or {}
-        folders: list[dict[str, Any]] = data.get("list") or []
+        folders = await get_all_favourite_folders(scope, self.id)
 
         all_items_options = replace(options, selection=Selection((Range(None, None),)))
         favourites: list[UgcFav] = []
@@ -753,31 +641,10 @@ class UgcSeriesSource(MediaSource):
     id: SeriesId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        info_api = f"https://api.bilibili.com/x/series/series?series_id={self.id}"
-        info = await self._fetch_payload(scope, info_api, "视频系列", f"series_id: {self.id}", "data")
+        info = await get_series_info(scope, self.id)
         meta = info.get("meta", {})
         mid = MId(str(meta["mid"]))
-
-        page_size = 30
-        page_num = 1
-        archives: list[dict[str, Any]] = []
-        while True:
-            list_api = (
-                "https://api.bilibili.com/x/series/archives"
-                f"?mid={mid}&series_id={self.id}&only_normal=true"
-                f"&pn={page_num}&ps={page_size}"
-            )
-            payload = await self._fetch_payload(scope, list_api, "视频系列", f"series_id: {self.id}", "data")
-            page_archives: list[dict[str, Any]] = payload.get("archives") or []
-            archives.extend(item for item in page_archives if item.get("bvid"))
-
-            total = payload.get("page", {}).get("total")
-            if isinstance(total, int):
-                if page_num * page_size >= total:
-                    break
-            elif len(page_archives) < page_size:
-                break
-            page_num += 1
+        archives = await get_series_archives(scope, self.id, mid)
 
         selected_archives = _select_indexed(archives, options.selection)
         resolved, failures = await resolve_ugc_videos(
@@ -803,60 +670,19 @@ class UgcSpaceSource(MediaSource):
     id: MId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        wbi_img = await get_wbi_img(scope)
-        profile = await self._fetch_payload(
-            scope,
-            "https://api.bilibili.com/x/space/wbi/acc/info",
-            "UP 主",
-            f"mid: {self.id}",
-            "data",
-            params=encode_wbi({"mid": self.id}, wbi_img),
-        )
-
-        page_size = 30
-        page_num = 1
-        archives: list[dict[str, Any]] = []
         publication_time_filter = options.publication_time_filter
-        while True:
-            payload = await self._fetch_payload(
-                scope,
-                "https://api.bilibili.com/x/space/wbi/arc/search",
-                "UP 主空间",
-                f"mid: {self.id}",
-                "data",
-                params=encode_wbi(
-                    {
-                        "mid": self.id,
-                        "ps": page_size,
-                        "tid": 0,
-                        "pn": page_num,
-                        "order": "pubdate",
-                    },
-                    wbi_img,
-                ),
-            )
-            page_archives: list[dict[str, Any]] = payload.get("list", {}).get("vlist") or []
-            for item in page_archives:
-                if not item.get("bvid"):
-                    continue
-                created = item.get("created")
-                if publication_time_filter is None or created is None or publication_time_filter.matches(int(created)):
-                    archives.append(item)
-
-            if publication_time_filter is not None and any(
-                item.get("created") is not None
-                and int(item["created"]) < publication_time_filter.start_timestamp
-                for item in page_archives
-            ):
-                break
-
-            total = payload.get("page", {}).get("count")
-            if isinstance(total, int):
-                if page_num * page_size >= total:
-                    break
-            elif len(page_archives) < page_size:
-                break
-            page_num += 1
+        profile, all_archives = await get_space_profile_and_archives(
+            scope,
+            self.id,
+            stop_before_timestamp=(
+                publication_time_filter.start_timestamp if publication_time_filter is not None else None
+            ),
+        )
+        archives: list[dict[str, Any]] = []
+        for item in all_archives:
+            created = item.get("created")
+            if publication_time_filter is None or created is None or publication_time_filter.matches(int(created)):
+                archives.append(item)
 
         selected_archives = _select_indexed(archives, options.selection)
         resolved, failures = await resolve_ugc_videos(
@@ -882,14 +708,7 @@ class UgcSpaceSource(MediaSource):
 
 class UgcWatchLaterSource(MediaSource):
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        payload = await self._fetch_payload(
-            scope,
-            "https://api.bilibili.com/x/v2/history/toview/web",
-            "稍后再看",
-            "watch_later",
-            "data",
-        )
-        entries: list[dict[str, Any]] = [item for item in payload.get("list", []) if item.get("bvid")]
+        entries = await get_watch_later_entries(scope)
         selected_entries = _select_indexed(entries, options.selection)
         resolved, failures = await resolve_ugc_videos(
             scope,
