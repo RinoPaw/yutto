@@ -112,7 +112,7 @@ def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: py
     assert any("第 2 项 BVBAD" in message and "视频已失效" in message for message, _ in reports)
 
 
-def test_manager_raises_original_error_when_every_child_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_manager_keeps_all_child_failures_for_download(monkeypatch: pytest.MonkeyPatch) -> None:
     error = NotFoundError("视频已失效")
 
     class FakeSource:
@@ -130,10 +130,30 @@ def test_manager_raises_original_error_when_every_child_fails(monkeypatch: pytes
     monkeypatch.setattr("yutto.download_manager.emit_download_report", lambda *args, **kwargs: None)
     _install_manager_stubs(monkeypatch)
 
-    with pytest.raises(NotFoundError) as raised:
-        asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
+    result = asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
 
-    assert raised.value is error
+    assert isinstance(result.media, UgcSeries)
+    assert result.media.items == []
+    assert result.failures[0].error is error
+
+
+def test_manager_returns_empty_download_for_expected_root_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = NotFoundError("视频已失效")
+
+    class FakeSource:
+        async def resolve(self, scope: object, options: object) -> MediaResolveResult:
+            return MediaResolveResult(
+                media=None,
+                failures=(MediaResolveFailure(index=1, source=BvId("BVBAD"), error=error),),
+            )
+
+    monkeypatch.setattr("yutto.download_manager.parse", lambda value: FakeSource())
+    monkeypatch.setattr("yutto.download_manager.emit_download_report", lambda *args, **kwargs: None)
+    _install_manager_stubs(monkeypatch)
+
+    result = asyncio.run(DownloadManager().process_request(cast("Any", None), _request()))
+
+    assert result == ()
 
 
 def test_manager_propagates_root_source_failure_directly(monkeypatch: pytest.MonkeyPatch) -> None:
