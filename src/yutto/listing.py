@@ -174,7 +174,7 @@ def _ugc_context(
     series_title: str | None = None
 
     if len(ancestry) == 1:
-        auto_path = "{title}/{name}" if len(video.items) > 1 else "{title}"
+        auto_path = "{title}/{name}" if video.page_count > 1 else "{title}"
         return video, auto_path, name, title, username, series_title
 
     root = ancestry[-2]
