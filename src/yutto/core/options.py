@@ -33,13 +33,16 @@ DEFAULT_SOURCE_OPTIONS = SourceOptions()
 DEFAULT_RESOURCE_OPTIONS = ResourceOptions()
 
 
+def _legacy_batch_selection(expression: str | None, *, batch: bool) -> str | None:
+    """Keep old `-b` without `-p` equivalent to selecting the whole collection."""
+    return "~" if expression is None and batch else expression
+
+
 def source_options_from_request(request: DownloadRequest) -> SourceOptions:
-    expression = request.selection.episodes
-    if expression is None and request.scope.batch:
-        # Legacy compatibility only: old CLI usage treated `-b` without `-p`
-        # as selecting the whole top-level collection. New callers should use
-        # an explicit selection (for example `-p "~"`) and do not need `-b`.
-        expression = "~"
+    expression = _legacy_batch_selection(
+        request.selection.episodes,
+        batch=request.scope.batch,
+    )
     return SourceOptions(
         selection=parse_selection(expression) if expression is not None else None,
         with_extra_episodes=request.scope.with_extra_episodes,
