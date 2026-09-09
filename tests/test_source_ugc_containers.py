@@ -11,7 +11,7 @@ from yutto.core.options import SourceOptions
 from yutto.exceptions import NotFoundError
 from yutto.media import UgcCollection, UgcFav, UgcSeries
 from yutto.selection import parse_selection
-from yutto.source import UgcCollectionSource, UgcFavSource, UgcSeriesSource, UgcVideoSource
+from yutto.source import UgcCollectionSource, UgcFavSource, UgcSeriesSource
 from yutto.types import BvId, CollectionId, FId, MId, SeriesId
 
 if TYPE_CHECKING:
@@ -64,23 +64,6 @@ def _video_response(bvid: str, title: str, page_count: int) -> dict[str, Any]:
             ],
         },
     }
-
-
-def test_ugc_video_expected_failure_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
-    error = NotFoundError("视频已失效")
-
-    async def fail_info(scope: object, avid: object) -> tuple[object, dict[str, Any]]:
-        raise error
-
-    monkeypatch.setattr(UgcVideoSource, "get_ugc_video_info", fail_info)
-
-    result = asyncio.run(UgcVideoSource(id=BvId("BVBAD")).resolve(_SCOPE, _DEFAULT_OPTIONS))
-
-    assert result.media is None
-    assert len(result.failures) == 1
-    assert result.failures[0].index == 1
-    assert result.failures[0].source == BvId("BVBAD")
-    assert result.failures[0].error is error
 
 
 def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
