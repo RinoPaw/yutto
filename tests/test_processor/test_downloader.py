@@ -241,7 +241,12 @@ async def test_cancelling_transfer_cleans_its_temporary_directory(
     blocker = (page_size, 2 * page_size - 1)
     later_range = f"bytes={2 * page_size}-{3 * page_size - 1}"
     staging_directory = tmp_path / "transfer-owned"
-    monkeypatch.setattr(transfer_module.tempfile, "mkdtemp", lambda **_kwargs: str(staging_directory))
+
+    def make_staging_directory(**_kwargs: object) -> str:
+        staging_directory.mkdir()
+        return str(staging_directory)
+
+    monkeypatch.setattr(transfer_module.tempfile, "mkdtemp", make_staging_directory)
 
     with LocalRangeServer(payload, delays={blocker: 0.2}) as server:
         async with create_client(trust_env=False) as session:
@@ -487,9 +492,13 @@ async def test_rust_backend_reaps_a_started_handle_when_later_setup_fails(
                 raise RuntimeError("second setup failed")
             return handle
 
+    def make_staging_directory(**_kwargs: object) -> str:
+        staging_directory.mkdir()
+        return str(staging_directory)
+
     monkeypatch.setattr(Fetcher, "get_size", get_size)
     monkeypatch.setattr(transfer_module, "wait_for_transfer", wait_for_transfer)
-    monkeypatch.setattr(transfer_module.tempfile, "mkdtemp", lambda **_kwargs: str(staging_directory))
+    monkeypatch.setattr(transfer_module.tempfile, "mkdtemp", make_staging_directory)
 
     with pytest.raises(RuntimeError, match="second setup failed"):
         await download_files(
