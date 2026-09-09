@@ -59,3 +59,32 @@ def test_source_selection_is_parsed_at_request_boundary() -> None:
 
     assert isinstance(options.selection, Selection)
     assert options.selection.resolve(4) == (3, 1, 2, 3, 4)
+
+
+def test_legacy_batch_without_selection_selects_whole_collection() -> None:
+    request = DownloadRequest.model_validate(
+        {
+            "source": {"url": "ss456"},
+            "scope": {"batch": True},
+        }
+    )
+
+    options = source_options_from_request(request)
+
+    assert isinstance(options.selection, Selection)
+    assert options.selection.resolve(4) == (1, 2, 3, 4)
+
+
+def test_explicit_selection_is_unchanged_by_legacy_batch_flag() -> None:
+    request = DownloadRequest.model_validate(
+        {
+            "source": {"url": "ss456"},
+            "scope": {"batch": True},
+            "selection": {"episodes": "3,1"},
+        }
+    )
+
+    options = source_options_from_request(request)
+
+    assert isinstance(options.selection, Selection)
+    assert options.selection.resolve(4) == (3, 1)
