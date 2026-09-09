@@ -51,7 +51,7 @@ class ResourceRequestOptions(_RequestModel):
     audio: bool = DEFAULT_RESOURCE_OPTIONS.audio
     danmaku: bool = DEFAULT_RESOURCE_OPTIONS.danmaku
     subtitle: bool = DEFAULT_RESOURCE_OPTIONS.subtitle
-    metadata: bool = DEFAULT_RESOURCE_OPTIONS.metadata
+    metadata: bool = False
     cover: bool = DEFAULT_RESOURCE_OPTIONS.cover
     chapter_info: bool = DEFAULT_RESOURCE_OPTIONS.chapter_info
     save_cover: bool = False

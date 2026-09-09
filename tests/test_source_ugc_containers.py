@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from returns.result import Success
@@ -14,7 +14,11 @@ from yutto.selection import parse_selection
 from yutto.source import UgcCollectionSource, UgcFavSource, UgcSeriesSource
 from yutto.types import BvId, CollectionId, FId, MId, SeriesId
 
+if TYPE_CHECKING:
+    from yutto.core.execution import ExecutionScope
+
 _DEFAULT_OPTIONS = SourceOptions()
+_SCOPE = cast("ExecutionScope", None)
 
 
 def _install_fetcher_stub(
@@ -92,9 +96,7 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
         selection=parse_selection("2"),
         fetch_tags=True,
     )
-    result = asyncio.run(
-        UgcSeriesSource(id=SeriesId("456")).resolve(None, options)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_SCOPE, options))
 
     assert isinstance(result.media, UgcSeries)
     assert result.failures == ()
@@ -133,7 +135,7 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
         UgcCollectionSource(
             id=CollectionId("456"),
             owner_id=MId("123"),
-        ).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
+        ).resolve(_SCOPE, _DEFAULT_OPTIONS)
     )
 
     assert isinstance(result.media, UgcCollection)
@@ -179,7 +181,7 @@ def test_favourite_preserves_folder_owner_and_item_titles(monkeypatch: pytest.Mo
     )
     options = replace(_DEFAULT_OPTIONS, selection=parse_selection("1~2"))
 
-    result = asyncio.run(UgcFavSource(id=FId("456")).resolve(None, options))  # type: ignore[arg-type]
+    result = asyncio.run(UgcFavSource(id=FId("456")).resolve(_SCOPE, options))
 
     assert isinstance(result.media, UgcFav)
     assert result.media.metadata.owner == "收藏者"
@@ -217,7 +219,7 @@ def test_series_keeps_successes_and_records_expected_child_failure(monkeypatch: 
     )
     options = replace(_DEFAULT_OPTIONS, selection=parse_selection("1~3"))
 
-    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(None, options))  # type: ignore[arg-type]
+    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_SCOPE, options))
 
     assert isinstance(result.media, UgcSeries)
     assert [video.metadata.title for video in result.media.items] == ["第一个", "第三个"]
@@ -251,4 +253,4 @@ def test_series_programming_error_aborts_task_group(monkeypatch: pytest.MonkeyPa
     options = replace(_DEFAULT_OPTIONS, selection=parse_selection("1~2"))
 
     with pytest.raises(TypeError, match="programming error"):
-        asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(None, options))  # type: ignore[arg-type]
+        asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_SCOPE, options))

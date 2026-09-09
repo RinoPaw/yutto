@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -10,6 +10,11 @@ from yutto.media import UgcPage
 from yutto.resource import ResourceManifest, resolve_resource_manifest
 from yutto.types import BvId, CId
 from yutto.utils.metadata import ItemMetaData
+
+if TYPE_CHECKING:
+    from yutto.core.execution import ExecutionScope
+
+_SCOPE = cast("ExecutionScope", None)
 
 
 def test_ugc_resource_manifest_uses_page_avid(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,7 +43,7 @@ def test_ugc_resource_manifest_uses_page_avid(monkeypatch: pytest.MonkeyPatch) -
         cover=False,
         chapter_info=False,
     )
-    manifest = asyncio.run(resolve_resource_manifest(None, page, options))  # type: ignore[arg-type]
+    manifest = asyncio.run(resolve_resource_manifest(_SCOPE, page, options))
 
     assert isinstance(manifest, ResourceManifest)
     assert page.avid == avid
@@ -58,7 +63,7 @@ def test_resource_manifest_keeps_cover_as_url() -> None:
     )
     manifest = asyncio.run(
         resolve_resource_manifest(
-            None,  # type: ignore[arg-type]
+            _SCOPE,
             page,
             ResourceOptions(video=False, audio=False, subtitle=False, danmaku=False, chapter_info=False),
         )

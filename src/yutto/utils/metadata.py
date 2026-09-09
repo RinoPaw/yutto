@@ -66,23 +66,23 @@ class ItemMetaData:
 
 
 def _metadata_as_dict(metadata: MetaData | ItemMetaData) -> dict[str, Any]:
-    if isinstance(metadata, dict):
-        return dict(metadata)
-    return {
-        "title": metadata.title,
-        "show_title": metadata.show_title,
-        "plot": metadata.plot,
-        "thumb": metadata.thumb,
-        "premiered": metadata.premiered,
-        "dateadded": metadata.dateadded,
-        "actor": metadata.actors,
-        "genre": metadata.genre,
-        "tag": metadata.tag,
-        "source": metadata.source,
-        "original_filename": metadata.original_filename,
-        "website": metadata.website,
-        "chapter_info_data": metadata.chapter_info_data,
-    }
+    if isinstance(metadata, ItemMetaData):
+        return {
+            "title": metadata.title,
+            "show_title": metadata.show_title,
+            "plot": metadata.plot,
+            "thumb": metadata.thumb,
+            "premiered": metadata.premiered,
+            "dateadded": metadata.dateadded,
+            "actor": metadata.actors,
+            "genre": metadata.genre,
+            "tag": metadata.tag,
+            "source": metadata.source,
+            "original_filename": metadata.original_filename,
+            "website": metadata.website,
+            "chapter_info_data": metadata.chapter_info_data,
+        }
+    return dict(metadata)
 
 
 def metadata_value_format(metadata: MetaData | ItemMetaData, metadata_format: dict[str, str]) -> dict[str, Any]:
@@ -107,10 +107,10 @@ def write_metadata(metadata: MetaData | ItemMetaData, video_path: Path, metadata
 
 
 def attach_chapter_info(metadata: MetaData | ItemMetaData, chapter_info_data: list[ChapterInfoData]):
-    if isinstance(metadata, dict):
-        metadata["chapter_info_data"] = chapter_info_data
-    else:
+    if isinstance(metadata, ItemMetaData):
         metadata.chapter_info_data = chapter_info_data
+    else:
+        metadata["chapter_info_data"] = chapter_info_data
 
 
 # https://wklchris.github.io/blog/FFmpeg/FFmpeg.html#id26

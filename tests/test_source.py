@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from returns.result import Success
@@ -27,8 +27,12 @@ from yutto.source import (
 )
 from yutto.types import EpisodeId, MediaId, SeasonId
 
+if TYPE_CHECKING:
+    from yutto.core.execution import ExecutionScope
+
 _NOT_FOUND = {"code": -404, "message": "啥都木有"}
 _DEFAULT_OPTIONS = SourceOptions()
+_SCOPE = cast("ExecutionScope", None)
 
 
 def _parse(value: str) -> Any:
@@ -185,9 +189,7 @@ def test_bangumi_episode_source_single_request_resolution(monkeypatch: pytest.Mo
         {"pgc/view/web/season": _bangumi_season_response("123")},
     )
 
-    result = asyncio.run(
-        BangumiEpisodeSource(id=EpisodeId("123")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(BangumiEpisodeSource(id=EpisodeId("123")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, BangumiEpisode)
     assert result.failures == ()
@@ -207,9 +209,7 @@ def test_cheese_episode_source_rejects_quirk_response(monkeypatch: pytest.Monkey
     )
 
     with pytest.raises(NotFoundError):
-        asyncio.run(
-            CheeseEpisodeSource(id=EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-        )
+        asyncio.run(CheeseEpisodeSource(id=EpisodeId("779775")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
 
 def test_episode_source_resolves_when_only_bangumi_has_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,9 +221,7 @@ def test_episode_source_resolves_when_only_bangumi_has_it(monkeypatch: pytest.Mo
         },
     )
 
-    result = asyncio.run(
-        _episode_source(EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(_episode_source(EpisodeId("779775")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, BangumiEpisode)
     assert result.media.episode_id == EpisodeId("779775")
@@ -239,9 +237,7 @@ def test_episode_source_resolves_when_only_cheese_has_it(monkeypatch: pytest.Mon
         },
     )
 
-    result = asyncio.run(
-        _episode_source(EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(_episode_source(EpisodeId("779775")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, CheeseEpisode)
     assert result.media.episode_id == EpisodeId("779775")
@@ -257,9 +253,7 @@ def test_episode_source_raises_when_both_namespaces_have_it(monkeypatch: pytest.
     )
 
     with pytest.raises(WrongArgumentError):
-        asyncio.run(
-            _episode_source(EpisodeId("779775")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-        )
+        asyncio.run(_episode_source(EpisodeId("779775")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
 
 def test_episode_source_raises_when_neither_namespace_has_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -272,9 +266,7 @@ def test_episode_source_raises_when_neither_namespace_has_it(monkeypatch: pytest
     )
 
     with pytest.raises(NotFoundError):
-        asyncio.run(
-            _episode_source(EpisodeId("999999")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-        )
+        asyncio.run(_episode_source(EpisodeId("999999")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
 
 def test_episode_source_propagates_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -287,9 +279,7 @@ def test_episode_source_propagates_unexpected_errors(monkeypatch: pytest.MonkeyP
     )
 
     with pytest.raises(NoAccessPermissionError):
-        asyncio.run(
-            _episode_source(EpisodeId("123")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-        )
+        asyncio.run(_episode_source(EpisodeId("123")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
 
 def test_episode_source_prefers_success_over_other_namespace_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,9 +291,7 @@ def test_episode_source_prefers_success_over_other_namespace_error(monkeypatch: 
         },
     )
 
-    result = asyncio.run(
-        _episode_source(EpisodeId("123")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(_episode_source(EpisodeId("123")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, BangumiEpisode)
 
@@ -317,9 +305,7 @@ def test_season_source_resolves_bangumi_only(monkeypatch: pytest.MonkeyPatch) ->
         },
     )
 
-    result = asyncio.run(
-        _season_source(SeasonId("34184")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(_season_source(SeasonId("34184")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, BangumiSeason)
     assert result.media.season_id == SeasonId("34184")
@@ -335,9 +321,7 @@ def test_season_source_resolves_cheese_only(monkeypatch: pytest.MonkeyPatch) -> 
         },
     )
 
-    result = asyncio.run(
-        _season_source(SeasonId("34184")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(_season_source(SeasonId("34184")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, CheeseSeason)
     assert [item.episode_id for item in result.media.items] == [EpisodeId("1122054")]
@@ -353,9 +337,7 @@ def test_season_source_raises_when_both_namespaces_have_it(monkeypatch: pytest.M
     )
 
     with pytest.raises(WrongArgumentError):
-        asyncio.run(
-            _season_source(SeasonId("34184")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-        )
+        asyncio.run(_season_source(SeasonId("34184")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
 
 def test_season_source_raises_when_neither_namespace_has_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -368,9 +350,7 @@ def test_season_source_raises_when_neither_namespace_has_it(monkeypatch: pytest.
     )
 
     with pytest.raises(NotFoundError):
-        asyncio.run(
-            _season_source(SeasonId("999999")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-        )
+        asyncio.run(_season_source(SeasonId("999999")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
 
 def test_bangumi_season_source_resolves_media_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -382,9 +362,7 @@ def test_bangumi_season_source_resolves_media_id(monkeypatch: pytest.MonkeyPatch
         },
     )
 
-    result = asyncio.run(
-        BangumiSeasonSource(id=MediaId("789")).resolve(None, _DEFAULT_OPTIONS)  # type: ignore[arg-type]
-    )
+    result = asyncio.run(BangumiSeasonSource(id=MediaId("789")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, BangumiSeason)
     assert result.media.season_id == SeasonId("456")
@@ -418,7 +396,7 @@ def test_bangumi_season_source_filters_extra_and_preview_before_selection(
 
     result = asyncio.run(
         BangumiSeasonSource(id=SeasonId("456")).resolve(
-            None,  # type: ignore[arg-type]
+            _SCOPE,
             replace(
                 _DEFAULT_OPTIONS,
                 selection=parse_selection("1~-1"),

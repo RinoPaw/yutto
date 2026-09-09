@@ -299,6 +299,8 @@ async def _resolve_danmaku(
             f"https://api.bilibili.com/x/v2/dm/web/view?type=1&oid={cid}&pid={aid.value}",
         )
     )
+    if meta is None:
+        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{format_ids(avid, cid)}）")
     size = get_danmaku_meta_size(meta)
     return source_type, [
         f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"
