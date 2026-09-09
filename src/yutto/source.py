@@ -459,6 +459,7 @@ class UgcVideoSource(MediaSource):
         return MediaResolveResult(
             media=UgcVideo(
                 avid=resolved_avid,
+                page_count=len(page_items),
                 metadata=self._make_ugc_metadata(
                     video_info,
                     tags,
