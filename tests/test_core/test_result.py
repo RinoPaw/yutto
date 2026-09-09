@@ -32,13 +32,15 @@ def test_result_models_are_frozen_and_reject_extra_fields():
 
 
 def test_resolve_result_keeps_media_tree_without_flat_projection():
+    avid = BvId("BV1D84y1t76J")
     page = UgcPage(
+        avid=avid,
         page=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2"),
     )
     video = UgcVideo(
-        avid=BvId("BV1D84y1t76J"),
+        avid=avid,
         metadata=ItemMetaData(title="标题"),
         items=[page],
     )

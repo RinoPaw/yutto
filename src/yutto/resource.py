@@ -10,7 +10,7 @@ from yutto.auth import get_user_info
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
 from yutto.core.options import ResourceOptions
 from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
-from yutto.media import BangumiEpisode, CheeseEpisode, MediaContainer, MediaItem, UgcPage, UgcVideo
+from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
 from yutto.types import AudioUrlMeta, VideoUrlMeta, format_ids
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
@@ -308,7 +308,6 @@ async def _resolve_danmaku(
 
 async def resolve_resource_manifest(
     scope: ExecutionScope,
-    parent: MediaContainer,
     item: MediaItem,
     options: ResourceOptions,
 ) -> ResourceManifest:
@@ -320,9 +319,7 @@ async def resolve_resource_manifest(
     chapter_info_url: str | None = None
 
     if isinstance(item, UgcPage):
-        if not isinstance(parent, UgcVideo):
-            raise TypeError("UgcPage parent must be UgcVideo")
-        avid = parent.avid
+        avid = item.avid
         if options.video or options.audio:
             videos, audios = await get_ugc_video_playurl(
                 scope,

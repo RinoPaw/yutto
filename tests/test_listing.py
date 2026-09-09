@@ -36,14 +36,14 @@ def test_root_ugc_path_uses_media_tree_shape() -> None:
     single = UgcVideo(
         avid=avid,
         metadata=ItemMetaData(title="投稿", owner="UP"),
-        items=[UgcPage(page=3, cid=CId("456"), metadata=ItemMetaData(title="P3"))],
+        items=[UgcPage(avid=avid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3"))],
     )
     multi = UgcVideo(
         avid=avid,
         metadata=ItemMetaData(title="投稿", owner="UP"),
         items=[
-            UgcPage(page=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
-            UgcPage(page=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),
+            UgcPage(avid=avid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
+            UgcPage(avid=avid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),
         ],
     )
 
@@ -106,17 +106,19 @@ def test_cheese_path_uses_original_episode_index() -> None:
 
 
 def test_nested_ugc_paths_follow_media_hierarchy() -> None:
+    single_avid = BvId("BV1D84y1t76J")
     single = UgcVideo(
-        avid=BvId("BV1D84y1t76J"),
+        avid=single_avid,
         metadata=ItemMetaData(title="单P", owner="UP"),
-        items=[UgcPage(page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+        items=[UgcPage(avid=single_avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
     )
+    multi_avid = BvId("BV1D84y1t76K")
     multi = UgcVideo(
-        avid=BvId("BV1D84y1t76K"),
+        avid=multi_avid,
         metadata=ItemMetaData(title="多P", owner="UP"),
         items=[
-            UgcPage(page=1, cid=CId("201"), metadata=ItemMetaData(title="第一段")),
-            UgcPage(page=2, cid=CId("202"), metadata=ItemMetaData(title="第二段")),
+            UgcPage(avid=multi_avid, page=1, cid=CId("201"), metadata=ItemMetaData(title="第一段")),
+            UgcPage(avid=multi_avid, page=2, cid=CId("202"), metadata=ItemMetaData(title="第二段")),
         ],
     )
 
@@ -154,10 +156,11 @@ def test_nested_ugc_paths_follow_media_hierarchy() -> None:
 
 
 def test_space_and_watch_later_paths_keep_nested_page_layouts() -> None:
+    avid = BvId("BV1D84y1t76J")
     video = UgcVideo(
-        avid=BvId("BV1D84y1t76J"),
+        avid=avid,
         metadata=ItemMetaData(title="投稿", owner="视频UP"),
-        items=[UgcPage(page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+        items=[UgcPage(avid=avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
     )
     space = UgcSpace(
         mid=MId("123"),
@@ -171,18 +174,20 @@ def test_space_and_watch_later_paths_keep_nested_page_layouts() -> None:
 
 
 def test_filter_media_tree_preserves_hierarchy_and_drops_empty_nested_branches() -> None:
+    first_avid = BvId("BV1D84y1t76J")
     first = UgcVideo(
-        avid=BvId("BV1D84y1t76J"),
+        avid=first_avid,
         metadata=ItemMetaData(title="A"),
         items=[
-            UgcPage(page=1, cid=CId("101"), metadata=ItemMetaData(title="A1")),
-            UgcPage(page=2, cid=CId("102"), metadata=ItemMetaData(title="A2")),
+            UgcPage(avid=first_avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="A1")),
+            UgcPage(avid=first_avid, page=2, cid=CId("102"), metadata=ItemMetaData(title="A2")),
         ],
     )
+    second_avid = BvId("BV1D84y1t76K")
     second = UgcVideo(
-        avid=BvId("BV1D84y1t76K"),
+        avid=second_avid,
         metadata=ItemMetaData(title="B"),
-        items=[UgcPage(page=1, cid=CId("201"), metadata=ItemMetaData(title="B1"))],
+        items=[UgcPage(avid=second_avid, page=1, cid=CId("201"), metadata=ItemMetaData(title="B1"))],
     )
     root = UgcSeries(
         series_id=SeriesId("99"),
@@ -200,15 +205,17 @@ def test_filter_media_tree_preserves_hierarchy_and_drops_empty_nested_branches()
 
 
 def test_publication_filter_keeps_empty_root_container() -> None:
+    avid = BvId("BV1D84y1t76J")
     root = UgcSeries(
         series_id=SeriesId("99"),
         metadata=ItemMetaData(title="系列"),
         items=[
             UgcVideo(
-                avid=BvId("BV1D84y1t76J"),
+                avid=avid,
                 metadata=ItemMetaData(title="A"),
                 items=[
                     UgcPage(
+                        avid=avid,
                         page=1,
                         cid=CId("101"),
                         metadata=ItemMetaData(title="A1", premiered=1_700_000_000),
