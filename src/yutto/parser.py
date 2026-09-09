@@ -112,7 +112,7 @@ class UgcVideoParser(Parser):
             AId(oid) if oid else None,
         ]
         values = [value for value in values if value]
-        return values[0]
+        return values[0] if values else None
 
 
 class BangumiParser(Parser):
