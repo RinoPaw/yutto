@@ -9,7 +9,11 @@ if TYPE_CHECKING:
     from yutto.types import CollectionId, MId
 
 
-async def get_collection(scope: ExecutionScope, collection_id: CollectionId, owner_id: MId) -> tuple[str, list[dict[str, Any]]]:
+async def get_collection(
+    scope: ExecutionScope,
+    collection_id: CollectionId,
+    owner_id: MId,
+) -> tuple[str, list[dict[str, Any]]]:
     page_size = 30
     page_num = 1
     archives: list[dict[str, Any]] = []
