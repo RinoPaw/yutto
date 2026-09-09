@@ -35,16 +35,8 @@ DEFAULT_SOURCE_OPTIONS = SourceOptions()
 DEFAULT_RESOURCE_OPTIONS = ResourceOptions()
 
 
-def _legacy_batch_selection(expression: str | None, *, batch: bool) -> str | None:
-    """Keep old `-b` without `-p` equivalent to selecting the whole collection."""
-    return "~" if expression is None and batch else expression
-
-
 def source_options_from_request(request: DownloadRequest) -> SourceOptions:
-    expression = _legacy_batch_selection(
-        request.selection.episodes,
-        batch=request.scope.batch,
-    )
+    expression = request.selection.episodes
     publication_time_filter = None
     if request.selection.start_time is not None or request.selection.end_time is not None:
         publication_time_filter = PublicationTimeFilter.from_strings(
