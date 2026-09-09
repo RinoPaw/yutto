@@ -132,7 +132,7 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
     result = asyncio.run(
         source.resolve(
             cast("Any", None),
-            replace(_DEFAULT_OPTIONS, selection=parse_selection("3,1,3")),
+            replace(_DEFAULT_OPTIONS, selection=parse_selection("3,5,1,3")),
         )
     )
     assert isinstance(result.media, UgcVideo)

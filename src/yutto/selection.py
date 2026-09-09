@@ -9,7 +9,9 @@ Grammar::
 Whitespace is ignored between tokens. Ranges are inclusive and follow their
 written direction. ``^`` denotes the first item, ``$`` the last item, and
 negative integers are resolved from the end. Evaluation preserves expression
-order while removing duplicate positions after resolution.
+order while removing duplicate positions after resolution. Positions outside
+the current context are ignored by ``resolve`` and retained in
+``SelectionResult.out_of_range`` by ``evaluate``.
 """
 
 from __future__ import annotations
@@ -60,42 +62,51 @@ SelectionItem: TypeAlias = Position | Range
 
 
 @dataclass(frozen=True, slots=True)
+class SelectionResult:
+    indexes: tuple[int, ...]
+    out_of_range: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Selection:
     items: tuple[SelectionItem, ...]
 
-    def resolve(self, total: int) -> tuple[int, ...]:
+    def evaluate(self, total: int) -> SelectionResult:
         if total < 0:
             raise ValueError("total must not be negative")
         if total == 0:
-            raise WrongArgumentError("没有可供选择的项目")
+            return SelectionResult(indexes=(), out_of_range=())
 
-        result: list[int] = []
+        expanded: list[int] = []
         for item in self.items:
             if isinstance(item, Range):
                 start = 1 if item.start is None else _resolve_position(item.start, total)
                 end = total if item.end is None else _resolve_position(item.end, total)
                 step = 1 if end >= start else -1
-                result.extend(range(start, end + step, step))
+                expanded.extend(range(start, end + step, step))
             else:
-                result.append(_resolve_position(item, total))
-        return tuple(dict.fromkeys(result))
+                expanded.append(_resolve_position(item, total))
+
+        resolved = tuple(dict.fromkeys(expanded))
+        return SelectionResult(
+            indexes=tuple(index for index in resolved if 1 <= index <= total),
+            out_of_range=tuple(index for index in resolved if index < 1 or index > total),
+        )
+
+    def resolve(self, total: int) -> tuple[int, ...]:
+        return self.evaluate(total).indexes
 
 
 def _resolve_position(position: Position, total: int) -> int:
     if position is Anchor.FIRST:
-        value = 1
-    elif position is Anchor.LAST:
-        value = total
-    else:
-        value = position.value
-        if value == 0:
-            raise WrongArgumentError("不可使用 0 作为序号（序号从 1 开始计算）")
-        if value < 0:
-            value = total + value + 1
+        return 1
+    if position is Anchor.LAST:
+        return total
 
-    if value < 1 or value > total:
-        raise WrongArgumentError(f"序号 {value} 超出范围（1~{total}）")
-    return value
+    value = position.value
+    if value == 0:
+        raise WrongArgumentError("不可使用 0 作为序号（序号从 1 开始计算）")
+    return value if value > 0 else total + value + 1
 
 
 class _Lexer:
@@ -235,4 +246,12 @@ def compile_selection(source: str, total: int) -> tuple[int, ...]:
     return parse_selection(source).resolve(total)
 
 
-__all__ = ["Anchor", "Index", "Range", "Selection", "compile_selection", "parse_selection"]
+__all__ = [
+    "Anchor",
+    "Index",
+    "Range",
+    "Selection",
+    "SelectionResult",
+    "compile_selection",
+    "parse_selection",
+]
