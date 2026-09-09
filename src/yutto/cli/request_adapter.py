@@ -123,7 +123,7 @@ def _download_request_defaults_from_settings(settings: YuttoSettings) -> dict[st
             "login_strict": settings.basic.login_strict,
             "vip_strict": settings.basic.vip_strict,
         },
-        "scope": {"batch": False, "with_extra_episodes": settings.batch.with_extra_episodes},
+        "scope": {"with_extra_episodes": settings.batch.with_extra_episodes},
         "selection": {
             "episodes": None,
             "skip_preview": settings.batch.skip_preview,
