@@ -116,15 +116,9 @@ class UgcVideoParser(Parser):
 
 
 class BangumiParser(Parser):
-    _BANGUMI_EP_URL = re.compile(
-        rf"{_BILIBILI}/bangumi/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE
-    )
-    _BANGUMI_SS_URL = re.compile(
-        rf"{_BILIBILI}/bangumi/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE
-    )
-    _BANGUMI_MD_URL = re.compile(
-        rf"{_BILIBILI}/bangumi/media/md(?P<media_id>[0-9]+){_URL_END}", re.IGNORECASE
-    )
+    _BANGUMI_EP_URL = re.compile(rf"{_BILIBILI}/bangumi/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE)
+    _BANGUMI_SS_URL = re.compile(rf"{_BILIBILI}/bangumi/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE)
+    _BANGUMI_MD_URL = re.compile(rf"{_BILIBILI}/bangumi/media/md(?P<media_id>[0-9]+){_URL_END}", re.IGNORECASE)
     _B23_EP_URL = re.compile(rf"{_B23}/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE)
     _B23_SS_URL = re.compile(rf"{_B23}/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE)
 
@@ -145,12 +139,8 @@ class BangumiParser(Parser):
 
 
 class CheeseParser(Parser):
-    _CHEESE_EP_URL = re.compile(
-        rf"{_BILIBILI}/cheese/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE
-    )
-    _CHEESE_SS_URL = re.compile(
-        rf"{_BILIBILI}/cheese/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE
-    )
+    _CHEESE_EP_URL = re.compile(rf"{_BILIBILI}/cheese/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE)
+    _CHEESE_SS_URL = re.compile(rf"{_BILIBILI}/cheese/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE)
 
     def parse(self, url: str) -> CheeseEpisodeSource | CheeseSeasonSource | None:
         if match := self._CHEESE_EP_URL.fullmatch(url):
@@ -184,9 +174,7 @@ class UgcCollectionParser(Parser):
     _SPACE_LIST_URL = re.compile(
         rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/lists/(?P<list_id>[0-9]+){_URL_END}", re.IGNORECASE
     )
-    _FAVOURITE_URL = re.compile(
-        rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE
-    )
+    _FAVOURITE_URL = re.compile(rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE)
 
     def parse(self, url: str) -> MediaSource | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
@@ -211,9 +199,7 @@ class UgcCollectionParser(Parser):
 
 
 class UgcFavParser(Parser):
-    _FAVOURITE_URL = re.compile(
-        rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE
-    )
+    _FAVOURITE_URL = re.compile(rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)/favlist{_URL_END}", re.IGNORECASE)
 
     def parse(self, url: str) -> MediaSource | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
@@ -237,9 +223,7 @@ class UgcWatchLaterParser(Parser):
 
 
 class UgcSpaceParser(Parser):
-    _SPACE_URL = re.compile(
-        rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)(?:/video)?{_URL_END}", re.IGNORECASE
-    )
+    _SPACE_URL = re.compile(rf"{_SPACE_BILIBILI}/(?P<mid>[0-9]+)(?:/video)?{_URL_END}", re.IGNORECASE)
 
     def parse(self, url: str) -> MediaSource | None:
         if match := self._SPACE_URL.fullmatch(url):

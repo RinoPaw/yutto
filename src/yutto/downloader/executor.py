@@ -98,9 +98,7 @@ class DownloadExecutor:
                     emit_download_report("无法获取该视频的章节信息", ReportLevel.WARNING)
 
             metadata_for_write = (
-                replace(metadata, chapter_info_data=list(chapter_info_data))
-                if chapter_info_data
-                else metadata
+                replace(metadata, chapter_info_data=list(chapter_info_data)) if chapter_info_data else metadata
             )
 
             artifacts: list[Artifact] = []

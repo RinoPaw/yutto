@@ -147,11 +147,11 @@ class _Lexer:
         while self.cursor < len(self.source) and _is_ascii_digit(self.source[self.cursor]):
             self.cursor += 1
 
-        digits = self.source[digit_start:self.cursor]
+        digits = self.source[digit_start : self.cursor]
         if len(digits) > 1 and digits.startswith("0"):
             self._error(digit_start, "整数不能包含前导零")
 
-        return _Token(_TokenKind.INTEGER, self.source[start:self.cursor], start)
+        return _Token(_TokenKind.INTEGER, self.source[start : self.cursor], start)
 
     def _error(self, offset: int, message: str) -> NoReturn:
         raise _selection_syntax_error(self.source, offset, message)

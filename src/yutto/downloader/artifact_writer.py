@@ -48,8 +48,7 @@ class ArtifactWriter:
 
         if subtitles:
             paths = tuple(
-                write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
-                for subtitle in subtitles
+                write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"]) for subtitle in subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,

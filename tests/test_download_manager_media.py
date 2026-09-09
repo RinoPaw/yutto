@@ -77,7 +77,7 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
         }
     )
 
-    result = asyncio.run(DownloadManager().resolve_request(cast(Any, None), request))
+    result = asyncio.run(DownloadManager().resolve_request(cast("Any", None), request))
 
     assert isinstance(result.media, UgcVideo)
     assert result.media.metadata.title == "投稿"
@@ -104,7 +104,7 @@ def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: py
     )
     _install_manager_stubs(monkeypatch)
 
-    result = asyncio.run(DownloadManager().resolve_request(cast(Any, None), _request()))
+    result = asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
 
     assert isinstance(result.media, UgcSeries)
     assert len(result.media.items) == 1
@@ -131,7 +131,7 @@ def test_manager_raises_original_error_when_every_child_fails(monkeypatch: pytes
     _install_manager_stubs(monkeypatch)
 
     with pytest.raises(NotFoundError) as raised:
-        asyncio.run(DownloadManager().resolve_request(cast(Any, None), _request()))
+        asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
 
     assert raised.value is error
 
@@ -147,6 +147,6 @@ def test_manager_propagates_root_source_failure_directly(monkeypatch: pytest.Mon
     _install_manager_stubs(monkeypatch)
 
     with pytest.raises(NotFoundError) as raised:
-        asyncio.run(DownloadManager().resolve_request(cast(Any, None), _request()))
+        asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
 
     assert raised.value is error

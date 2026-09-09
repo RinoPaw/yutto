@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from yutto.utils.metadata import ItemMetaData
-
 if TYPE_CHECKING:
     from yutto.types import AvId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
+    from yutto.utils.metadata import ItemMetaData
 
 
 @dataclass(slots=True, kw_only=True)

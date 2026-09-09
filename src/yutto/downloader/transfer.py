@@ -105,9 +105,7 @@ async def download_files(
                     wait_tasks.append(wait_task)
                     batch_tasks.append(wait_task)
 
-                total_size = sum(
-                    size for _, _, size in prepared_transfers[batch_start : batch_start + batch_size]
-                )
+                total_size = sum(size for _, _, size in prepared_transfers[batch_start : batch_start + batch_size])
                 progress_task = asyncio.create_task(show_progress(batch_handles, total_size))
                 await _wait_for_native_transfers(batch_tasks)
                 await progress_task

@@ -142,14 +142,10 @@ class DownloadPlanner:
         )
 
         selected_video_index = (
-            resources.videos.index(video_candidate)
-            if video_candidate is not None and request.resources.video
-            else -1
+            resources.videos.index(video_candidate) if video_candidate is not None and request.resources.video else -1
         )
         selected_audio_index = (
-            resources.audios.index(audio_candidate)
-            if audio_candidate is not None and request.resources.audio
-            else -1
+            resources.audios.index(audio_candidate) if audio_candidate is not None and request.resources.audio else -1
         )
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
