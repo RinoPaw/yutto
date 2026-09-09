@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from yutto.api.common import fetch_payload
-from yutto.types import MediaId, SeasonId
+from yutto.types import SeasonId
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.types import EpisodeId
+    from yutto.types import EpisodeId, MediaId
 
 
 async def get_season_by_episode(scope: ExecutionScope, episode_id: EpisodeId) -> dict[str, Any]:
