@@ -19,6 +19,7 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
 
     video_download_codec, video_save_codec = _split_codec_pair(args.vcodec, "vcodec")
     audio_download_codec, audio_save_codec = _split_codec_pair(args.acodec, "acodec")
+    episodes = args.episodes if args.episodes is not None else ("~" if args.batch else None)
 
     request: dict[str, Any] = {
         "source": {
@@ -30,11 +31,10 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
             "vip_strict": args.vip_strict,
         },
         "scope": {
-            "batch": args.batch,
             "with_extra_episodes": args.with_extra_episodes,
         },
         "selection": {
-            "episodes": args.episodes,
+            "episodes": episodes,
             "skip_preview": args.skip_preview,
             "start_time": args.batch_filter_start_time,
             "end_time": args.batch_filter_end_time,
