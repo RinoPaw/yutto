@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from yutto.auth import validate_user_info
+from yutto.cli.auth import run_auth
 from yutto.cli.cli import cli, handle_default_subcommand
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.input import file_scheme_parser
@@ -18,7 +19,6 @@ from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFac
 from yutto.core.operation import bind_download_report_sink
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, YuttoBaseException
-from yutto.login import run_auth
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
