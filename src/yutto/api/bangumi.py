@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from yutto.api.common import fetch_payload
 from yutto.types import MediaId, SeasonId
+from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -31,14 +32,9 @@ async def get_season(scope: ExecutionScope, season_id: SeasonId) -> dict[str, An
 
 
 async def get_season_id_by_media(scope: ExecutionScope, media_id: MediaId) -> SeasonId:
-    result = await fetch_payload(
-        scope,
-        f"https://api.bilibili.com/pgc/review/user?media_id={media_id}",
-        "该番剧媒体",
-        f"media_id: {media_id}",
-        "result",
-    )
-    return SeasonId(str(result["media"]["season_id"]))
+    api = f"https://api.bilibili.com/pgc/review/user?media_id={media_id}"
+    response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
+    return SeasonId(str(response["result"]["media"]["season_id"]))
 
 
 __all__ = ["get_season", "get_season_by_episode", "get_season_id_by_media"]
