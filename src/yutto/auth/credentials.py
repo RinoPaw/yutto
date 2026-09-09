@@ -1,49 +1,24 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import os
 import platform
-import random
 import re
-import string
-import time
 import tomllib
-import urllib.parse
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
-
-from yutto.types import UserInfo
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from argparse import Namespace
 
-    from yutto.core.execution import ExecutionScope
-
 PROFILE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-USER_INFO_API = "https://api.bilibili.com/x/web-interface/nav"
 
 
 class AuthInfo(TypedDict):
     SESSDATA: str
     bili_jct: str | None
-
-
-class WbiImg(TypedDict):
-    img_key: str
-    sub_key: str
-
-
-dm_img_str_cache = base64.b64encode("".join(random.choices(string.printable, k=random.randint(16, 64))).encode())[
-    :-2
-].decode()
-dm_cover_img_str_cache = base64.b64encode(
-    "".join(random.choices(string.printable, k=random.randint(32, 128))).encode()
-)[:-2].decode()
 
 
 class AuthProfileModel(BaseModel):
@@ -58,150 +33,6 @@ class AuthFileModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     profiles: dict[str, AuthProfileModel] = Field(default_factory=dict)
-
-
-def parse_user_info(res_json: dict[str, Any]) -> UserInfo:
-    res_json_data_any = res_json.get("data")
-    if not isinstance(res_json_data_any, dict):
-        raise ValueError(f"获取用户信息失败，返回值异常：{res_json}")
-    res_json_data = cast("dict[str, Any]", res_json_data_any)
-    return UserInfo(
-        vip_status=res_json_data.get("vipStatus") == 1,
-        is_login=bool(res_json_data.get("isLogin")),
-    )
-
-
-async def get_user_info(scope: ExecutionScope) -> UserInfo:
-    if scope.user_info_cache is not None:
-        return scope.user_info_cache
-    async with scope.user_info_lock:
-        if scope.user_info_cache is None:
-            res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, USER_INFO_API))
-            scope.user_info_cache = parse_user_info(res_json)
-        return scope.user_info_cache
-
-
-def user_info_matches(user_info: UserInfo, check_option: UserInfo) -> bool:
-    if check_option["is_login"] and not user_info["is_login"]:
-        return False
-    if check_option["vip_status"] and not user_info["vip_status"]:
-        return False
-    return True
-
-
-async def validate_user_info(scope: ExecutionScope, check_option: UserInfo) -> bool:
-    if not check_option["is_login"] and not check_option["vip_status"]:
-        return True
-    if scope.user_info_cache is not None:
-        return user_info_matches(scope.user_info_cache, check_option)
-    return user_info_matches(await get_user_info(scope), check_option)
-
-
-async def get_wbi_img(scope: ExecutionScope) -> WbiImg:
-    if scope.wbi_img_cache is not None:
-        return cast("WbiImg", scope.wbi_img_cache)
-    async with scope.wbi_img_lock:
-        if scope.wbi_img_cache is None:
-            res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, USER_INFO_API))
-            wbi_img = WbiImg(
-                img_key=_get_key_from_url(res_json["data"]["wbi_img"]["img_url"]),
-                sub_key=_get_key_from_url(res_json["data"]["wbi_img"]["sub_url"]),
-            )
-            scope.wbi_img_cache = cast("dict[str, str]", dict(wbi_img))
-        return cast("WbiImg", scope.wbi_img_cache)
-
-
-def _get_key_from_url(url: str) -> str:
-    return url.split("/")[-1].split(".")[0]
-
-
-def _get_mixin_key(value: str) -> str:
-    char_indices = [
-        46,
-        47,
-        18,
-        2,
-        53,
-        8,
-        23,
-        32,
-        15,
-        50,
-        10,
-        31,
-        58,
-        3,
-        45,
-        35,
-        27,
-        43,
-        5,
-        49,
-        33,
-        9,
-        42,
-        19,
-        29,
-        28,
-        14,
-        39,
-        12,
-        38,
-        41,
-        13,
-        37,
-        48,
-        7,
-        16,
-        24,
-        55,
-        40,
-        61,
-        26,
-        17,
-        0,
-        1,
-        60,
-        51,
-        30,
-        4,
-        22,
-        25,
-        54,
-        21,
-        56,
-        59,
-        6,
-        63,
-        57,
-        62,
-        11,
-        36,
-        20,
-        34,
-        44,
-        52,
-    ]
-    return "".join(value[index] for index in char_indices[:32])
-
-
-def encode_wbi(params: dict[str, Any], wbi_img: WbiImg) -> dict[str, Any]:
-    illegal_char_remover = re.compile(r"[!'\(\)*]")
-    mixin_key = _get_mixin_key(wbi_img["img_key"] + wbi_img["sub_key"])
-    params_with_dm = {
-        **params,
-        "wts": int(time.time()),
-        "dm_img_list": "[]",
-        "dm_img_str": dm_img_str_cache,
-        "dm_cover_img_str": dm_cover_img_str_cache,
-    }
-    url_encoded_params = urllib.parse.urlencode(
-        {key: illegal_char_remover.sub("", str(params_with_dm[key])) for key in sorted(params_with_dm)}
-    )
-    return {
-        **params_with_dm,
-        "w_rid": hashlib.md5((url_encoded_params + mixin_key).encode()).hexdigest(),
-    }
 
 
 def xdg_config_home() -> Path:
@@ -245,7 +76,7 @@ def resolve_auth_file(args: Namespace) -> Path:
     return default_auth_file()
 
 
-def validate_profile(profile: str):
+def validate_profile(profile: str) -> None:
     if not PROFILE_RE.match(profile):
         raise ValueError(f"auth profile 名称不合法：{profile}")
 
@@ -289,14 +120,12 @@ def load_auth(auth_file: Path, profile: str) -> AuthInfo | None:
         return None
 
     entry = auth_file_model.profiles.get(profile)
-    if entry is None:
-        return None
-    if not entry.sessdata:
+    if entry is None or not entry.sessdata:
         return None
     return AuthInfo(SESSDATA=entry.sessdata, bili_jct=entry.bili_jct or None)
 
 
-def save_auth(auth_file: Path, profile: str, sessdata: str, bili_jct: str | None):
+def save_auth(auth_file: Path, profile: str, sessdata: str, bili_jct: str | None) -> None:
     validate_profile(profile)
 
     profiles: dict[str, AuthProfileModel] = {}
@@ -359,9 +188,31 @@ def write_auth_file(auth_file: Path, profiles: dict[str, AuthProfileModel]) -> N
         auth_file.chmod(0o600)
 
 
-def save_sessdata(auth_file: Path, profile: str, sessdata: str):
+def save_sessdata(auth_file: Path, profile: str, sessdata: str) -> None:
     save_auth(auth_file, profile, sessdata, None)
 
 
 def escape_toml_basic_string(raw: str) -> str:
     return raw.replace("\\", "\\\\").replace('"', '\\"')
+
+
+__all__ = [
+    "PROFILE_RE",
+    "AuthFileModel",
+    "AuthInfo",
+    "AuthProfileModel",
+    "default_auth_file",
+    "escape_toml_basic_string",
+    "format_auth_inline",
+    "load_auth",
+    "load_auth_file",
+    "parse_auth_inline",
+    "remove_auth",
+    "resolve_auth",
+    "resolve_auth_file",
+    "save_auth",
+    "save_sessdata",
+    "validate_profile",
+    "write_auth_file",
+    "xdg_config_home",
+]
