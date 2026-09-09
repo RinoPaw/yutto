@@ -4,7 +4,7 @@ import pytest
 
 from yutto.exceptions import WrongArgumentError
 from yutto.parser import parse
-from yutto.selection import Anchor, Index, Range, compile_selection, parse_selection
+from yutto.selection import Anchor, Index, Range, SelectionResult, compile_selection, parse_selection
 from yutto.source import UgcSeriesSource, UgcVideoSource
 
 
@@ -42,6 +42,21 @@ def test_selection_allows_whitespace_between_tokens() -> None:
     assert compile_selection("  3 , 1 ~ -1 , ^  ", 4) == (3, 1, 2, 4)
 
 
+def test_selection_tolerates_out_of_range_positions() -> None:
+    result = parse_selection("1,5,-5,2~6").evaluate(4)
+
+    assert result == SelectionResult(
+        indexes=(1, 2, 3, 4),
+        out_of_range=(5, 0, 6),
+    )
+    assert compile_selection("5,-5", 4) == ()
+    assert compile_selection("8~12", 10) == (8, 9, 10)
+
+
+def test_selection_returns_empty_for_empty_context() -> None:
+    assert compile_selection("1,$,^,~", 0) == ()
+
+
 @pytest.mark.parametrize(
     "selection",
     ["", "   ", "1,,2", "1,", ",1", "1~~2", "foo", "01", "-", "1 2", "- 1", "1+2"],
@@ -51,8 +66,8 @@ def test_parse_selection_rejects_invalid_syntax(selection: str) -> None:
         parse_selection(selection)
 
 
-@pytest.mark.parametrize("selection", ["0", "5", "-5"])
-def test_compile_selection_rejects_invalid_semantics(selection: str) -> None:
+@pytest.mark.parametrize("selection", ["0", "0~2", "2~0"])
+def test_compile_selection_rejects_zero(selection: str) -> None:
     with pytest.raises(WrongArgumentError):
         compile_selection(selection, 4)
 
@@ -60,9 +75,6 @@ def test_compile_selection_rejects_invalid_semantics(selection: str) -> None:
 def test_compile_selection_validates_syntax_before_context_size() -> None:
     with pytest.raises(WrongArgumentError, match="无法识别字符"):
         compile_selection("foo", 0)
-
-    with pytest.raises(WrongArgumentError, match="没有可供选择"):
-        compile_selection("1", 0)
 
 
 def test_parser_only_records_input_facts() -> None:
