@@ -180,8 +180,8 @@ async def test_interrupted_mux_cleans_transfer_owned_files(
     temporary_dir = tmp_path / "temporary/series"
     assert (output_dir / "episode.zh-CN.srt").exists()
     assert not transfer_directory.exists()
-    assert (temporary_dir / "episode_cover.jpg").exists()
-    assert (temporary_dir / "episode_chapter_info.ini").exists()
+    assert not (temporary_dir / "episode_cover.jpg").exists()
+    assert not (temporary_dir / "episode_chapter_info.ini").exists()
     assert not (output_dir / "episode.m4a").exists()
 
 
