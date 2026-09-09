@@ -1,20 +1,20 @@
-set positional-arguments
+set dotenv-load
 
-VERSION := `uv run scripts/get-version.py src/yutto/__version__.py`
-BILIASS_VERSION := `uv run scripts/get-version.py packages/biliass/src/biliass/__version__.py`
-DOCKER_NAME := "siguremo/yutto"
+PYTHON := "python"
+DOCKER_NAME := "yutto"
+VERSION := "2.3.1"
 
-run *ARGS:
-  uv run python -m yutto {{ARGS}}
+_default:
+  @just --list
 
+# dev
 install:
-  uv sync
+  uv sync --all-extras --dev
 
-test:
-  uv run pytest -m '(api or e2e or processor or biliass) and not (ci_only or ignore)'
-  just clean
+install-min:
+  uv sync --no-dev --no-default-groups
 
-fmt:
+format:
   uv run ruff format .
 
 lint:
@@ -22,51 +22,56 @@ lint:
   uv run ruff check .
   uv run typos
 
+fix:
+  uv run ruff check --fix .
+
+check:
+  just format
+  just lint
+
+# test
+test *ARGS:
+  uv run pytest {{ARGS}}
+
+test-api *ARGS:
+  uv run pytest -m "api" {{ARGS}}
+
+test-e2e *ARGS:
+  uv run pytest -m "e2e" {{ARGS}}
+
+test-processor *ARGS:
+  uv run pytest -m "processor" {{ARGS}}
+
+test-biliass *ARGS:
+  uv run pytest -m "biliass" {{ARGS}}
+
+# build
 build:
   uv build
 
-release:
-  @echo 'Tagging v{{VERSION}}...'
-  git tag "v{{VERSION}}"
-  @echo 'Push to GitHub to trigger publish process...'
-  git push --tags
+build-wheel:
+  uv build --wheel
 
-publish:
-  uv build
-  uv publish
-  git push --tags
-  just clean-builds
+build-sdist:
+  uv build --sdist
 
-clean:
-  fd \
-    -u \
-    -E tests/test_biliass/test_corpus/ \
-    -e m4s \
-    -e mp4 \
-    -e mkv \
-    -e mov \
-    -e m4a \
-    -e aac \
-    -e mp3 \
-    -e flac \
-    -e srt \
-    -e xml \
-    -e ass \
-    -e nfo \
-    -e pb \
-    -e pyc \
-    -e jpg \
-    -e ini \
-    -x rm
-  rm -rf .pytest_cache/
-  rm -rf .mypy_cache/
-  find . -maxdepth 3 -type d -empty -print0 | xargs -0 -r rm -r
+# docs
+docs-install:
+  pnpm --dir docs install
 
-clean-builds:
-  rm -rf build/
-  rm -rf dist/
-  rm -rf yutto.egg-info/
+docs-dev:
+  pnpm --dir docs dev
 
+docs-build:
+  pnpm --dir docs build
+
+docs-preview:
+  pnpm --dir docs preview
+
+docs-check:
+  pnpm --dir docs check
+
+# schema
 generate-schema:
   uv run scripts/generate-schema.py
 
@@ -82,6 +87,7 @@ ci-lint:
 
 ci-test pyversion:
   uv run -p {{pyversion}} pytest -m "(api or processor or biliass) and not (ci_skip or ignore)" --reruns 3 --reruns-delay 1
+  uv run -p {{pyversion}} pytest tests/test_core/test_options.py tests/test_download_manager_media.py tests/test_listing.py tests/test_parser.py tests/test_resource.py tests/test_selection.py tests/test_selection_priority.py tests/test_source.py tests/test_source_all_favourites.py tests/test_source_publication_filter.py tests/test_source_ugc_containers.py --reruns 3 --reruns-delay 1
 
 ci-e2e-test pyversion:
   uv run -p {{pyversion}} pytest -m "e2e and not (ci_skip or ignore)"
@@ -89,41 +95,5 @@ ci-e2e-test pyversion:
 # docker specific
 docker-run *ARGS:
   docker run --rm -it -v `pwd`:/app {{DOCKER_NAME}} {{ARGS}}
-
 docker-build:
   docker build --no-cache -t "{{DOCKER_NAME}}:{{VERSION}}" -t "{{DOCKER_NAME}}:latest" .
-
-docker-publish:
-  docker buildx build --no-cache --platform=linux/amd64,linux/arm64 -t "{{DOCKER_NAME}}:{{VERSION}}" -t "{{DOCKER_NAME}}:latest" . --push
-
-# docs specific
-docs-setup:
-  cd docs; pnpm i
-
-docs-dev:
-  cd docs; pnpm dev
-
-docs-build:
-  cd docs; pnpm build
-
-# biliass specific
-build-biliass:
-  cd packages/biliass; maturin build
-
-develop-biliass *ARGS:
-  cd packages/biliass; maturin develop --uv {{ARGS}}
-
-release-biliass:
-  @echo 'Tagging biliass@{{BILIASS_VERSION}}...'
-  git tag "biliass@{{BILIASS_VERSION}}"
-  @echo 'Push to GitHub to trigger publish process...'
-  git push --tags
-
-snapshot-update:
-  uv run pytest tests/test_biliass/test_corpus --snapshot-update
-
-fetch-corpus *ARGS:
-  cd tests/test_biliass/test_corpus; uv run scripts/fetch-corpus.py {{ARGS}}
-
-test-corpus:
-  uv run pytest tests/test_biliass/test_corpus --capture=no -vv
