@@ -57,10 +57,9 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
-_EXPECTED_CHILD_RESOLVE_ERRORS = (
+_EXPECTED_UGC_RESOLVE_ERRORS = (
     NotFoundError,
     NoAccessPermissionError,
-    MaxRetryError,
     HttpStatusError,
     UnSupportedTypeError,
 )
@@ -400,6 +399,15 @@ class UgcVideoSource(MediaSource):
     page: int | None = None
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
+        try:
+            return await self._resolve(scope, options)
+        except _EXPECTED_UGC_RESOLVE_ERRORS as error:
+            return MediaResolveResult(
+                media=None,
+                failures=(MediaResolveFailure(index=1, source=self.id, error=error),),
+            )
+
+    async def _resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         resolved_avid, video_info = await self.get_ugc_video_info(scope, self.id)
         tags = await self.get_ugc_video_tag(scope, resolved_avid) if options.fetch_tags else []
         dateadded = get_time_stamp_by_now()
@@ -525,12 +533,19 @@ async def resolve_ugc_videos(
     async def resolve_one(order: int, index: int, avid: AvId) -> None:
         try:
             result = await UgcVideoSource(id=avid).resolve(scope, page_options)
-        except _EXPECTED_CHILD_RESOLVE_ERRORS as error:
+        except MaxRetryError as error:
             results[order] = MediaResolveFailure(index=index, source=avid, error=error)
             return
 
         if result.failures:
-            raise TypeError("UgcVideoSource must not return nested resolve failures")
+            if result.media is not None or len(result.failures) != 1:
+                raise TypeError("UgcVideoSource returned an invalid failure result")
+            results[order] = MediaResolveFailure(
+                index=index,
+                source=avid,
+                error=result.failures[0].error,
+            )
+            return
         if not isinstance(result.media, UgcVideo):
             raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
         results[order] = _ResolvedUgcVideo(index=index, source=avid, media=result.media)

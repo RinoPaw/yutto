@@ -33,7 +33,7 @@ from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
-from yutto.source import MediaResolveFailure, MediaResolveResult, UgcVideoSource
+from yutto.source import MediaResolveFailure, MediaResolveResult
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.filter import PublicationTimeFilter
 
@@ -283,16 +283,7 @@ class DownloadManager:
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-        try:
-            result = await source.resolve(scope, source_options)
-        except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError) as error:
-            if not isinstance(source, UgcVideoSource):
-                raise
-            result = MediaResolveResult(
-                media=None,
-                failures=(MediaResolveFailure(index=1, source=source.id, error=error),),
-            )
-
+        result = await source.resolve(scope, source_options)
         if result.media is None and not result.failures:
             raise TypeError(f"{type(source).__name__}.resolve() returned no media")
 
