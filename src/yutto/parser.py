@@ -12,6 +12,7 @@ from yutto.source import (
     CheeseEpisodeSource,
     CheeseSeasonSource,
     MediaSource,
+    UgcAllFavouritesSource,
     UgcCollectionSource,
     UgcFavSource,
     UgcSeriesSource,
@@ -203,14 +204,17 @@ class UgcFavParser(Parser):
 
     def parse(self, url: str) -> MediaSource | None:
         query = parse_qs(urlparse(url).query, keep_blank_values=True)
-        if not self._FAVOURITE_URL.fullmatch(url):
+        match = self._FAVOURITE_URL.fullmatch(url)
+        if match is None:
             return None
         if self._single_query_value(query, "ftype") == "collect":
             return None
         fid = self._single_query_value(query, "fid")
-        if fid is None:
-            return None
-        return UgcFavSource(id=FId(fid))
+        if fid is not None:
+            return UgcFavSource(id=FId(fid))
+        if not query:
+            return UgcAllFavouritesSource(id=MId(match.group("mid")))
+        return None
 
 
 class UgcWatchLaterParser(Parser):
