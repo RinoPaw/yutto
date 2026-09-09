@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-import yutto.login as login_module
+import yutto.cli.auth as login_module
 from yutto._native import HttpTransportError
 from yutto.auth import USER_INFO_API
 from yutto.exceptions import ErrorCode
