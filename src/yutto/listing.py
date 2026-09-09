@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -22,18 +22,27 @@ from yutto.media import (
     UgcWatchLater,
 )
 from yutto.path_templates import UNKNOWN, resolve_path_template
-from yutto.source import AmbiguousSource, BangumiEpisodeSource, CheeseEpisodeSource
-from yutto.types import EpisodeId
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from yutto.core.request import DownloadRequest
     from yutto.path_templates import PathTemplateVariableDict
-    from yutto.source import MediaSource
     from yutto.types import AvId
+    from yutto.utils.filter import PublicationTimeFilter
 
 MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PathOptions:
+    subpath_template: str = "{auto}"
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMediaPath:
+    ancestry: MediaAncestry
+    item: MediaItem
+    path: Path
 
 
 def iter_media_items(
@@ -51,32 +60,76 @@ def iter_media_items(
     raise TypeError(f"unsupported media: {type(media).__name__}")
 
 
-def filter_media_tree(
+def _filter_media_tree(
     media: Media,
     predicate: Callable[[MediaAncestry, MediaItem], bool],
-    ancestry: MediaAncestry = (),
+    ancestry: MediaAncestry,
+    *,
+    preserve_container: bool,
 ) -> Media | None:
     if isinstance(media, MediaContainer):
         child_ancestry = (*ancestry, media)
         items = [
             filtered
             for child in media.items
-            if (filtered := filter_media_tree(child, predicate, child_ancestry)) is not None
+            if (
+                filtered := _filter_media_tree(
+                    child,
+                    predicate,
+                    child_ancestry,
+                    preserve_container=False,
+                )
+            )
+            is not None
         ]
-        return replace(media, items=items) if items else None
+        if items or preserve_container:
+            return replace(media, items=items)
+        return None
     if isinstance(media, MediaItem):
         return media if predicate(ancestry, media) else None
     raise TypeError(f"unsupported media: {type(media).__name__}")
 
 
-def _owner(media: MediaItem, parent: BangumiSeason | CheeseSeason | UgcVideo) -> tuple[str, str]:
-    owner = media.metadata.owner or parent.metadata.owner
-    mid = media.metadata.mid or parent.metadata.mid
+def filter_media_tree(
+    media: Media,
+    predicate: Callable[[MediaAncestry, MediaItem], bool],
+) -> Media | None:
+    """Filter Media leaves while retaining an empty root container when possible."""
+    return _filter_media_tree(
+        media,
+        predicate,
+        (),
+        preserve_container=isinstance(media, MediaContainer),
+    )
+
+
+def media_item_pubdate(ancestry: MediaAncestry, item: MediaItem) -> int:
+    if item.metadata.premiered:
+        return item.metadata.premiered
+    if ancestry:
+        return ancestry[-1].metadata.premiered
+    return 0
+
+
+def filter_media_by_publication_time(
+    media: Media,
+    publication_time_filter: PublicationTimeFilter,
+) -> Media | None:
+    """Filter downloadable leaves by publication time without discarding an empty root container."""
+    return filter_media_tree(
+        media,
+        lambda ancestry, item: publication_time_filter.matches(media_item_pubdate(ancestry, item)),
+    )
+
+
+def _owner(media: MediaItem, parent: MediaContainer | None) -> tuple[str, str]:
+    owner = media.metadata.owner or (parent.metadata.owner if parent is not None else "")
+    mid = media.metadata.mid or (parent.metadata.mid if parent is not None else None)
     return owner or UNKNOWN, str(mid) if mid is not None else UNKNOWN
 
 
 def _path_variables(
-    parent: BangumiSeason | CheeseSeason | UgcVideo,
+    parent: BangumiSeason | CheeseSeason | UgcVideo | None,
     item: BangumiEpisode | CheeseEpisode | UgcPage,
     avid: AvId,
     *,
@@ -87,14 +140,20 @@ def _path_variables(
     series_title: str | None = None,
 ) -> PathTemplateVariableDict:
     owner, owner_uid = _owner(item, parent)
-    pubdate = item.metadata.premiered or parent.metadata.premiered
-    download_date = item.metadata.dateadded or parent.metadata.dateadded
+    parent_metadata = parent.metadata if parent is not None else None
+    pubdate = item.metadata.premiered or (parent_metadata.premiered if parent_metadata is not None else 0)
+    download_date = item.metadata.dateadded or (parent_metadata.dateadded if parent_metadata is not None else 0)
+    default_title = (
+        parent_metadata.title
+        if parent_metadata is not None
+        else (item.metadata.show_title or item.metadata.title)
+    )
     return {
         "id": index,
         "aid": str(avid.as_aid()),
         "bvid": str(avid.as_bvid()),
         "name": item.metadata.title if name is None else name,
-        "title": parent.metadata.title if title is None else title,
+        "title": default_title if title is None else title,
         "username": owner if username is None else username,
         "series_title": UNKNOWN if series_title is None else series_title,
         "pubdate": pubdate if pubdate else UNKNOWN,
@@ -104,27 +163,7 @@ def _path_variables(
     }
 
 
-def _is_direct_episode_source(source: MediaSource) -> bool:
-    if isinstance(source, (BangumiEpisodeSource, CheeseEpisodeSource)):
-        return True
-    return isinstance(source, AmbiguousSource) and isinstance(source.id, EpisodeId)
-
-
-def _auto_path_template(
-    source: MediaSource,
-    request: DownloadRequest,
-    parent: BangumiSeason | CheeseSeason | UgcVideo,
-) -> str:
-    if isinstance(parent, UgcVideo):
-        return "{title}" if request.selection.episodes is None else "{title}/{name}"
-    if _is_direct_episode_source(source) and request.selection.episodes is None:
-        return "{name}"
-    return "{title}/{name}"
-
-
 def _ugc_context(
-    source: MediaSource,
-    request: DownloadRequest,
     ancestry: MediaAncestry,
     page: UgcPage,
 ) -> tuple[UgcVideo, str, str, str, str | None, str | None]:
@@ -138,7 +177,8 @@ def _ugc_context(
     series_title: str | None = None
 
     if len(ancestry) == 1:
-        return video, _auto_path_template(source, request, video), name, title, username, series_title
+        auto_path = "{title}/{name}" if len(video.items) > 1 else "{title}"
+        return video, auto_path, name, title, username, series_title
 
     root = ancestry[-2]
     if isinstance(root, UgcSeries):
@@ -181,22 +221,13 @@ def _episode_name(item: BangumiEpisode | CheeseEpisode) -> str:
     return name
 
 
-def media_item_pubdate(ancestry: MediaAncestry, item: MediaItem) -> int:
-    if item.metadata.premiered:
-        return item.metadata.premiered
-    if ancestry:
-        return ancestry[-1].metadata.premiered
-    return 0
-
-
-def resolve_media_path(
-    source: MediaSource,
+def _resolve_media_path(
     ancestry: MediaAncestry,
     item: MediaItem,
-    request: DownloadRequest,
+    options: PathOptions,
 ) -> Path:
     if isinstance(item, UgcPage):
-        video, auto_path, name, title, username, series_title = _ugc_context(source, request, ancestry, item)
+        video, auto_path, name, title, username, series_title = _ugc_context(ancestry, item)
         variables = _path_variables(
             video,
             item,
@@ -207,28 +238,50 @@ def resolve_media_path(
             username=username,
             series_title=series_title,
         )
-        return Path(resolve_path_template(request.output.subpath_template, auto_path, variables))
+        return Path(resolve_path_template(options.subpath_template, auto_path, variables))
 
     if isinstance(item, BangumiEpisode):
-        if not ancestry or not isinstance(ancestry[-1], BangumiSeason):
+        parent = ancestry[-1] if ancestry else None
+        if parent is not None and not isinstance(parent, BangumiSeason):
             raise TypeError("BangumiEpisode parent must be BangumiSeason")
-        parent = ancestry[-1]
         avid = item.avid
         index = item.index
     elif isinstance(item, CheeseEpisode):
-        if not ancestry or not isinstance(ancestry[-1], CheeseSeason):
+        parent = ancestry[-1] if ancestry else None
+        if parent is not None and not isinstance(parent, CheeseSeason):
             raise TypeError("CheeseEpisode parent must be CheeseSeason")
-        parent = ancestry[-1]
         avid = item.avid
         index = item.index
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
     variables = _path_variables(parent, item, avid, index=index, name=_episode_name(item))
-    return Path(
-        resolve_path_template(
-            request.output.subpath_template,
-            _auto_path_template(source, request, parent),
-            variables,
+    auto_path = "{name}" if parent is None else "{title}/{name}"
+    return Path(resolve_path_template(options.subpath_template, auto_path, variables))
+
+
+def resolve_media_paths(
+    root_media: Media,
+    path_options: PathOptions,
+) -> tuple[ResolvedMediaPath, ...]:
+    """Resolve paths for every downloadable leaf in a Media tree."""
+    return tuple(
+        ResolvedMediaPath(
+            ancestry=ancestry,
+            item=item,
+            path=_resolve_media_path(ancestry, item, path_options),
         )
+        for ancestry, item in iter_media_items(root_media)
     )
+
+
+__all__ = [
+    "MediaAncestry",
+    "PathOptions",
+    "ResolvedMediaPath",
+    "filter_media_by_publication_time",
+    "filter_media_tree",
+    "iter_media_items",
+    "media_item_pubdate",
+    "resolve_media_paths",
+]
