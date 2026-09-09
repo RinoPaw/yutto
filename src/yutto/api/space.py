@@ -51,7 +51,8 @@ async def get_space_profile_and_archives(
         archives.extend(item for item in page_archives if item.get("bvid"))
 
         if stop_before_timestamp is not None and any(
-            item.get("created") is not None and int(item["created"]) < stop_before_timestamp for item in page_archives
+            item.get("created") is not None and int(item["created"]) < stop_before_timestamp
+            for item in page_archives
         ):
             break
 
