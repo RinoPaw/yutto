@@ -102,6 +102,14 @@ class UgcFav(MediaContainer):
 
 
 @dataclass(slots=True, kw_only=True)
+class UgcAllFavourites(MediaContainer):
+    """用户创建的全部收藏夹。"""
+
+    mid: MId
+    items: list[UgcFav] = field(default_factory=list)
+
+
+@dataclass(slots=True, kw_only=True)
 class UgcWatchLater(MediaContainer):
     """稍后再看列表。"""
 
@@ -124,6 +132,7 @@ __all__ = [
     "Media",
     "MediaContainer",
     "MediaItem",
+    "UgcAllFavourites",
     "UgcCollection",
     "UgcFav",
     "UgcPage",
