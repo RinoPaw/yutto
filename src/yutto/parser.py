@@ -146,10 +146,10 @@ class BangumiParser(Parser):
 
 class CheeseParser(Parser):
     _CHEESE_EP_URL = re.compile(
-        r"https?://(?:www\.)?bilibili\.com/cheese/play/ep(?P<episode_id>[0-9]+)/?", re.IGNORECASE
+        rf"{_BILIBILI}/cheese/play/ep(?P<episode_id>[0-9]+){_URL_END}", re.IGNORECASE
     )
     _CHEESE_SS_URL = re.compile(
-        r"https?://(?:www\.)?bilibili\.com/cheese/play/ss(?P<season_id>[0-9]+)/?", re.IGNORECASE
+        rf"{_BILIBILI}/cheese/play/ss(?P<season_id>[0-9]+){_URL_END}", re.IGNORECASE
     )
 
     def parse(self, url: str) -> CheeseEpisodeSource | CheeseSeasonSource | None:
