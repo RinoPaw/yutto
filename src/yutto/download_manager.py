@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.auth import validate_user_info
@@ -29,7 +29,7 @@ from yutto.listing import (
     iter_media_items,
     resolve_media_paths,
 )
-from yutto.media import MediaContainer, UgcFav, UgcVideo
+from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
@@ -204,11 +204,9 @@ class DownloadManager:
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-                parent = ancestry[-1] if ancestry else None
                 try:
                     manifest = await resolve_resource_manifest(
                         scope,
-                        cast(MediaContainer, parent),
                         item,
                         resource_options,
                     )
@@ -217,7 +215,6 @@ class DownloadManager:
                     if index + 1 < len(start_turns):
                         start_turns[index + 1].set()
                     return
-
                 if request.output.enforce_directory_boundary:
                     ensure_output_path_is_scoped(
                         path,

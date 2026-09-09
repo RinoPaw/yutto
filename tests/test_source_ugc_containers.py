@@ -104,7 +104,7 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     assert [page.metadata.title for page in result.media.items[0].items] == ["P1", "P2"]
     assert all(page.metadata.owner == "UP" for page in result.media.items[0].items)
     assert all(page.metadata.tag == ["标签"] for page in result.media.items[0].items)
-    assert all(not hasattr(page, "avid") for page in result.media.items[0].items)
+    assert all(page.avid == BvId("BVSECOND") for page in result.media.items[0].items)
 
     assert any("mid=123" in call and "series_id=456" in call for call in calls)
     assert any("bvid=BVSECOND" in call for call in calls)
@@ -144,7 +144,7 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
     assert result.media.items[0].metadata.genre == ["知识"]
     assert result.media.items[0].metadata.tag == []
     assert [page.metadata.title for page in result.media.items[0].items] == ["P1", "P2"]
-    assert all(not hasattr(page, "avid") for page in result.media.items[0].items)
+    assert all(page.avid == BvId("BVFIRST") for page in result.media.items[0].items)
     assert any("/x/polymer/web-space/seasons_archives_list" in call for call in calls)
     assert not any("/x/tag/archive/tags" in call for call in calls)
     assert not any("seasons_series_detail" in call for call in calls)

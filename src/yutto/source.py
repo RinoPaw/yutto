@@ -415,6 +415,7 @@ class UgcVideoSource(MediaSource):
 
         pages = [
             UgcPage(
+                avid=resolved_avid,
                 page=index,
                 cid=CId(page_items[index - 1]["cid"]),
                 metadata=self._make_ugc_metadata(

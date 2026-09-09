@@ -47,14 +47,15 @@ def _install_manager_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _series_with_one_video() -> UgcSeries:
+    avid = BvId("BVGOOD")
     return UgcSeries(
         series_id=SeriesId("456"),
         metadata=ItemMetaData(title="系列"),
         items=[
             UgcVideo(
-                avid=BvId("BVGOOD"),
+                avid=avid,
                 metadata=ItemMetaData(title="可用视频"),
-                items=[UgcPage(page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+                items=[UgcPage(avid=avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
             )
         ],
     )
@@ -82,6 +83,7 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
     assert result.media.metadata.title == "投稿"
     assert [page.page for page in result.media.items] == [3, 1]
     assert [page.metadata.title for page in result.media.items] == ["P3", "P1"]
+    assert all(page.avid == result.media.avid for page in result.media.items)
 
 
 def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: pytest.MonkeyPatch) -> None:

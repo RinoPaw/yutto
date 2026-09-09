@@ -65,6 +65,7 @@ class CheeseSeason(MediaContainer):
 class UgcPage(MediaItem):
     """UGC 投稿中的一个分 P。"""
 
+    avid: AvId
     page: int
     cid: CId
 
