@@ -33,7 +33,7 @@ from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
-from yutto.source import MediaResolveFailure, MediaResolveResult
+from yutto.source import MediaResolveFailure, MediaResolveResult, UgcVideoSource
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.filter import PublicationTimeFilter
 
@@ -146,6 +146,9 @@ class DownloadManager:
                 failures.extend(result.failures)
                 if result.media is not None:
                     media.append(result.media)
+
+        if failures and not any(_has_media_items(item) for item in media):
+            _raise_all_resolve_failures(tuple(failures))
 
         resolved_failures = tuple(
             ResolveFailure(
@@ -280,13 +283,22 @@ class DownloadManager:
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-        result = await source.resolve(scope, source_options)
-        if result.media is None:
+        try:
+            result = await source.resolve(scope, source_options)
+        except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError) as error:
+            if not isinstance(source, UgcVideoSource):
+                raise
+            result = MediaResolveResult(
+                media=None,
+                failures=(MediaResolveFailure(index=1, source=source.id, error=error),),
+            )
+
+        if result.media is None and not result.failures:
             raise TypeError(f"{type(source).__name__}.resolve() returned no media")
 
         _report_resolve_failures(result.failures)
-        if result.failures and not _has_media_items(result.media):
-            _raise_all_resolve_failures(result.failures)
+        if result.media is None:
+            return result
 
         if request.selection.start_time is not None or request.selection.end_time is not None:
             publication_time_filter = PublicationTimeFilter.from_strings(
