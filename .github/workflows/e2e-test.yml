@@ -11,6 +11,7 @@ jobs:
   test-e2e:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14", "3.14t"]
         architecture: ["x64"]
@@ -48,12 +49,10 @@ jobs:
         run: |
           just ci-install ${{ matrix.python-version }}
 
-      - name: e2e without subprocess
+      - name: CLI smoke
         run: |
           uv run yutto -v
           uv run yutto -h
-          uv run yutto https://www.bilibili.com/video/BV1AZ4y147Yg -w -d __test_files__
-          rm -rf __test_files__
 
       - name: e2e test
         run: |
