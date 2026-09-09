@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from returns.result import Success
 
 from yutto.core.options import SourceOptions
@@ -11,6 +10,9 @@ from yutto.media import UgcAllFavourites
 from yutto.parser import parse
 from yutto.source import UgcAllFavouritesSource, UgcFavSource
 from yutto.types import MId
+
+if TYPE_CHECKING:
+    import pytest
 
 _SCOPE = cast("Any", None)
 
