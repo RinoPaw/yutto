@@ -10,10 +10,9 @@ on:
 jobs:
   unit-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
     strategy:
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.14t"]
         architecture: ["x64"]
     name: Python ${{ matrix.python-version }} on ${{ matrix.architecture }} unit test
     steps:
@@ -46,12 +45,16 @@ jobs:
         run: |
           just ci-install ${{ matrix.python-version }}
 
-      - name: Run diagnostic unit tests
-        timeout-minutes: 15
-        env:
-          PYTHONUNBUFFERED: "1"
+      - name: Run unit tests
         run: |
-          uv run -p ${{ matrix.python-version }} pytest -vv --tb=short -m "(api or processor or biliass) and not (ci_skip or ignore)" --reruns 0
+          just ci-test ${{ matrix.python-version }}
+
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v5
+        if: ${{ matrix.python-version == '3.14' && github.event_name != 'merge_group' && !github.event.repository.fork }}
+        with:
+          mode: simulation
+          run: uv run -p ${{ matrix.python-version }} pytest --codspeed
 
   unit-test-rust:
     name: yutto Rust unit test
