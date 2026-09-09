@@ -3,20 +3,27 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from returns.result import Failure
 
 from yutto.auth import encode_wbi, get_wbi_img
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.core.options import SourceOptions
-from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
+from yutto.exceptions import (
+    HttpStatusError,
+    MaxRetryError,
+    NoAccessPermissionError,
+    NotFoundError,
+    UnSupportedTypeError,
+    WrongArgumentError,
+)
 from yutto.media import (
     BangumiEpisode,
     BangumiSeason,
     CheeseEpisode,
     CheeseSeason,
-    MediaContainer,
+    Media,
     UgcCollection,
     UgcFav,
     UgcPage,
@@ -46,6 +53,37 @@ from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
+    from yutto.exceptions import YuttoBaseException
+
+T = TypeVar("T")
+
+_EXPECTED_CHILD_RESOLVE_ERRORS = (
+    NotFoundError,
+    NoAccessPermissionError,
+    MaxRetryError,
+    HttpStatusError,
+    UnSupportedTypeError,
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MediaResolveFailure:
+    index: int
+    source: BilibiliId
+    error: YuttoBaseException
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MediaResolveResult:
+    media: Media | None
+    failures: tuple[MediaResolveFailure, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedUgcVideo:
+    index: int
+    source: AvId
+    media: UgcVideo
 
 
 @dataclass(slots=True, kw_only=True)
@@ -53,7 +91,7 @@ class MediaSource(ABC):
     id: BilibiliId
 
     @abstractmethod
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaContainer:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         raise NotImplementedError
 
     @staticmethod
@@ -116,20 +154,27 @@ class MediaSource(ABC):
 class AmbiguousSource(MediaSource):
     candidates: tuple[MediaSource, ...]
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaContainer:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         results = await asyncio.gather(
             *(candidate.resolve(scope, options) for candidate in self.candidates),
             return_exceptions=True,
         )
-        successes = [result for result in results if not isinstance(result, BaseException)]
+        successes: list[MediaResolveResult] = []
+        failures: list[BaseException] = []
+        for result in results:
+            if isinstance(result, BaseException):
+                failures.append(result)
+            else:
+                successes.append(result)
+
         if len(successes) > 1:
             raise WrongArgumentError("该 ID 同时存在于多个命名空间，无法自动判断")
         if successes:
             return successes[0]
 
-        for result in results:
-            if isinstance(result, BaseException) and not isinstance(result, NotFoundError):
-                raise result
+        for failure in failures:
+            if not isinstance(failure, NotFoundError):
+                raise failure
         raise NotFoundError("未找到对应的内容")
 
 
@@ -188,7 +233,11 @@ def make_bangumi_season_metadata(result: dict[str, Any]) -> ItemMetaData:
     )
 
 
-def indexed_bangumi_episode_items(result: dict[str, Any], *, with_extra_episodes: bool) -> list[tuple[int, dict[str, Any]]]:
+def indexed_bangumi_episode_items(
+    result: dict[str, Any],
+    *,
+    with_extra_episodes: bool,
+) -> list[tuple[int, dict[str, Any]]]:
     all_items = bangumi_episode_items(result)
     indexed_items = list(enumerate(all_items, start=1))
     if with_extra_episodes:
@@ -196,10 +245,19 @@ def indexed_bangumi_episode_items(result: dict[str, Any], *, with_extra_episodes
     return indexed_items[: len(result["episodes"])]
 
 
+def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: ItemMetaData) -> None:
+    episode.metadata.mid = episode.metadata.mid or metadata.mid
+    episode.metadata.owner = episode.metadata.owner or metadata.owner
+    if not episode.metadata.genre:
+        episode.metadata.genre = list(metadata.genre)
+    if not episode.metadata.actors:
+        episode.metadata.actors = list(metadata.actors)
+
+
 class BangumiEpisodeSource(MediaSource):
     id: EpisodeId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> BangumiSeason:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         api = f"https://api.bilibili.com/pgc/view/web/season?ep_id={self.id}"
         res = await self._fetch_payload(scope, api, "该番剧", f"episode_id: {self.id}", "result")
 
@@ -211,26 +269,31 @@ class BangumiEpisodeSource(MediaSource):
         if anchor_item is None:
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
 
+        season_metadata = make_bangumi_season_metadata(res)
         if options.selection is None:
-            episode_items = [anchor_item]
-        else:
-            episode_items = indexed_bangumi_episode_items(res, with_extra_episodes=options.with_extra_episodes)
-            if options.skip_preview:
-                episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-            indexes = options.selection.resolve(len(episode_items))
-            episode_items = [episode_items[index - 1] for index in indexes]
+            index, item = anchor_item
+            episode = parse_bangumi_episode(index, item)
+            _apply_container_metadata_to_episode(episode, season_metadata)
+            return MediaResolveResult(media=episode)
 
-        return BangumiSeason(
-            season_id=SeasonId(str(res["season_id"])),
-            metadata=make_bangumi_season_metadata(res),
-            items=[parse_bangumi_episode(index, item) for index, item in episode_items],
+        episode_items = indexed_bangumi_episode_items(res, with_extra_episodes=options.with_extra_episodes)
+        if options.skip_preview:
+            episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
+        indexes = options.selection.resolve(len(episode_items))
+        episode_items = [episode_items[index - 1] for index in indexes]
+        return MediaResolveResult(
+            media=BangumiSeason(
+                season_id=SeasonId(str(res["season_id"])),
+                metadata=season_metadata,
+                items=[parse_bangumi_episode(index, item) for index, item in episode_items],
+            )
         )
 
 
 class BangumiSeasonSource(MediaSource):
     id: SeasonId | MediaId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> BangumiSeason:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         season_id = await self._get_season_id(scope, self.id) if isinstance(self.id, MediaId) else self.id
         api = f"https://api.bilibili.com/pgc/view/web/season?season_id={season_id}"
         res = await self._fetch_payload(scope, api, "该番剧列表", f"season_id: {season_id}", "result")
@@ -244,10 +307,12 @@ class BangumiSeasonSource(MediaSource):
             indexes = options.selection.resolve(len(episode_items))
             episode_items = [episode_items[index - 1] for index in indexes]
 
-        return BangumiSeason(
-            season_id=season_id,
-            metadata=make_bangumi_season_metadata(res),
-            items=[parse_bangumi_episode(index, item) for index, item in episode_items],
+        return MediaResolveResult(
+            media=BangumiSeason(
+                season_id=season_id,
+                metadata=make_bangumi_season_metadata(res),
+                items=[parse_bangumi_episode(index, item) for index, item in episode_items],
+            )
         )
 
     @staticmethod
@@ -279,7 +344,7 @@ def parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
 class CheeseEpisodeSource(MediaSource):
     id: EpisodeId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> CheeseSeason:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         api = f"https://api.bilibili.com/pugv/view/web/season?ep_id={self.id}"
         res = await self._fetch_payload(scope, api, "该课程", f"episode_id: {self.id}", "data")
 
@@ -292,22 +357,25 @@ class CheeseEpisodeSource(MediaSource):
             raise NotFoundError(f"无法在课程 {res['title']} 中找到剧集 ep{self.id}")
 
         if options.selection is None:
-            episode_items = [anchor_item]
-        else:
-            indexes = options.selection.resolve(len(indexed_items))
-            episode_items = [indexed_items[index - 1] for index in indexes]
+            index, item = anchor_item
+            return MediaResolveResult(media=parse_cheese_episode(index, item))
+
+        indexes = options.selection.resolve(len(indexed_items))
+        episode_items = [indexed_items[index - 1] for index in indexes]
         season_id = res.get("season_id", self.id.value)
-        return CheeseSeason(
-            season_id=SeasonId(str(season_id)),
-            metadata=ItemMetaData(title=str(res.get("title", ""))),
-            items=[parse_cheese_episode(index, item) for index, item in episode_items],
+        return MediaResolveResult(
+            media=CheeseSeason(
+                season_id=SeasonId(str(season_id)),
+                metadata=ItemMetaData(title=str(res.get("title", ""))),
+                items=[parse_cheese_episode(index, item) for index, item in episode_items],
+            )
         )
 
 
 class CheeseSeasonSource(MediaSource):
     id: SeasonId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> CheeseSeason:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         api = f"https://api.bilibili.com/pugv/view/web/season?season_id={self.id}"
         res = await self._fetch_payload(scope, api, "该课程列表", f"season_id: {self.id}", "data")
         episode_items = list(enumerate(res["episodes"], start=1))
@@ -317,10 +385,12 @@ class CheeseSeasonSource(MediaSource):
             indexes = options.selection.resolve(len(episode_items))
             episode_items = [episode_items[index - 1] for index in indexes]
 
-        return CheeseSeason(
-            season_id=self.id,
-            metadata=ItemMetaData(title=str(res.get("title", ""))),
-            items=[parse_cheese_episode(index, item) for index, item in episode_items],
+        return MediaResolveResult(
+            media=CheeseSeason(
+                season_id=self.id,
+                metadata=ItemMetaData(title=str(res.get("title", ""))),
+                items=[parse_cheese_episode(index, item) for index, item in episode_items],
+            )
         )
 
 
@@ -329,7 +399,7 @@ class UgcVideoSource(MediaSource):
     id: AvId
     page: int | None = None
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcVideo:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         resolved_avid, video_info = await self.get_ugc_video_info(scope, self.id)
         tags = await self.get_ugc_video_tag(scope, resolved_avid) if options.fetch_tags else []
         dateadded = get_time_stamp_by_now()
@@ -357,16 +427,18 @@ class UgcVideoSource(MediaSource):
             )
             for index in indexes
         ]
-        return UgcVideo(
-            avid=resolved_avid,
-            metadata=self._make_ugc_metadata(
-                video_info,
-                tags,
-                dateadded,
-                title=str(video_info["title"]),
-                duration=int(video_info.get("duration", 0)),
-            ),
-            items=pages,
+        return MediaResolveResult(
+            media=UgcVideo(
+                avid=resolved_avid,
+                metadata=self._make_ugc_metadata(
+                    video_info,
+                    tags,
+                    dateadded,
+                    title=str(video_info["title"]),
+                    duration=int(video_info.get("duration", 0)),
+                ),
+                items=pages,
+            )
         )
 
     def _make_ugc_metadata(
@@ -433,16 +505,50 @@ class UgcVideoSource(MediaSource):
         return [tag["tag_name"] for tag in res_json["data"]]
 
 
+def _select_indexed(items: list[T], selection: Selection | None) -> list[tuple[int, T]]:
+    indexed_items = list(enumerate(items, start=1))
+    if selection is None:
+        return indexed_items[:1]
+    indexes = selection.resolve(len(indexed_items))
+    return [indexed_items[index - 1] for index in indexes]
+
+
 async def resolve_ugc_videos(
     scope: ExecutionScope,
-    avids: list[AvId],
+    indexed_avids: list[tuple[int, AvId]],
     options: SourceOptions,
-) -> list[UgcVideo]:
+) -> tuple[tuple[_ResolvedUgcVideo, ...], tuple[MediaResolveFailure, ...]]:
     page_options = replace(options, selection=Selection((Range(None, None),)))
-    return list(
-        await asyncio.gather(
-            *(UgcVideoSource(id=avid).resolve(scope, page_options) for avid in avids)
-        )
+    results: list[_ResolvedUgcVideo | MediaResolveFailure | None] = [None] * len(indexed_avids)
+
+    async def resolve_one(order: int, index: int, avid: AvId) -> None:
+        try:
+            result = await UgcVideoSource(id=avid).resolve(scope, page_options)
+        except _EXPECTED_CHILD_RESOLVE_ERRORS as error:
+            results[order] = MediaResolveFailure(index=index, source=avid, error=error)
+            return
+
+        if result.failures:
+            raise TypeError("UgcVideoSource must not return nested resolve failures")
+        if not isinstance(result.media, UgcVideo):
+            raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
+        results[order] = _ResolvedUgcVideo(index=index, source=avid, media=result.media)
+
+    try:
+        async with asyncio.TaskGroup() as task_group:
+            for order, (index, avid) in enumerate(indexed_avids):
+                task_group.create_task(resolve_one(order, index, avid))
+    except ExceptionGroup as error_group:
+        if len(error_group.exceptions) == 1:
+            raise error_group.exceptions[0] from None
+        raise
+
+    completed = [result for result in results if result is not None]
+    if len(completed) != len(indexed_avids):
+        raise RuntimeError("UGC batch resolve completed without a result for every child")
+    return (
+        tuple(result for result in completed if isinstance(result, _ResolvedUgcVideo)),
+        tuple(result for result in completed if isinstance(result, MediaResolveFailure)),
     )
 
 
@@ -451,7 +557,7 @@ class UgcCollectionSource(MediaSource):
     id: CollectionId
     owner_id: MId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcCollection:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         page_size = 30
         page_num = 1
         archives: list[dict[str, Any]] = []
@@ -484,27 +590,26 @@ class UgcCollectionSource(MediaSource):
                 break
             page_num += 1
 
-        if options.selection is None:
-            selected_archives = archives[:1]
-        else:
-            indexes = options.selection.resolve(len(archives))
-            selected_archives = [archives[index - 1] for index in indexes]
-        videos = await resolve_ugc_videos(
+        selected_archives = _select_indexed(archives, options.selection)
+        resolved, failures = await resolve_ugc_videos(
             scope,
-            [BvId(item["bvid"]) for item in selected_archives],
+            [(index, BvId(item["bvid"])) for index, item in selected_archives],
             options,
         )
-        return UgcCollection(
-            collection_id=self.id,
-            metadata=ItemMetaData(title=title, mid=self.owner_id),
-            items=videos,
+        return MediaResolveResult(
+            media=UgcCollection(
+                collection_id=self.id,
+                metadata=ItemMetaData(title=title, mid=self.owner_id),
+                items=[item.media for item in resolved],
+            ),
+            failures=failures,
         )
 
 
 class UgcFavSource(MediaSource):
     id: FId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcFav:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         info_api = f"https://api.bilibili.com/x/v3/fav/folder/info?media_id={self.id}"
         info = await self._fetch_payload(scope, info_api, "收藏夹", f"fid: {self.id}", "data")
 
@@ -528,17 +633,15 @@ class UgcFavSource(MediaSource):
                 break
             page_num += 1
 
-        if options.selection is None:
-            selected_medias = medias[:1]
-        else:
-            indexes = options.selection.resolve(len(medias))
-            selected_medias = [medias[index - 1] for index in indexes]
-        videos = await resolve_ugc_videos(
+        selected_medias = _select_indexed(medias, options.selection)
+        resolved, failures = await resolve_ugc_videos(
             scope,
-            [BvId(item["bvid"]) for item in selected_medias],
+            [(index, BvId(item["bvid"])) for index, item in selected_medias],
             options,
         )
-        for favourite, video in zip(selected_medias, videos, strict=True):
+        for resolved_video in resolved:
+            favourite = medias[resolved_video.index - 1]
+            video = resolved_video.media
             favourite_title = str(favourite.get("title") or video.metadata.title)
             video.metadata.title = favourite_title
             if len(video.items) == 1:
@@ -547,23 +650,26 @@ class UgcFavSource(MediaSource):
 
         upper = info.get("upper") or {}
         upper_mid = upper.get("mid")
-        return UgcFav(
-            fid=self.id,
-            metadata=ItemMetaData(
-                title=str(info.get("title", "")),
-                plot=str(info.get("intro", "")),
-                thumb=str(info.get("cover", "")),
-                mid=MId(str(upper_mid)) if upper_mid is not None else None,
-                owner=str(upper.get("name", "")),
+        return MediaResolveResult(
+            media=UgcFav(
+                fid=self.id,
+                metadata=ItemMetaData(
+                    title=str(info.get("title", "")),
+                    plot=str(info.get("intro", "")),
+                    thumb=str(info.get("cover", "")),
+                    mid=MId(str(upper_mid)) if upper_mid is not None else None,
+                    owner=str(upper.get("name", "")),
+                ),
+                items=[item.media for item in resolved],
             ),
-            items=videos,
+            failures=failures,
         )
 
 
 class UgcSeriesSource(MediaSource):
     id: SeriesId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcSeries:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         info_api = f"https://api.bilibili.com/x/series/series?series_id={self.id}"
         info = await self._fetch_payload(scope, info_api, "视频系列", f"series_id: {self.id}", "data")
         meta = info.get("meta", {})
@@ -590,31 +696,30 @@ class UgcSeriesSource(MediaSource):
                 break
             page_num += 1
 
-        if options.selection is None:
-            selected_archives = archives[:1]
-        else:
-            indexes = options.selection.resolve(len(archives))
-            selected_archives = [archives[index - 1] for index in indexes]
-        videos = await resolve_ugc_videos(
+        selected_archives = _select_indexed(archives, options.selection)
+        resolved, failures = await resolve_ugc_videos(
             scope,
-            [BvId(item["bvid"]) for item in selected_archives],
+            [(index, BvId(item["bvid"])) for index, item in selected_archives],
             options,
         )
-        return UgcSeries(
-            series_id=self.id,
-            metadata=ItemMetaData(
-                title=str(meta.get("name", "")),
-                mid=mid,
-                plot=str(meta.get("description", "")),
+        return MediaResolveResult(
+            media=UgcSeries(
+                series_id=self.id,
+                metadata=ItemMetaData(
+                    title=str(meta.get("name", "")),
+                    mid=mid,
+                    plot=str(meta.get("description", "")),
+                ),
+                items=[item.media for item in resolved],
             ),
-            items=videos,
+            failures=failures,
         )
 
 
 class UgcSpaceSource(MediaSource):
     id: MId
 
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcSpace:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         wbi_img = await get_wbi_img(scope)
         profile = await self._fetch_payload(
             scope,
@@ -657,31 +762,30 @@ class UgcSpaceSource(MediaSource):
                 break
             page_num += 1
 
-        if options.selection is None:
-            selected_archives = archives[:1]
-        else:
-            indexes = options.selection.resolve(len(archives))
-            selected_archives = [archives[index - 1] for index in indexes]
-        videos = await resolve_ugc_videos(
+        selected_archives = _select_indexed(archives, options.selection)
+        resolved, failures = await resolve_ugc_videos(
             scope,
-            [BvId(item["bvid"]) for item in selected_archives],
+            [(index, BvId(item["bvid"])) for index, item in selected_archives],
             options,
         )
-        return UgcSpace(
-            mid=self.id,
-            metadata=ItemMetaData(
-                title=str(profile.get("name", "")),
-                plot=str(profile.get("sign", "")),
-                thumb=str(profile.get("face", "")),
+        return MediaResolveResult(
+            media=UgcSpace(
                 mid=self.id,
-                owner=str(profile.get("name", "")),
+                metadata=ItemMetaData(
+                    title=str(profile.get("name", "")),
+                    plot=str(profile.get("sign", "")),
+                    thumb=str(profile.get("face", "")),
+                    mid=self.id,
+                    owner=str(profile.get("name", "")),
+                ),
+                items=[item.media for item in resolved],
             ),
-            items=videos,
+            failures=failures,
         )
 
 
 class UgcWatchLaterSource(MediaSource):
-    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> UgcWatchLater:
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         payload = await self._fetch_payload(
             scope,
             "https://api.bilibili.com/x/v2/history/toview/web",
@@ -690,17 +794,19 @@ class UgcWatchLaterSource(MediaSource):
             "data",
         )
         entries: list[dict[str, Any]] = [item for item in payload.get("list", []) if item.get("bvid")]
-        if options.selection is None:
-            selected_entries = entries[:1]
-        else:
-            indexes = options.selection.resolve(len(entries))
-            selected_entries = [entries[index - 1] for index in indexes]
-        videos = await resolve_ugc_videos(
+        selected_entries = _select_indexed(entries, options.selection)
+        resolved, failures = await resolve_ugc_videos(
             scope,
-            [BvId(item["bvid"]) for item in selected_entries],
+            [(index, BvId(item["bvid"])) for index, item in selected_entries],
             options,
         )
-        return UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=videos)
+        return MediaResolveResult(
+            media=UgcWatchLater(
+                metadata=ItemMetaData(title="稍后再看"),
+                items=[item.media for item in resolved],
+            ),
+            failures=failures,
+        )
 
 
 __all__ = [
@@ -709,6 +815,8 @@ __all__ = [
     "BangumiSeasonSource",
     "CheeseEpisodeSource",
     "CheeseSeasonSource",
+    "MediaResolveFailure",
+    "MediaResolveResult",
     "MediaSource",
     "UgcCollectionSource",
     "UgcFavSource",
