@@ -33,7 +33,6 @@ def test_bangumi_e2e():
 
 
 @pytest.mark.e2e
-@pytest.mark.ci_skip
 def test_ugc_video_e2e():
     short_ugc_video = "https://www.bilibili.com/video/BV1AZ4y147Yg"
     subprocess.run(
@@ -44,7 +43,6 @@ def test_ugc_video_e2e():
 
 
 @pytest.mark.e2e
-@pytest.mark.ci_skip
 def test_batch_file_e2e():
     short_ugc_video = "https://www.bilibili.com/video/BV1AZ4y147Yg"
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
