@@ -253,6 +253,19 @@ def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: Item
         episode.metadata.actors = list(metadata.actors)
 
 
+def _resolve_selection_indexes(selection: Selection, total: int) -> tuple[int, ...]:
+    result = selection.evaluate(total)
+    if result.out_of_range:
+        emit_download_report(
+            "序号 {} 超出范围（1~{}），已忽略".format(",".join(map(str, result.out_of_range)), total),
+            ReportLevel.WARNING,
+        )
+    if not result.indexes:
+        message = "没有可供选择的项目" if total == 0 else "没有选中任何项目"
+        emit_download_report(message, ReportLevel.WARNING)
+    return result.indexes
+
+
 class BangumiEpisodeSource(MediaSource):
     id: EpisodeId
 
@@ -278,7 +291,7 @@ class BangumiEpisodeSource(MediaSource):
         episode_items = indexed_bangumi_episode_items(res, with_extra_episodes=options.with_extra_episodes)
         if options.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-        indexes = options.selection.resolve(len(episode_items))
+        indexes = _resolve_selection_indexes(options.selection, len(episode_items))
         episode_items = [episode_items[index - 1] for index in indexes]
         return MediaResolveResult(
             media=BangumiSeason(
@@ -303,7 +316,7 @@ class BangumiSeasonSource(MediaSource):
         if options.selection is None:
             episode_items = episode_items[:1]
         else:
-            indexes = options.selection.resolve(len(episode_items))
+            indexes = _resolve_selection_indexes(options.selection, len(episode_items))
             episode_items = [episode_items[index - 1] for index in indexes]
 
         return MediaResolveResult(
@@ -359,7 +372,7 @@ class CheeseEpisodeSource(MediaSource):
             index, item = anchor_item
             return MediaResolveResult(media=parse_cheese_episode(index, item))
 
-        indexes = options.selection.resolve(len(indexed_items))
+        indexes = _resolve_selection_indexes(options.selection, len(indexed_items))
         episode_items = [indexed_items[index - 1] for index in indexes]
         season_id = res.get("season_id", self.id.value)
         return MediaResolveResult(
@@ -381,7 +394,7 @@ class CheeseSeasonSource(MediaSource):
         if options.selection is None:
             episode_items = episode_items[:1]
         else:
-            indexes = options.selection.resolve(len(episode_items))
+            indexes = _resolve_selection_indexes(options.selection, len(episode_items))
             episode_items = [episode_items[index - 1] for index in indexes]
 
         return MediaResolveResult(
@@ -414,7 +427,7 @@ class UgcVideoSource(MediaSource):
 
         page_items: list[dict[str, Any]] = list(video_info["pages"])
         if options.selection is not None:
-            indexes = options.selection.resolve(len(page_items))
+            indexes = _resolve_selection_indexes(options.selection, len(page_items))
         else:
             page = self.page if self.page is not None else 1
             if page > len(page_items):
@@ -518,7 +531,7 @@ def _select_indexed(items: list[T], selection: Selection | None) -> list[tuple[i
     indexed_items = list(enumerate(items, start=1))
     if selection is None:
         return indexed_items[:1]
-    indexes = selection.resolve(len(indexed_items))
+    indexes = _resolve_selection_indexes(selection, len(indexed_items))
     return [indexed_items[index - 1] for index in indexes]
 
 
