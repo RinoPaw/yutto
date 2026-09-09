@@ -9,7 +9,6 @@ from returns.result import Failure
 
 from yutto.auth import encode_wbi, get_wbi_img
 from yutto.core.operation import ReportLevel, emit_download_report
-from yutto.core.options import SourceOptions
 from yutto.exceptions import (
     HttpStatusError,
     MaxRetryError,
@@ -42,8 +41,8 @@ from yutto.types import (
     CollectionId,
     EpisodeId,
     FId,
-    MId,
     MediaId,
+    MId,
     SeasonId,
     SeriesId,
 )
@@ -53,6 +52,7 @@ from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
+    from yutto.core.options import SourceOptions
     from yutto.exceptions import YuttoBaseException
 
 T = TypeVar("T")

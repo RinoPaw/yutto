@@ -4,8 +4,7 @@ import asyncio
 import inspect
 import shutil
 import sys
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from returns.result import Failure, Success
@@ -21,6 +20,10 @@ from yutto.downloader.transfer import _probe_media_size, _wait_for_native_transf
 from yutto.exceptions import MaxRetryError
 from yutto.utils.fetcher import Fetcher, create_client
 from yutto.utils.functional import as_sync
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 pytestmark = pytest.mark.processor
 

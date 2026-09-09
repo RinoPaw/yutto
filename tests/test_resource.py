@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
-
 from yutto.core.options import ResourceOptions
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest, resolve_resource_manifest
@@ -12,6 +10,8 @@ from yutto.types import BvId, CId
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
+    import pytest
+
     from yutto.core.execution import ExecutionScope
 
 _SCOPE = cast("ExecutionScope", None)

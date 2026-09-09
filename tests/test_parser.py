@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from yutto.parser import parse
 from yutto.source import CheeseEpisodeSource, CheeseSeasonSource
 

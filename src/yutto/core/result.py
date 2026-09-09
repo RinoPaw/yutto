@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from yutto.media import Media
+if TYPE_CHECKING:
+    from yutto.media import Media
 
 
 class _ResultModel(BaseModel):

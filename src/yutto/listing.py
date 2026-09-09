@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
@@ -24,7 +23,7 @@ from yutto.media import (
 from yutto.path_templates import UNKNOWN, resolve_path_template
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from yutto.path_templates import PathTemplateVariableDict
     from yutto.types import AvId
@@ -144,9 +143,7 @@ def _path_variables(
     pubdate = item.metadata.premiered or (parent_metadata.premiered if parent_metadata is not None else 0)
     download_date = item.metadata.dateadded or (parent_metadata.dateadded if parent_metadata is not None else 0)
     default_title = (
-        parent_metadata.title
-        if parent_metadata is not None
-        else (item.metadata.show_title or item.metadata.title)
+        parent_metadata.title if parent_metadata is not None else (item.metadata.show_title or item.metadata.title)
     )
     return {
         "id": index,
@@ -156,8 +153,8 @@ def _path_variables(
         "title": default_title if title is None else title,
         "username": owner if username is None else username,
         "series_title": UNKNOWN if series_title is None else series_title,
-        "pubdate": pubdate if pubdate else UNKNOWN,
-        "download_date": download_date if download_date else UNKNOWN,
+        "pubdate": pubdate or UNKNOWN,
+        "download_date": download_date or UNKNOWN,
         "owner_uid": owner_uid,
         "owner_uname": owner,
     }

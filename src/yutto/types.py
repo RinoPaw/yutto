@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 if TYPE_CHECKING:
+    from typing import Self
+
     from yutto.media.codec import AudioCodec, VideoCodec
     from yutto.media.quality import AudioQuality, VideoQuality
     from yutto.utils.subtitle import SubtitleData
@@ -86,7 +88,7 @@ class AvId(BilibiliId):
 class AId(AvId):
     """AID"""
 
-    def __new__(cls, aid: object) -> AId:
+    def __new__(cls, aid: object) -> Self:
         return super().__new__(cls, str(aid))
 
     def to_dict(self):
@@ -112,7 +114,7 @@ class BvId(AvId):
 class CId(BilibiliId):
     """视频 ID"""
 
-    def __new__(cls, cid: object) -> CId:
+    def __new__(cls, cid: object) -> Self:
         return super().__new__(cls, str(cid))
 
     def to_dict(self):
