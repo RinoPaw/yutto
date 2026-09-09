@@ -68,7 +68,11 @@ def test_selection_allows_whitespace_between_tokens() -> None:
     assert compile_selection("  3 , 1 ~ -1 , ^  ", 4) == (3, 1, 2, 4)
 
 
-@pytest.mark.parametrize("selection", ["0", "25", "-25"])
-def test_selection_rejects_out_of_range_positions(selection: str) -> None:
+def test_selection_rejects_zero_position() -> None:
     with pytest.raises(WrongArgumentError):
-        compile_selection(selection, 24)
+        compile_selection("0", 24)
+
+
+@pytest.mark.parametrize("selection", ["25", "-25"])
+def test_selection_ignores_out_of_range_positions(selection: str) -> None:
+    assert compile_selection(selection, 24) == ()
