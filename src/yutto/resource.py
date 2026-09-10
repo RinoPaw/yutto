@@ -11,7 +11,7 @@ from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
 from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
-from yutto.types import AudioUrlMeta, VideoUrlMeta, format_ids
+from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
 
@@ -159,15 +159,13 @@ async def get_ugc_video_playurl(
 
     play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid))
     if isinstance(play_result, Failure):
-        raise NoAccessPermissionError(f"无法获取该视频链接（{format_ids(avid, cid)}）") from play_result.failure()
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}）") from play_result.failure()
     resp_json = play_result.unwrap()
     if resp_json.get("data") is None:
-        raise NoAccessPermissionError(
-            f"无法获取该视频链接（{format_ids(avid, cid)}），原因：{resp_json.get('message')}"
-        )
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{resp_json.get('message')}")
     dash = resp_json["data"].get("dash")
     if dash is None:
-        raise UnSupportedTypeError(f"该视频（{format_ids(avid, cid)}）尚不支持 DASH 格式")
+        raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
 
     videos = _video_streams(dash.get("video") or [])
     audios = _audio_streams(dash.get("audio") or [])
@@ -188,21 +186,19 @@ async def get_bangumi_playurl(
     )
     play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid))
     if isinstance(play_result, Failure):
-        raise NoAccessPermissionError(f"无法获取该视频链接（{format_ids(avid, cid)}）") from play_result.failure()
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}）") from play_result.failure()
     resp_json = play_result.unwrap()
     if resp_json.get("result") is None or resp_json["result"].get("video_info") is None:
-        raise NoAccessPermissionError(
-            f"无法获取该视频链接（{format_ids(avid, cid)}），原因：{resp_json.get('message')}"
-        )
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{resp_json.get('message')}")
     video_info = resp_json["result"]["video_info"]
     if video_info.get("is_preview") == 1:
         emit_download_report(
-            f"视频（{format_ids(avid, cid)}）是预览视频（疑似未登录或非大会员用户）",
+            f"视频（{avid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
             ReportLevel.WARNING,
         )
     dash = video_info.get("dash")
     if dash is None:
-        raise UnSupportedTypeError(f"该视频（{format_ids(avid, cid)}）尚不支持 DASH 格式")
+        raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
 
     videos = _video_streams(dash.get("video") or [])
     audios = _audio_streams(dash.get("audio") or [])
@@ -225,20 +221,18 @@ async def get_cheese_playurl(
         play_api.format(**avid.to_dict(), cid=cid, episode_id=episode_id),
     )
     if isinstance(play_result, Failure):
-        raise NoAccessPermissionError(f"无法获取该视频链接（{format_ids(avid, cid)}）") from play_result.failure()
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}）") from play_result.failure()
     resp_json = play_result.unwrap()
     if resp_json.get("data") is None:
-        raise NoAccessPermissionError(
-            f"无法获取该视频链接（{format_ids(avid, cid)}），原因：{resp_json.get('message')}"
-        )
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{resp_json.get('message')}")
     if resp_json["data"].get("is_preview") == 1:
         emit_download_report(
-            f"视频（{format_ids(avid, cid)}）是预览视频（疑似未登录或非大会员用户）",
+            f"视频（{avid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
             ReportLevel.WARNING,
         )
     dash = resp_json["data"].get("dash")
     if dash is None:
-        raise UnSupportedTypeError(f"该视频（{format_ids(avid, cid)}）尚不支持 DASH 格式")
+        raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
     return _video_streams(dash.get("video") or []), _audio_streams(dash.get("audio") or [])
 
 
@@ -260,7 +254,7 @@ async def _resolve_subtitles(
     if not data_has_chained_keys(resp_json, ["data", "subtitle", "subtitles"]):
         if not isinstance(item, UgcPage):
             emit_download_report(
-                f"无法获取该视频的字幕（{format_ids(avid, cid)}），原因：{resp_json.get('message')}",
+                f"无法获取该视频的字幕（{avid}, cid: {cid}），原因：{resp_json.get('message')}",
                 ReportLevel.WARNING,
             )
         return []
@@ -270,7 +264,7 @@ async def _resolve_subtitles(
         subtitle_url = sub_info["subtitle_url"]
         if subtitle_url is None or not subtitle_url.strip():
             emit_download_report(
-                f"跳过无效的字幕URL（{format_ids(avid, cid)}），语言：{sub_info.get('lan_doc', '未知')}",
+                f"跳过无效的字幕URL（{avid}, cid: {cid}），语言：{sub_info.get('lan_doc', '未知')}",
                 ReportLevel.WARNING,
             )
             continue
@@ -300,7 +294,7 @@ async def _resolve_danmaku(
         )
     )
     if meta is None:
-        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{format_ids(avid, cid)}）")
+        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{avid}, cid: {cid}）")
     size = get_danmaku_meta_size(meta)
     return source_type, [
         f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"

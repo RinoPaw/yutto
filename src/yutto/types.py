@@ -26,7 +26,7 @@ class BilibiliId(NamedTuple):
             return False
         return self.value == other.value
 
-    def to_param(self) -> str:
+    def to_dict(self) -> dict[str, str]:
         raise NotImplementedError("请不要直接使用 BilibiliId")
 
 
@@ -65,7 +65,7 @@ class AvId(BilibiliId):
             tmp = tmp * AvId.BASE + idx
         return (tmp & AvId.MASK_CODE) ^ AvId.XOR_CODE
 
-    def to_param(self) -> str:
+    def to_dict(self) -> dict[str, str]:
         raise NotImplementedError("请不要直接使用 AvId")
 
     def to_url(self) -> str:
@@ -88,8 +88,8 @@ class AId(AvId):
     def __new__(cls, aid: object) -> Self:
         return super().__new__(cls, str(aid))
 
-    def to_param(self) -> str:
-        return f"aid={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"aid": self.value, "bvid": ""}
 
     def to_url(self) -> str:
         return f"https://www.bilibili.com/video/av{self.value}"
@@ -98,8 +98,8 @@ class AId(AvId):
 class BvId(AvId):
     """BVID"""
 
-    def to_param(self) -> str:
-        return f"bvid={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"aid": "", "bvid": self.value}
 
     def to_url(self) -> str:
         return f"https://www.bilibili.com/video/{self.value}"
@@ -111,61 +111,57 @@ class CId(BilibiliId):
     def __new__(cls, cid: object) -> Self:
         return super().__new__(cls, str(cid))
 
-    def to_param(self) -> str:
-        return f"cid={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"cid": self.value}
 
 
 class EpisodeId(BilibiliId):
     """番剧剧集 ID"""
 
-    def to_param(self) -> str:
-        return f"ep_id={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"ep_id": self.value}
 
 
 class MediaId(BilibiliId):
     """番剧 ID"""
 
-    def to_param(self) -> str:
-        return f"media_id={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"media_id": self.value}
 
 
 class SeasonId(BilibiliId):
     """番剧（季） ID"""
 
-    def to_param(self) -> str:
-        return f"season_id={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"season_id": self.value}
 
 
 class MId(BilibiliId):
     """用户 ID"""
 
-    def to_param(self) -> str:
-        return f"mid={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"mid": self.value}
 
 
 class FId(BilibiliId):
     """收藏夹 ID"""
 
-    def to_param(self) -> str:
-        return f"fid={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"fid": self.value}
 
 
 class SeriesId(BilibiliId):
     """视频系列 ID"""
 
-    def to_param(self) -> str:
-        return f"series_id={self.value}"
+    def to_dict(self) -> dict[str, str]:
+        return {"series_id": self.value}
 
 
 class CollectionId(BilibiliId):
     """UGC 视频合集 ID"""
 
-    def to_param(self) -> str:
-        return f"season_id={self.value}"
-
-
-def format_ids(*id: BilibiliId) -> str:
-    return ", ".join(item.to_param().replace("=", ": ", 1) for item in id)
+    def to_dict(self) -> dict[str, str]:
+        return {"season_id": self.value}
 
 
 class VideoUrlMeta(TypedDict):
@@ -212,4 +208,4 @@ class UserInfo(TypedDict):
 if __name__ == "__main__":
     aid = AId("add")
     cid = CId("xxx")
-    print(f"?{aid.to_param()}&{cid.to_param()}")
+    print("?aid={aid}&bvid={bvid}&cid={cid}".format(**aid.to_dict(), **cid.to_dict()))
