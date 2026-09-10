@@ -30,9 +30,7 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
             "login_strict": args.login_strict,
             "vip_strict": args.vip_strict,
         },
-        "scope": {
-            "with_extra_episodes": args.with_extra_episodes,
-        },
+        "with_extra_episodes": args.with_extra_episodes,
         "selection": {
             "expression": selection_expr,
             "skip_preview": args.skip_preview,
@@ -123,7 +121,7 @@ def _download_request_defaults_from_settings(settings: YuttoSettings) -> dict[st
             "login_strict": settings.basic.login_strict,
             "vip_strict": settings.basic.vip_strict,
         },
-        "scope": {"with_extra_episodes": settings.batch.with_extra_episodes},
+        "with_extra_episodes": settings.batch.with_extra_episodes,
         "selection": {
             "expression": None,
             "skip_preview": settings.batch.skip_preview,
