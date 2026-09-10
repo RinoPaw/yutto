@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from yutto._native import InvalidUrlError, UnsupportedProtocolError
 from yutto.auth import validate_user_info
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
@@ -20,14 +19,13 @@ from yutto.exceptions import (
     ResolveFailedError,
     UnSupportedTypeError,
     WrongArgumentError,
-    WrongUrlError,
 )
 from yutto.listing import MediaAncestry, PathOptions, iter_media_items, resolve_media_paths
 from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
+from yutto.url_resolver import resolve_redirected_source
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -256,16 +254,7 @@ class DownloadManager:
         value = request.source.url.strip()
         source = parse(value)
         if source is None:
-            try:
-                redirected_value = unwrap_fetch_result(await Fetcher.get_redirected_url(scope, value))
-            except InvalidUrlError:
-                raise WrongUrlError(f"无效的 url({value})～请检查一下链接是否正确～") from None
-            except UnsupportedProtocolError:
-                raise WrongUrlError(f"无效的 url 协议（{value}）～请检查一下链接协议是否正确") from None
-
-            source = parse(redirected_value)
-            if source is None:
-                raise WrongUrlError(f"无法识别 url（{redirected_value}）")
+            source = await resolve_redirected_source(scope, value)
 
         source_options = source_options_from_request(request)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
