@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from yutto.api.common import NAV_API as USER_INFO_API, get_nav
+from yutto.api.account import NAV_API as USER_INFO_API, get_nav
 from yutto.types import UserInfo
 
 if TYPE_CHECKING:
