@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
-from yutto.core.options import ResourceOptions
+from yutto.core.request import DownloadRequest
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest, resolve_resource_manifest
 from yutto.types import BvId, CId
@@ -38,12 +38,17 @@ def test_ugc_resource_manifest_uses_page_avid(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("yutto.resource.get_ugc_video_playurl", fake_playurl)
     monkeypatch.setattr("yutto.resource._resolve_danmaku", fake_danmaku)
 
-    options = ResourceOptions(
-        subtitle=False,
-        cover=False,
-        chapter_info=False,
+    request = DownloadRequest.model_validate(
+        {
+            "source": {"url": str(avid)},
+            "resources": {
+                "subtitle": False,
+                "cover": False,
+                "chapter_info": False,
+            },
+        }
     )
-    manifest = asyncio.run(resolve_resource_manifest(_SCOPE, page, options))
+    manifest = asyncio.run(resolve_resource_manifest(_SCOPE, page, request))
 
     assert isinstance(manifest, ResourceManifest)
     assert page.avid == avid
@@ -61,13 +66,19 @@ def test_resource_manifest_keeps_cover_as_url() -> None:
         cid=CId(123),
         metadata=ItemMetaData(title="P1", thumb="https://example.test/cover.jpg"),
     )
-    manifest = asyncio.run(
-        resolve_resource_manifest(
-            _SCOPE,
-            page,
-            ResourceOptions(video=False, audio=False, subtitle=False, danmaku=False, chapter_info=False),
-        )
+    request = DownloadRequest.model_validate(
+        {
+            "source": {"url": "BV1D84y1t76J"},
+            "resources": {
+                "video": False,
+                "audio": False,
+                "subtitle": False,
+                "danmaku": False,
+                "chapter_info": False,
+            },
+        }
     )
+    manifest = asyncio.run(resolve_resource_manifest(_SCOPE, page, request))
 
     assert manifest.cover_url == "https://example.test/cover.jpg"
     assert not hasattr(manifest, "cover_data")

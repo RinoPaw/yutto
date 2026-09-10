@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from returns.result import Success
 
-from yutto.core.options import SourceOptions
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
 from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeason
 from yutto.parser import parse
@@ -19,6 +18,7 @@ from yutto.source import (
     BangumiSeasonSource,
     CheeseEpisodeSource,
     CheeseSeasonSource,
+    SourceOptions,
     UgcCollectionSource,
     UgcFavSource,
     UgcSeriesSource,

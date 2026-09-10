@@ -9,7 +9,7 @@ from yutto.utils.time import TIME_FULL_FMT
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from yutto.core.options import DownloadOptions
+    from yutto.core.request import DownloadRequest
     from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
@@ -66,7 +66,7 @@ class MetadataPlan:
 
 @dataclass(frozen=True, slots=True)
 class DownloadResources:
-    """Frozen write policy derived from DownloadOptions and ResourceManifest."""
+    """Frozen write policy derived from DownloadRequest and ResourceManifest."""
 
     subtitle_languages: tuple[str, ...]
     has_danmaku: bool
@@ -105,71 +105,81 @@ class DownloadPlan:
 
 
 class DownloadPlanner:
-    """Turn a ResourceManifest plus a path and DownloadOptions into a pure download plan."""
+    """Turn a ResourceManifest plus a path and DownloadRequest into a pure download plan."""
 
-    def plan(self, resources: ResourceManifest, path: Path, options: DownloadOptions) -> DownloadPlan:
+    def plan(self, resources: ResourceManifest, path: Path, request: DownloadRequest) -> DownloadPlan:
+        resource_options = request.resources
+        stream = request.stream
+        output = request.output
+        network = request.network
+        danmaku = request.danmaku
+
         video_candidate = select_video(
             resources.videos,
-            options.video_quality,
-            options.video_download_codec,
-            options.video_download_codec_priority,
+            stream.video_quality,
+            stream.video_download_codec,
+            stream.video_download_codec_priority,
         )
         audio_candidate = select_audio(
             resources.audios,
-            options.audio_quality,
-            options.audio_download_codec,
+            stream.audio_quality,
+            stream.audio_download_codec,
         )
-        video_meta = video_candidate if options.video else None
-        audio_meta = audio_candidate if options.audio else None
-        suffix = resolve_output_suffix(video_meta, audio_meta, options)
+        video_meta = video_candidate if resource_options.video else None
+        audio_meta = audio_candidate if resource_options.audio else None
+        suffix = resolve_output_suffix(video_meta, audio_meta, request)
         paths = resolve_paths(
-            options.output_directory,
-            options.temporary_directory or options.output_directory,
+            output.directory,
+            output.temporary_directory or output.directory,
             path,
             suffix,
         )
 
-        video_save_codec = options.video_save_codec
+        video_save_codec = stream.video_save_codec
         attach_hvc1_tag = should_attach_hvc1_tag(video_meta, video_save_codec)
         if video_meta is not None and video_meta["codec"] == video_save_codec:
             video_save_codec = "copy"
 
-        requested_audio_save_codec = options.audio_save_codec
+        requested_audio_save_codec = stream.audio_save_codec
         audio_save_codec = (
             resolve_audio_save_codec(audio_meta["codec"], requested_audio_save_codec, suffix)
             if audio_meta is not None
             else requested_audio_save_codec
         )
 
-        selected_video_index = resources.videos.index(video_candidate) if video_candidate is not None and options.video else -1
-        selected_audio_index = resources.audios.index(audio_candidate) if audio_candidate is not None and options.audio else -1
+        selected_video_index = (
+            resources.videos.index(video_candidate) if video_candidate is not None and resource_options.video else -1
+        )
+        selected_audio_index = (
+            resources.audios.index(audio_candidate) if audio_candidate is not None and resource_options.audio else -1
+        )
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
             danmaku_save_type=resources.danmaku_save_type,
-            has_metadata=options.metadata,
+            has_metadata=resource_options.metadata,
             has_cover=resources.cover_url is not None,
             has_chapter_info=resources.chapter_info_url is not None,
-            save_cover=options.save_cover,
+            save_cover=resource_options.save_cover,
             danmaku_width=video_candidate["width"] if video_candidate is not None else 1920,
             danmaku_height=video_candidate["height"] if video_candidate is not None else 1080,
             metadata=MetadataPlan(
-                premiered=options.metadata_format_premiered,
+                premiered=output.metadata_format_premiered,
                 dateadded=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
-                font_size=options.danmaku_font_size,
-                font=options.danmaku_font,
-                opacity=options.danmaku_opacity,
-                display_region_ratio=options.danmaku_display_region_ratio,
-                speed=options.danmaku_speed,
-                block_top=options.danmaku_block_top,
-                block_bottom=options.danmaku_block_bottom,
-                block_scroll=options.danmaku_block_scroll,
-                block_reverse=options.danmaku_block_reverse,
-                block_special=options.danmaku_block_special,
-                block_colorful=options.danmaku_block_colorful,
-                block_keyword_patterns=options.danmaku_block_keyword_patterns,
+                font_size=danmaku.font_size,
+                font=danmaku.font,
+                opacity=danmaku.opacity,
+                display_region_ratio=danmaku.display_region_ratio,
+                speed=danmaku.speed,
+                block_top=danmaku.block_top,
+                block_bottom=danmaku.block_bottom,
+                block_scroll=danmaku.block_scroll,
+                block_reverse=danmaku.block_reverse,
+                block_special=danmaku.block_special,
+                block_colorful=danmaku.block_colorful,
+                block_keyword_patterns=tuple(danmaku.block_keyword_patterns),
             ),
         )
         return DownloadPlan(
@@ -177,16 +187,16 @@ class DownloadPlanner:
             paths=paths,
             video=freeze_video_stream(video_meta, selected_video_index),
             audio=freeze_audio_stream(audio_meta, selected_audio_index),
-            media_requested=options.video or options.audio,
+            media_requested=resource_options.video or resource_options.audio,
             video_save_codec=video_save_codec,
             audio_save_codec=audio_save_codec,
             attach_hvc1_tag=attach_hvc1_tag,
             requires_audio_transcode_notice=(
                 audio_meta is not None and audio_save_codec not in {requested_audio_save_codec, "copy"}
             ),
-            overwrite=options.overwrite,
-            block_size=options.block_size_bytes,
-            banned_mirrors_pattern=options.banned_mirrors_pattern,
+            overwrite=output.overwrite,
+            block_size=network.block_size_bytes,
+            banned_mirrors_pattern=network.banned_mirrors_pattern,
             resources=resource_plan,
         )
 
@@ -217,19 +227,21 @@ def resolve_paths(
 def resolve_output_suffix(
     video: VideoUrlMeta | None,
     audio: AudioUrlMeta | None,
-    options: DownloadOptions,
+    request: DownloadRequest,
 ) -> str:
+    output = request.output
+    stream = request.stream
     if video is None:
-        if options.audio_only_format != "infer":
-            return f".{options.audio_only_format}"
-        if audio is not None and audio["codec"] == "flac" and options.audio_save_codec in {"copy", "flac"}:
+        if output.audio_only_format != "infer":
+            return f".{output.audio_only_format}"
+        if audio is not None and audio["codec"] == "flac" and stream.audio_save_codec in {"copy", "flac"}:
             return ".flac"
-        if audio is not None and audio["codec"] == "eac3" and options.audio_save_codec in {"copy", "eac3"}:
+        if audio is not None and audio["codec"] == "eac3" and stream.audio_save_codec in {"copy", "eac3"}:
             return ".mkv"
         return ".m4a"
 
-    if options.output_format != "infer":
-        return f".{options.output_format}"
+    if output.format != "infer":
+        return f".{output.format}"
     if audio is not None and audio["codec"] == "flac":
         return ".mkv"
     return ".mp4"

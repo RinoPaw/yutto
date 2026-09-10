@@ -5,10 +5,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from returns.result import Success
 
-from yutto.core.options import SourceOptions
 from yutto.media import UgcAllFavourites
 from yutto.parser import parse
-from yutto.source import UgcAllFavouritesSource, UgcFavSource
+from yutto.source import SourceOptions, UgcAllFavouritesSource, UgcFavSource
 from yutto.types import MId
 
 if TYPE_CHECKING:

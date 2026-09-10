@@ -6,11 +6,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from returns.result import Success
 
-from yutto.core.options import SourceOptions, source_options_from_request
 from yutto.core.request import DownloadRequest
 from yutto.media import UgcSeries, UgcSpace
 from yutto.selection import parse_selection
-from yutto.source import UgcSeriesSource, UgcSpaceSource
+from yutto.source import SourceOptions, UgcSeriesSource, UgcSpaceSource
 from yutto.types import MId, SeriesId
 from yutto.utils.filter import PublicationTimeFilter
 
@@ -51,7 +50,7 @@ def test_request_builds_publication_filter_for_sources() -> None:
         }
     )
 
-    publication_filter = source_options_from_request(request).publication_time_filter
+    publication_filter = SourceOptions.from_request(request).publication_time_filter
     assert publication_filter is not None
     assert publication_filter.matches(int(datetime.datetime(2024, 1, 15).timestamp()))
     assert not publication_filter.matches(int(datetime.datetime(2024, 2, 15).timestamp()))

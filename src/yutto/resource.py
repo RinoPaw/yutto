@@ -21,7 +21,7 @@ from yutto.utils.functional import data_has_chained_keys
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.core.options import ResourceOptions
+    from yutto.core.request import DownloadRequest
     from yutto.types import AvId, CId, EpisodeId
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
@@ -259,10 +259,11 @@ async def _resolve_danmaku(
 async def resolve_resource_manifest(
     scope: ExecutionScope,
     item: MediaItem,
-    options: ResourceOptions,
+    request: DownloadRequest,
 ) -> ResourceManifest:
     """Resolve resource locations for one MediaItem without downloading resource bodies."""
 
+    resources = request.resources
     videos: list[VideoUrlMeta] = []
     audios: list[AudioUrlMeta] = []
     subtitles: list[SubtitleResource] = []
@@ -270,41 +271,41 @@ async def resolve_resource_manifest(
 
     if isinstance(item, UgcPage):
         avid = item.avid
-        if options.video or options.audio:
+        if resources.video or resources.audio:
             videos, audios = await get_ugc_video_playurl(
                 scope,
                 avid,
                 item.cid,
-                options.ai_translation_language,
+                resources.ai_translation_language,
             )
-        if options.chapter_info:
+        if resources.chapter_info:
             chapter_info_url = player_info_url(avid, item.cid, wbi=False)
     elif isinstance(item, BangumiEpisode):
         avid = item.avid
-        if options.video or options.audio:
+        if resources.video or resources.audio:
             videos, audios = await get_bangumi_playurl(scope, avid, item.cid)
     elif isinstance(item, CheeseEpisode):
         avid = item.avid
-        if options.video or options.audio:
+        if resources.video or resources.audio:
             videos, audios = await get_cheese_playurl(scope, avid, item.episode_id, item.cid)
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
-    if options.subtitle:
+    if resources.subtitle:
         subtitles = await _resolve_subtitles(scope, item, avid, item.cid)
-    if not options.video:
+    if not resources.video:
         videos = []
-    if not options.audio:
+    if not resources.audio:
         audios = []
 
     danmaku_source_type: DanmakuSourceType | None = None
     danmaku_urls: list[str] = []
-    if options.danmaku:
+    if resources.danmaku:
         danmaku_source_type, danmaku_urls = await _resolve_danmaku(
             scope,
             avid,
             item.cid,
-            options.danmaku_format,
+            request.danmaku.format,
         )
 
     return ResourceManifest(
@@ -312,8 +313,8 @@ async def resolve_resource_manifest(
         audios=tuple(audios),
         subtitles=tuple(subtitles),
         danmaku_source_type=danmaku_source_type,
-        danmaku_save_type=options.danmaku_format if danmaku_urls else None,
+        danmaku_save_type=request.danmaku.format if danmaku_urls else None,
         danmaku_urls=tuple(danmaku_urls),
-        cover_url=item.metadata.thumb if options.cover and item.metadata.thumb else None,
+        cover_url=item.metadata.thumb if resources.cover and item.metadata.thumb else None,
         chapter_info_url=chapter_info_url,
     )
