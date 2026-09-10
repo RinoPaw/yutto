@@ -333,8 +333,9 @@ def add_download_arguments(parser: argparse.ArgumentParser, settings: YuttoSetti
     group_selection.add_argument(
         "-p",
         "--episodes",
+        dest="selection_expr",
         default=None,
-        help="选择当前资源的直接子项；未指定时默认选择第 1 项",
+        help="选择当前资源对应列表中的条目；未指定时使用该资源的默认选择",
     )
 
     # 资源选择
