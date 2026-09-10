@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from yutto.api.common import fetch_payload
-from yutto.auth.wbi import encode_wbi, get_wbi_img
+from yutto.auth import encode_wbi, get_wbi_img
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope

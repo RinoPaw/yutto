@@ -9,8 +9,9 @@ import time
 import urllib.parse
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from yutto.auth.user import USER_INFO_API
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
+
+from .user import USER_INFO_API
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope

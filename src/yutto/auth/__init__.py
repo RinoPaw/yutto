@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from yutto.auth.credentials import (
+from .credentials import (
     PROFILE_RE,
     AuthFileModel,
     AuthInfo,
@@ -20,8 +20,8 @@ from yutto.auth.credentials import (
     write_auth_file,
     xdg_config_home,
 )
-from yutto.auth.user import USER_INFO_API, get_user_info, parse_user_info, user_info_matches, validate_user_info
-from yutto.auth.wbi import WbiImg, dm_cover_img_str_cache, dm_img_str_cache, encode_wbi, get_wbi_img
+from .user import USER_INFO_API, get_user_info, parse_user_info, user_info_matches, validate_user_info
+from .wbi import WbiImg, dm_cover_img_str_cache, dm_img_str_cache, encode_wbi, get_wbi_img
 
 __all__ = [
     "PROFILE_RE",
