@@ -18,14 +18,6 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Checkout upstream main
-        uses: actions/checkout@v7
-        with:
-          repository: yutto-dev/yutto
-          ref: main
-          path: baseline
-          submodules: recursive
-
       - name: Install python
         id: python
         uses: actions/setup-python@v7
@@ -69,35 +61,42 @@ jobs:
       - name: Install candidate dependencies
         run: just ci-install 3.14
 
-      - name: Install baseline dependencies
-        working-directory: baseline
-        run: just ci-install 3.14
-
       - name: Run candidate exactly like upstream CodSpeed job
-        continue-on-error: true
         uses: CodSpeedHQ/action@v5
         env:
           YUTTO_VARIANT: candidate
-          PYTHONPATH: ${{ github.workspace }}/src
         with:
           mode: simulation
           run: uv run -p 3.14 pytest --codspeed
 
+      # Keep the baseline out of the candidate checkout until the upstream-style
+      # pytest run has finished. Otherwise pytest recursively discovers a second
+      # tests/ tree and imports the wrong conftest modules.
+      - name: Checkout upstream main
+        uses: actions/checkout@v7
+        with:
+          repository: yutto-dev/yutto
+          ref: main
+          path: baseline
+          submodules: recursive
+
+      - name: Install baseline dependencies
+        working-directory: baseline
+        run: just ci-install 3.14
+
       - name: Run the same benchmark corpus on upstream main
-        continue-on-error: true
         uses: CodSpeedHQ/action@v5
         env:
           YUTTO_VARIANT: baseline
-          PYTHONPATH: ${{ github.workspace }}/baseline/src
         with:
           mode: simulation
           run: baseline/.venv/bin/python -m pytest benchmarks/test_refactor_codspeed.py --codspeed -q
 
       - name: Compare wall time on the same runner
         run: |
-          YUTTO_VARIANT=baseline PYTHONPATH="$GITHUB_WORKSPACE/baseline/src" \
+          YUTTO_VARIANT=baseline \
             baseline/.venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/baseline.json
-          YUTTO_VARIANT=candidate PYTHONPATH="$GITHUB_WORKSPACE/src" \
+          YUTTO_VARIANT=candidate \
             .venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/candidate.json
           python - <<'PY'
           import json
