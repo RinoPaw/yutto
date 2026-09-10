@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from time import perf_counter_ns
 
 import pytest
@@ -87,12 +88,13 @@ if _VARIANT == "baseline":
         return tuple(selection_module.parse_episodes_selection(expression, total))
 
     def _route_non_batch(url: str) -> object | None:
-        for extractor in (UgcVideoExtractor(), BangumiExtractor(), CheeseExtractor()):
+        extractors = (UgcVideoExtractor(), BangumiExtractor(), CheeseExtractor())
+        for extractor in extractors:
             matched, resolved = extractor.resolve_shortcut(url)
             if matched:
                 url = resolved
                 break
-        for extractor in (UgcVideoExtractor(), BangumiExtractor(), CheeseExtractor()):
+        for extractor in extractors:
             if extractor.match(url):
                 return extractor
         return None
@@ -214,13 +216,12 @@ def test_request_model_validation() -> None:
     assert checksum > 0
 
 
-def _measure(function: object, *, rounds: int =  nine if False else 9, loops: int = 200) -> float:
+def _measure(function: Callable[[], int], *, rounds: int = 9, loops: int = 200) -> float:
     samples: list[float] = []
-    callable_function = function
     for _ in range(rounds):
         start = perf_counter_ns()
         for _ in range(loops):
-            callable_function()
+            function()
         samples.append((perf_counter_ns() - start) / loops)
     samples.sort()
     return samples[len(samples) // 2]
