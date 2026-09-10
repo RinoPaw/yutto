@@ -4,7 +4,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
-from yutto.core.options import execution_options_from_request
 from yutto.utils.fetcher import (
     DEFAULT_FETCH_WORKERS,
     cookies_from_auth,
@@ -75,8 +74,7 @@ class RequestExecutionScopeFactory:
 
     @asynccontextmanager
     async def open(self, request: DownloadRequest) -> AsyncIterator[ExecutionScope]:
-        options = execution_options_from_request(request)
-        proxy, trust_env = resolve_proxy(options.proxy)
+        proxy, trust_env = resolve_proxy(request.network.proxy)
         auth = self._credential_resolver(request)
         cookies = cookies_from_auth(auth)
 
@@ -87,8 +85,8 @@ class RequestExecutionScopeFactory:
         ) as session:
             scope = ExecutionScope(
                 session,
-                fetch_workers=options.fetch_workers,
-                download_workers=options.download_workers,
+                fetch_workers=request.network.fetch_workers,
+                download_workers=request.network.download_workers,
             )
             if self._on_open is not None:
                 await self._on_open(scope, request)
