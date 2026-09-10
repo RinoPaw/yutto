@@ -54,7 +54,8 @@ def test_legacy_batch_without_selection_normalizes_to_full_selection():
     request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD", "-b"]))
 
     assert request.selection.expression == "~"
-    assert request.scope.model_dump() == {"batch": False, "with_extra_episodes": False}
+    assert request.batch is False
+    assert request.with_extra_episodes is False
 
 
 def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
@@ -151,7 +152,8 @@ def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
         "login_strict": True,
         "vip_strict": True,
     }
-    assert request.scope.model_dump() == {"batch": False, "with_extra_episodes": True}
+    assert request.batch is False
+    assert request.with_extra_episodes is True
     assert request.selection.model_dump() == {
         "expression": "2,4~6",
         "skip_preview": True,

@@ -102,7 +102,7 @@ class SourceOptions:
             )
         return cls(
             selection=parse_selection(expression) if expression is not None else None,
-            with_extra_episodes=request.scope.with_extra_episodes,
+            with_extra_episodes=request.with_extra_episodes,
             skip_preview=request.selection.skip_preview,
             fetch_tags=request.resources.metadata,
             publication_time_filter=publication_time_filter,
