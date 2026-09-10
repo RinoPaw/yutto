@@ -15,20 +15,6 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class AccessOptions:
-    login_strict: bool = False
-    vip_strict: bool = False
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ExecutionOptions:
-    auth_profile: str = "default"
-    proxy: str = "auto"
-    fetch_workers: int = 8
-    download_workers: int = 8
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class SourceOptions:
     selection: Selection | None = None
     with_extra_episodes: bool = False
@@ -86,26 +72,8 @@ class DownloadOptions:
     danmaku_block_keyword_patterns: tuple[str, ...]
 
 
-DEFAULT_ACCESS_OPTIONS = AccessOptions()
-DEFAULT_EXECUTION_OPTIONS = ExecutionOptions()
 DEFAULT_SOURCE_OPTIONS = SourceOptions()
 DEFAULT_RESOURCE_OPTIONS = ResourceOptions()
-
-
-def access_options_from_request(request: DownloadRequest) -> AccessOptions:
-    return AccessOptions(
-        login_strict=request.access.login_strict,
-        vip_strict=request.access.vip_strict,
-    )
-
-
-def execution_options_from_request(request: DownloadRequest) -> ExecutionOptions:
-    return ExecutionOptions(
-        auth_profile=request.access.auth_profile,
-        proxy=request.network.proxy,
-        fetch_workers=request.network.fetch_workers,
-        download_workers=request.network.download_workers,
-    )
 
 
 def source_options_from_request(request: DownloadRequest) -> SourceOptions:
@@ -191,18 +159,12 @@ def download_options_from_request(request: DownloadRequest) -> DownloadOptions:
 
 
 __all__ = [
-    "DEFAULT_ACCESS_OPTIONS",
-    "DEFAULT_EXECUTION_OPTIONS",
     "DEFAULT_RESOURCE_OPTIONS",
     "DEFAULT_SOURCE_OPTIONS",
-    "AccessOptions",
     "DownloadOptions",
-    "ExecutionOptions",
     "ResourceOptions",
     "SourceOptions",
-    "access_options_from_request",
     "download_options_from_request",
-    "execution_options_from_request",
     "path_options_from_request",
     "resource_options_from_request",
     "source_options_from_request",

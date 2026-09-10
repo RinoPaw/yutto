@@ -8,7 +8,6 @@ from yutto.auth import validate_user_info
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
 from yutto.core.options import (
-    access_options_from_request,
     download_options_from_request,
     path_options_from_request,
     resource_options_from_request,
@@ -168,7 +167,6 @@ class DownloadManager:
 
         path_options = path_options_from_request(request)
         download_options = download_options_from_request(request)
-        access_options = access_options_from_request(request)
         resource_options = resource_options_from_request(request)
         path_entries = resolve_media_paths(result.media, path_options)
         download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
@@ -200,7 +198,7 @@ class DownloadManager:
             async with self._item_limiter:
                 if not await validate_user_info(
                     scope,
-                    {"is_login": access_options.login_strict, "vip_status": access_options.vip_strict},
+                    {"is_login": request.access.login_strict, "vip_status": request.access.vip_strict},
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
@@ -263,12 +261,11 @@ class DownloadManager:
             source = await resolve_redirected_source(scope, value)
 
         source_options = source_options_from_request(request)
-        access_options = access_options_from_request(request)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
 
         if not await validate_user_info(
             scope,
-            {"is_login": access_options.login_strict, "vip_status": access_options.vip_strict},
+            {"is_login": request.access.login_strict, "vip_status": request.access.vip_strict},
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 

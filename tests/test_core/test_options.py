@@ -3,17 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from yutto.core.options import (
-    DEFAULT_ACCESS_OPTIONS,
-    DEFAULT_EXECUTION_OPTIONS,
     DEFAULT_RESOURCE_OPTIONS,
     DEFAULT_SOURCE_OPTIONS,
-    AccessOptions,
-    ExecutionOptions,
     ResourceOptions,
     SourceOptions,
-    access_options_from_request,
     download_options_from_request,
-    execution_options_from_request,
     path_options_from_request,
     resource_options_from_request,
     source_options_from_request,
@@ -23,8 +17,6 @@ from yutto.selection import Selection
 
 
 def test_internal_options_define_canonical_defaults() -> None:
-    assert AccessOptions() == DEFAULT_ACCESS_OPTIONS
-    assert ExecutionOptions() == DEFAULT_EXECUTION_OPTIONS
     assert SourceOptions() == DEFAULT_SOURCE_OPTIONS
     assert ResourceOptions() == DEFAULT_RESOURCE_OPTIONS
 
@@ -32,12 +24,6 @@ def test_internal_options_define_canonical_defaults() -> None:
 def test_request_defaults_follow_internal_defaults() -> None:
     request = DownloadRequest.model_validate({"source": {"url": "BV1D84y1t76J"}})
 
-    assert request.access.login_strict == DEFAULT_ACCESS_OPTIONS.login_strict
-    assert request.access.vip_strict == DEFAULT_ACCESS_OPTIONS.vip_strict
-    assert request.access.auth_profile == DEFAULT_EXECUTION_OPTIONS.auth_profile
-    assert request.network.proxy == DEFAULT_EXECUTION_OPTIONS.proxy
-    assert request.network.fetch_workers == DEFAULT_EXECUTION_OPTIONS.fetch_workers
-    assert request.network.download_workers == DEFAULT_EXECUTION_OPTIONS.download_workers
     assert request.scope.with_extra_episodes == DEFAULT_SOURCE_OPTIONS.with_extra_episodes
     assert request.selection.skip_preview == DEFAULT_SOURCE_OPTIONS.skip_preview
     assert request.resources.video == DEFAULT_RESOURCE_OPTIONS.video
@@ -49,8 +35,6 @@ def test_request_defaults_follow_internal_defaults() -> None:
     assert request.resources.ai_translation_language == DEFAULT_RESOURCE_OPTIONS.ai_translation_language
     assert request.danmaku.format == DEFAULT_RESOURCE_OPTIONS.danmaku_format
 
-    assert access_options_from_request(request) == DEFAULT_ACCESS_OPTIONS
-    assert execution_options_from_request(request) == DEFAULT_EXECUTION_OPTIONS
     assert source_options_from_request(request) == DEFAULT_SOURCE_OPTIONS
     assert resource_options_from_request(request) == DEFAULT_RESOURCE_OPTIONS
 
@@ -108,15 +92,11 @@ def test_explicit_selection_is_unchanged_by_deprecated_batch_flag() -> None:
     assert options.selection.resolve(4) == (3, 1)
 
 
-def test_request_projects_path_execution_and_download_options() -> None:
+def test_request_projects_path_and_download_options() -> None:
     request = DownloadRequest.model_validate(
         {
             "source": {"url": "BV1D84y1t76J"},
-            "access": {"auth_profile": "work", "login_strict": True},
             "network": {
-                "proxy": "no",
-                "fetch_workers": 3,
-                "download_workers": 4,
                 "download_interval": 2,
                 "block_size_bytes": 1024 * 1024,
                 "banned_mirrors_pattern": "blocked",
@@ -133,15 +113,9 @@ def test_request_projects_path_execution_and_download_options() -> None:
         }
     )
 
-    access = access_options_from_request(request)
-    execution = execution_options_from_request(request)
     path = path_options_from_request(request)
     download = download_options_from_request(request)
 
-    assert access.login_strict is True
-    assert execution.auth_profile == "work"
-    assert execution.proxy == "no"
-    assert (execution.fetch_workers, execution.download_workers) == (3, 4)
     assert path.subpath_template == "{title}/{name}"
     assert download.output_directory == Path("out")
     assert download.temporary_directory == Path("tmp")
