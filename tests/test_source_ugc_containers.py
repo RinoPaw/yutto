@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from returns.result import Success
 
-from yutto.core.options import SourceOptions
 from yutto.exceptions import NotFoundError
 from yutto.media import UgcCollection, UgcFav, UgcSeries
 from yutto.selection import parse_selection
-from yutto.source import UgcCollectionSource, UgcFavSource, UgcSeriesSource
+from yutto.source import SourceOptions, UgcCollectionSource, UgcFavSource, UgcSeriesSource
 from yutto.types import BvId, CollectionId, FId, MId, SeriesId
 
 if TYPE_CHECKING:

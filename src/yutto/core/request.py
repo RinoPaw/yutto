@@ -5,7 +5,6 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from yutto.core.options import DEFAULT_RESOURCE_OPTIONS, DEFAULT_SOURCE_OPTIONS
 from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
 from yutto.utils.time import TIME_DATE_FMT
 
@@ -32,14 +31,14 @@ class ScopeRequestOptions(_RequestModel):
     """Whether resolution targets one episode or an expanded collection."""
 
     batch: bool = Field(default=False, deprecated=True)
-    with_extra_episodes: bool = DEFAULT_SOURCE_OPTIONS.with_extra_episodes
+    with_extra_episodes: bool = False
 
 
 class SelectionRequestOptions(_RequestModel):
     """Selection expression and filters for the current source selection domain."""
 
     expression: str | None = None
-    skip_preview: bool = DEFAULT_SOURCE_OPTIONS.skip_preview
+    skip_preview: bool = False
     start_time: str | None = None
     end_time: str | None = None
 
@@ -47,15 +46,15 @@ class SelectionRequestOptions(_RequestModel):
 class ResourceRequestOptions(_RequestModel):
     """Resources that should be present in the resulting download."""
 
-    video: bool = DEFAULT_RESOURCE_OPTIONS.video
-    audio: bool = DEFAULT_RESOURCE_OPTIONS.audio
-    danmaku: bool = DEFAULT_RESOURCE_OPTIONS.danmaku
-    subtitle: bool = DEFAULT_RESOURCE_OPTIONS.subtitle
+    video: bool = True
+    audio: bool = True
+    danmaku: bool = True
+    subtitle: bool = True
     metadata: bool = False
-    cover: bool = DEFAULT_RESOURCE_OPTIONS.cover
-    chapter_info: bool = DEFAULT_RESOURCE_OPTIONS.chapter_info
+    cover: bool = True
+    chapter_info: bool = True
     save_cover: bool = False
-    ai_translation_language: str | None = DEFAULT_RESOURCE_OPTIONS.ai_translation_language
+    ai_translation_language: str | None = None
 
     @model_validator(mode="after")
     def enable_save_cover_for_cover_only(self) -> Self:
@@ -123,7 +122,7 @@ class NetworkRequestOptions(_RequestModel):
 class DanmakuRequestOptions(_RequestModel):
     """Danmaku serialization, rendering, and filtering preferences."""
 
-    format: Literal["xml", "ass", "protobuf"] = DEFAULT_RESOURCE_OPTIONS.danmaku_format
+    format: Literal["xml", "ass", "protobuf"] = "ass"
     font_size: int | None = None
     font: str = "SimHei"
     opacity: float = 0.8

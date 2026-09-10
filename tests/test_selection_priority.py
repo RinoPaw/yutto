@@ -7,7 +7,6 @@ from typing import Any, cast
 import pytest
 from returns.result import Success
 
-from yutto.core.options import SourceOptions
 from yutto.exceptions import WrongArgumentError
 from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeason, UgcVideo
 from yutto.parser import parse
@@ -17,6 +16,7 @@ from yutto.source import (
     BangumiSeasonSource,
     CheeseEpisodeSource,
     CheeseSeasonSource,
+    SourceOptions,
     UgcVideoSource,
 )
 from yutto.types import EpisodeId

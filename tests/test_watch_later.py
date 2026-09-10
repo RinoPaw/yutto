@@ -6,9 +6,8 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from returns.result import Success
 
-from yutto.core.options import SourceOptions
 from yutto.exceptions import NotLoginError
-from yutto.source import UgcWatchLaterSource
+from yutto.source import SourceOptions, UgcWatchLaterSource
 from yutto.types import BilibiliId
 
 if TYPE_CHECKING:
