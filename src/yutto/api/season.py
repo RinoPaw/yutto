@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from yutto.types import EpisodeId, MediaId
 
 
-async def get_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[str, Any]:
+async def get_bangumi_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[str, Any]:
     return await fetch_payload(
         scope,
         f"https://api.bilibili.com/pgc/view/web/season?{urlencode(id.to_dict())}",
@@ -22,13 +22,32 @@ async def get_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[st
     )
 
 
+get_bangumi_season_by_episode = get_bangumi_season
+
+
 async def get_season_id_by_media(scope: ExecutionScope, media_id: MediaId) -> SeasonId:
     api = f"https://api.bilibili.com/pgc/review/user?{urlencode(media_id.to_dict())}"
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
     return SeasonId(str(response["result"]["media"]["season_id"]))
 
 
-get_season_by_episode = get_season
+async def get_cheese_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[str, Any]:
+    return await fetch_payload(
+        scope,
+        f"https://api.bilibili.com/pugv/view/web/season?{urlencode(id.to_dict())}",
+        "该课程",
+        str(id),
+        "data",
+    )
 
 
-__all__ = ["get_season", "get_season_by_episode", "get_season_id_by_media"]
+get_cheese_season_by_episode = get_cheese_season
+
+
+__all__ = [
+    "get_bangumi_season",
+    "get_bangumi_season_by_episode",
+    "get_cheese_season",
+    "get_cheese_season_by_episode",
+    "get_season_id_by_media",
+]
