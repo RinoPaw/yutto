@@ -1,0 +1,128 @@
+name: Refactor Full CodSpeed Preflight
+
+on:
+  push:
+    branches:
+      - benchmark/refactor-full-codspeed
+  workflow_dispatch:
+
+jobs:
+  compare:
+    name: upstream-standard CodSpeed preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Checkout upstream main
+        uses: actions/checkout@v7
+        with:
+          repository: yutto-dev/yutto
+          ref: main
+          path: baseline
+          submodules: recursive
+
+      - name: Install python
+        id: python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          architecture: x64
+          allow-prereleases: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare wheel cache identity
+        id: wheels
+        run: python scripts/prepare-ci-cache.py
+
+      - name: Install uv
+        id: uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: ""
+          cache-suffix: ci-wheels-${{ steps.wheels.outputs.cache-key }}
+          prune-cache: true
+
+      - name: Cache native build dependencies
+        if: steps.uv.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+            packages/biliass/rust
+          shared-key: native-3.14-${{ steps.python.outputs.python-version }}-${{ hashFiles('**/pyproject.toml', 'uv.lock') }}
+          env-vars: ImageOS PYO3 PYTHON MATURIN UV YUTTO_CI_BUILD_ENV_KEY
+          cache-bin: false
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install candidate dependencies
+        run: just ci-install 3.14
+
+      - name: Install baseline dependencies
+        working-directory: baseline
+        run: just ci-install 3.14
+
+      - name: Run candidate exactly like upstream CodSpeed job
+        continue-on-error: true
+        uses: CodSpeedHQ/action@v5
+        env:
+          YUTTO_VARIANT: candidate
+          PYTHONPATH: ${{ github.workspace }}/src
+        with:
+          mode: simulation
+          run: uv run -p 3.14 pytest --codspeed
+
+      - name: Run the same benchmark corpus on upstream main
+        continue-on-error: true
+        uses: CodSpeedHQ/action@v5
+        env:
+          YUTTO_VARIANT: baseline
+          PYTHONPATH: ${{ github.workspace }}/baseline/src
+        with:
+          mode: simulation
+          run: baseline/.venv/bin/python -m pytest benchmarks/test_refactor_codspeed.py --codspeed -q
+
+      - name: Compare wall time on the same runner
+        run: |
+          YUTTO_VARIANT=baseline PYTHONPATH="$GITHUB_WORKSPACE/baseline/src" \
+            baseline/.venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/baseline.json
+          YUTTO_VARIANT=candidate PYTHONPATH="$GITHUB_WORKSPACE/src" \
+            .venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/candidate.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          baseline = json.loads(Path("/tmp/baseline.json").read_text())
+          candidate = json.loads(Path("/tmp/candidate.json").read_text())
+          labels = {
+              "selection": "Legacy selection corpus",
+              "routing_non_batch": "Non-batch routing corpus",
+              "routing_batch": "Batch routing corpus",
+              "cli": "CLI parsing corpus",
+              "request_validation": "DownloadRequest validation corpus",
+          }
+          lines = [
+              "| Benchmark | upstream main | refactor | delta |",
+              "| --- | ---: | ---: | ---: |",
+          ]
+          for key, label in labels.items():
+              old = baseline[key] / 1_000
+              new = candidate[key] / 1_000
+              delta = (new / old - 1) * 100
+              lines.append(f"| {label} | {old:.3f} µs/op | {new:.3f} µs/op | {delta:+.1f}% |")
+          report = "\n".join(lines)
+          print(report)
+          Path("/tmp/perf-summary.md").write_text(report + "\n")
+          PY
+          cat /tmp/perf-summary.md >> "$GITHUB_STEP_SUMMARY"
