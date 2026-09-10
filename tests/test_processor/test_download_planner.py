@@ -9,6 +9,7 @@ import pytest
 from tests.test_processor.test_download_result import make_audio, make_request, make_resource_only_entry
 from yutto.core.events import DownloadMediaSelected, SelectedAudioStream, SelectedVideoStream
 from yutto.core.operation import bind_download_event_sink
+from yutto.core.options import download_options_from_request
 from yutto.downloader.executor import emit_streams_selected
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner
 
@@ -64,7 +65,8 @@ def make_plan(
     if use_output_as_temporary:
         request.output.temporary_directory = None
     request.danmaku.block_keyword_patterns = ["original-pattern"]
-    return manifest, request, DownloadPlanner().plan(manifest, path, request)
+    options = download_options_from_request(request)
+    return manifest, request, DownloadPlanner().plan(manifest, path, options)
 
 
 @pytest.mark.parametrize(
