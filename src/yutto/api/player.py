@@ -31,9 +31,7 @@ async def get_ugc_playurl(
 
     response = play_result.unwrap()
     if response.get("data") is None:
-        raise NoAccessPermissionError(
-            f"无法获取该视频链接（{avid}, cid: {cid}），原因：{response.get('message')}"
-        )
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{response.get('message')}")
     return response
 
 
@@ -53,9 +51,7 @@ async def get_bangumi_playurl(
     response = play_result.unwrap()
     result = response.get("result")
     if result is None or result.get("video_info") is None:
-        raise NoAccessPermissionError(
-            f"无法获取该视频链接（{avid}, cid: {cid}），原因：{response.get('message')}"
-        )
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{response.get('message')}")
     return response
 
 
@@ -78,9 +74,7 @@ async def get_cheese_playurl(
 
     response = play_result.unwrap()
     if response.get("data") is None:
-        raise NoAccessPermissionError(
-            f"无法获取该视频链接（{avid}, cid: {cid}），原因：{response.get('message')}"
-        )
+        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{response.get('message')}")
     return response
 
 
