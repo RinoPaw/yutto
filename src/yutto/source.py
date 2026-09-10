@@ -5,19 +5,25 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from yutto.api.bangumi import (
-    get_season as get_bangumi_season,
-    get_season_by_episode as get_bangumi_season_by_episode,
+from yutto.api.season import (
+    get_bangumi_season,
+    get_bangumi_season_by_episode,
+    get_cheese_season,
+    get_cheese_season_by_episode,
     get_season_id_by_media,
 )
-from yutto.api.cheese import get_season as get_cheese_season
-from yutto.api.cheese import get_season_by_episode as get_cheese_season_by_episode
-from yutto.api.collection import get_collection
-from yutto.api.favourite import get_all_favourite_folders, get_favourite_info, get_favourite_medias
-from yutto.api.series import get_series_archives, get_series_info
-from yutto.api.space import get_space_profile_and_archives
-from yutto.api.ugc import get_ugc_video_info, get_ugc_video_tags
-from yutto.api.watch_later import get_watch_later_entries
+from yutto.api.ugc import (
+    get_all_favourite_folders,
+    get_collection,
+    get_favourite_info,
+    get_favourite_medias,
+    get_series_archives,
+    get_series_info,
+    get_space_profile_and_archives,
+    get_ugc_video_info,
+    get_ugc_video_tags,
+    get_watch_later_entries,
+)
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.exceptions import (
     HttpStatusError,
