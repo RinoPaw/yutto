@@ -100,19 +100,30 @@ jobs:
           mode: simulation
           run: baseline/.venv/bin/python -m pytest benchmarks/test_refactor_codspeed.py --codspeed -q
 
-      - name: Compare wall time on the same runner
+      - name: Compare wall time on the same runner (3 paired runs)
         if: ${{ always() }}
         run: |
+          # Alternate execution order to reduce warm-cache / runner-drift bias.
           YUTTO_VARIANT=baseline \
-            baseline/.venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/baseline.json
+            baseline/.venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/baseline-1.json
           YUTTO_VARIANT=candidate \
-            .venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/candidate.json
+            .venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/candidate-1.json
+
+          YUTTO_VARIANT=candidate \
+            .venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/candidate-2.json
+          YUTTO_VARIANT=baseline \
+            baseline/.venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/baseline-2.json
+
+          YUTTO_VARIANT=baseline \
+            baseline/.venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/baseline-3.json
+          YUTTO_VARIANT=candidate \
+            .venv/bin/python benchmarks/test_refactor_codspeed.py > /tmp/candidate-3.json
+
           python - <<'PY'
           import json
           from pathlib import Path
+          from statistics import fmean
 
-          baseline = json.loads(Path("/tmp/baseline.json").read_text())
-          candidate = json.loads(Path("/tmp/candidate.json").read_text())
           labels = {
               "selection": "Legacy selection corpus",
               "routing_non_batch": "Non-batch routing corpus",
@@ -120,16 +131,45 @@ jobs:
               "cli": "CLI parsing corpus",
               "request_validation": "DownloadRequest validation corpus",
           }
+
+          baseline_runs = [
+              json.loads(Path(f"/tmp/baseline-{i}.json").read_text())
+              for i in range(1, 4)
+          ]
+          candidate_runs = [
+              json.loads(Path(f"/tmp/candidate-{i}.json").read_text())
+              for i in range(1, 4)
+          ]
+
           lines = [
-              "| Benchmark | upstream main | refactor | delta |",
+              "| Benchmark | upstream main avg | refactor avg | delta |",
               "| --- | ---: | ---: | ---: |",
           ]
+          details = [
+              "",
+              "<details><summary>Per-run values</summary>",
+              "",
+              "| Benchmark | main #1 | main #2 | main #3 | refactor #1 | refactor #2 | refactor #3 |",
+              "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+          ]
+
           for key, label in labels.items():
-              old = baseline[key] / 1_000
-              new = candidate[key] / 1_000
+              old_values = [run[key] / 1_000 for run in baseline_runs]
+              new_values = [run[key] / 1_000 for run in candidate_runs]
+              old = fmean(old_values)
+              new = fmean(new_values)
               delta = (new / old - 1) * 100
-              lines.append(f"| {label} | {old:.3f} µs/op | {new:.3f} µs/op | {delta:+.1f}% |")
-          report = "\n".join(lines)
+              lines.append(
+                  f"| {label} | {old:.3f} µs/op | {new:.3f} µs/op | {delta:+.1f}% |"
+              )
+              details.append(
+                  f"| {label} | "
+                  + " | ".join(f"{value:.3f}" for value in (*old_values, *new_values))
+                  + " |"
+              )
+
+          details.extend(["", "</details>"])
+          report = "\n".join([*lines, *details])
           print(report)
           Path("/tmp/perf-summary.md").write_text(report + "\n")
           PY
