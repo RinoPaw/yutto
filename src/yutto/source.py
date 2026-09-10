@@ -24,6 +24,7 @@ from yutto.exceptions import (
     MaxRetryError,
     NoAccessPermissionError,
     NotFoundError,
+    NotLoginError,
     UnSupportedTypeError,
     WrongArgumentError,
 )
@@ -708,7 +709,14 @@ class UgcSpaceSource(MediaSource):
 
 class UgcWatchLaterSource(MediaSource):
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        entries = await get_watch_later_entries(scope)
+        try:
+            entries = await get_watch_later_entries(scope)
+        except NotLoginError as error:
+            return MediaResolveResult(
+                media=None,
+                failures=(MediaResolveFailure(index=1, source=self.id, error=error),),
+            )
+
         selected_entries = _select_indexed(entries, options.selection)
         resolved, failures = await resolve_ugc_videos(
             scope,
