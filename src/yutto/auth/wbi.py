@@ -7,11 +7,9 @@ import re
 import string
 import time
 import urllib.parse
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
-
-from .user import USER_INFO_API
+from yutto.api.common import get_nav
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -31,17 +29,11 @@ dm_cover_img_str_cache = base64.b64encode(
 
 
 async def get_wbi_img(scope: ExecutionScope) -> WbiImg:
-    if scope.wbi_img_cache is not None:
-        return cast("WbiImg", scope.wbi_img_cache)
-    async with scope.wbi_img_lock:
-        if scope.wbi_img_cache is None:
-            res_json = unwrap_fetch_result(await Fetcher.fetch_json(scope, USER_INFO_API))
-            wbi_img = WbiImg(
-                img_key=_get_key_from_url(res_json["data"]["wbi_img"]["img_url"]),
-                sub_key=_get_key_from_url(res_json["data"]["wbi_img"]["sub_url"]),
-            )
-            scope.wbi_img_cache = cast("dict[str, str]", dict(wbi_img))
-        return cast("WbiImg", scope.wbi_img_cache)
+    res_json = await get_nav(scope)
+    return WbiImg(
+        img_key=_get_key_from_url(res_json["data"]["wbi_img"]["img_url"]),
+        sub_key=_get_key_from_url(res_json["data"]["wbi_img"]["sub_url"]),
+    )
 
 
 def _get_key_from_url(url: str) -> str:
