@@ -22,7 +22,7 @@ def select_video(
     videos: Sequence[VideoUrlMeta],
     video_quality: VideoQuality = 127,
     video_codec: VideoCodec = "hevc",
-    video_download_codec_priority: list[VideoCodec] | None = None,
+    video_download_codec_priority: Sequence[VideoCodec] | None = None,
 ) -> VideoUrlMeta | None:
     video_quality_priority = gen_video_quality_priority(video_quality)
     video_codec_priority = (

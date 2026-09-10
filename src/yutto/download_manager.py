@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 from yutto.auth import validate_user_info
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
-from yutto.core.options import resource_options_from_request, source_options_from_request
+from yutto.core.options import (
+    access_options_from_request,
+    download_options_from_request,
+    path_options_from_request,
+    resource_options_from_request,
+    source_options_from_request,
+)
 from yutto.core.result import DownloadResult, ItemResult, ResolveFailure, ResolveResult
 from yutto.downloader.downloader import process_download
 from yutto.downloader.path_leases import DownloadPathLeasePool
@@ -20,7 +26,7 @@ from yutto.exceptions import (
     UnSupportedTypeError,
     WrongArgumentError,
 )
-from yutto.listing import MediaAncestry, PathOptions, iter_media_items, resolve_media_paths
+from yutto.listing import MediaAncestry, iter_media_items, resolve_media_paths
 from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
@@ -160,10 +166,11 @@ class DownloadManager:
         if result.media is None:
             return ()
 
-        path_entries = resolve_media_paths(
-            result.media,
-            PathOptions(subpath_template=request.output.subpath_template),
-        )
+        path_options = path_options_from_request(request)
+        download_options = download_options_from_request(request)
+        access_options = access_options_from_request(request)
+        resource_options = resource_options_from_request(request)
+        path_entries = resolve_media_paths(result.media, path_options)
         download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
         current_display_group: str | None = None
@@ -172,14 +179,13 @@ class DownloadManager:
             prepared.append((entry.ancestry, entry.item, path, current_display_group))
             current_display_group = _display_group(entry.ancestry)
 
-        if request.network.download_interval > 0 and len(prepared) > 1:
-            emit_download_report(f"下载任务启动间隔 {request.network.download_interval} 秒")
+        if download_options.download_interval > 0 and len(prepared) > 1:
+            emit_download_report(f"下载任务启动间隔 {download_options.download_interval} 秒")
 
         results: list[ItemResult | None] = [None] * len(prepared)
         start_turns = [asyncio.Event() for _ in prepared]
         if start_turns:
             start_turns[0].set()
-        resource_options = resource_options_from_request(request)
 
         async def run_item(
             index: int,
@@ -188,13 +194,13 @@ class DownloadManager:
             path: Path,
             previous_display_group: str | None,
         ) -> None:
-            if index > 0 and request.network.download_interval > 0:
-                await asyncio.sleep(index * request.network.download_interval)
+            if index > 0 and download_options.download_interval > 0:
+                await asyncio.sleep(index * download_options.download_interval)
             await start_turns[index].wait()
             async with self._item_limiter:
                 if not await validate_user_info(
                     scope,
-                    {"is_login": request.access.login_strict, "vip_status": request.access.vip_strict},
+                    {"is_login": access_options.login_strict, "vip_status": access_options.vip_strict},
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
@@ -209,11 +215,11 @@ class DownloadManager:
                     if index + 1 < len(start_turns):
                         start_turns[index + 1].set()
                     return
-                if request.output.enforce_directory_boundary:
+                if download_options.enforce_directory_boundary:
                     ensure_output_path_is_scoped(
                         path,
-                        request.output.directory,
-                        request.output.temporary_directory or request.output.directory,
+                        download_options.output_directory,
+                        download_options.temporary_directory or download_options.output_directory,
                     )
                 if len(download_list) > 1:
                     show_batch_episode_title(
@@ -230,7 +236,7 @@ class DownloadManager:
                     manifest,
                     item.metadata,
                     path,
-                    request,
+                    download_options,
                     path_leases=self.path_leases,
                 )
 
@@ -257,11 +263,12 @@ class DownloadManager:
             source = await resolve_redirected_source(scope, value)
 
         source_options = source_options_from_request(request)
+        access_options = access_options_from_request(request)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
 
         if not await validate_user_info(
             scope,
-            {"is_login": request.access.login_strict, "vip_status": request.access.vip_strict},
+            {"is_login": access_options.login_strict, "vip_status": access_options.vip_strict},
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
