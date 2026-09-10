@@ -36,9 +36,9 @@ class ScopeRequestOptions(_RequestModel):
 
 
 class SelectionRequestOptions(_RequestModel):
-    """Selection for the direct children of the top-level source."""
+    """Selection expression and filters for the current source selection domain."""
 
-    episodes: str | None = None
+    expression: str | None = None
     skip_preview: bool = DEFAULT_SOURCE_OPTIONS.skip_preview
     start_time: str | None = None
     end_time: str | None = None

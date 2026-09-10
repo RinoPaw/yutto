@@ -51,7 +51,7 @@ def test_source_selection_is_parsed_at_request_boundary() -> None:
     request = DownloadRequest.model_validate(
         {
             "source": {"url": "BV1D84y1t76J"},
-            "selection": {"episodes": "3, 1~-1"},
+            "selection": {"expression": "3, 1~-1"},
         }
     )
 
@@ -77,7 +77,7 @@ def test_explicit_selection_is_unchanged_by_deprecated_batch_flag() -> None:
         {
             "source": {"url": "ss456"},
             "scope": {"batch": True},
-            "selection": {"episodes": "3,1"},
+            "selection": {"expression": "3,1"},
         }
     )
 

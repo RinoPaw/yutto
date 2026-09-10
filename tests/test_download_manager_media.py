@@ -73,7 +73,7 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
     request = DownloadRequest.model_validate(
         {
             "source": {"url": "https://www.bilibili.com/video/BV1D84y1t76J?p=2"},
-            "selection": {"episodes": "3,1,3"},
+            "selection": {"expression": "3,1,3"},
         }
     )
 

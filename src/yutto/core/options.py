@@ -36,7 +36,7 @@ DEFAULT_RESOURCE_OPTIONS = ResourceOptions()
 
 
 def source_options_from_request(request: DownloadRequest) -> SourceOptions:
-    expression = request.selection.episodes
+    expression = request.selection.expression
     publication_time_filter = None
     if request.selection.start_time is not None or request.selection.end_time is not None:
         publication_time_filter = PublicationTimeFilter.from_strings(

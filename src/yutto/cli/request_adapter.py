@@ -19,7 +19,7 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
 
     video_download_codec, video_save_codec = _split_codec_pair(args.vcodec, "vcodec")
     audio_download_codec, audio_save_codec = _split_codec_pair(args.acodec, "acodec")
-    episodes = args.episodes if args.episodes is not None else ("~" if args.batch else None)
+    selection_expr = args.selection_expr if args.selection_expr is not None else ("~" if args.batch else None)
 
     request: dict[str, Any] = {
         "source": {
@@ -34,7 +34,7 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
             "with_extra_episodes": args.with_extra_episodes,
         },
         "selection": {
-            "episodes": episodes,
+            "expression": selection_expr,
             "skip_preview": args.skip_preview,
             "start_time": args.batch_filter_start_time,
             "end_time": args.batch_filter_end_time,
@@ -125,7 +125,7 @@ def _download_request_defaults_from_settings(settings: YuttoSettings) -> dict[st
         },
         "scope": {"with_extra_episodes": settings.batch.with_extra_episodes},
         "selection": {
-            "episodes": None,
+            "expression": None,
             "skip_preview": settings.batch.skip_preview,
             "start_time": settings.batch.batch_filter_start_time,
             "end_time": settings.batch.batch_filter_end_time,

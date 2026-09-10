@@ -30,7 +30,7 @@ def test_default_namespace_maps_to_grouped_core_request():
 
     assert request.source.url == "BV1xx411c7mD"
     assert request.access.auth_profile == "default"
-    assert request.selection.episodes is None
+    assert request.selection.expression is None
     assert request.selection.skip_preview is False
     assert request.resources.video is True
     assert request.resources.metadata is False
@@ -42,15 +42,18 @@ def test_default_namespace_maps_to_grouped_core_request():
 
 
 def test_selection_is_explicit_without_batch():
-    request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD", "-p", "1~-1"]))
+    args = parse_download_args(["BV1xx411c7mD", "-p", "1~-1"])
+    assert args.selection_expr == "1~-1"
+    assert not hasattr(args, "episodes")
 
-    assert request.selection.episodes == "1~-1"
+    request = download_request_from_namespace(args)
+    assert request.selection.expression == "1~-1"
 
 
 def test_legacy_batch_without_selection_normalizes_to_full_selection():
     request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD", "-b"]))
 
-    assert request.selection.episodes == "~"
+    assert request.selection.expression == "~"
     assert request.scope.model_dump() == {"batch": False, "with_extra_episodes": False}
 
 
@@ -150,7 +153,7 @@ def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
     }
     assert request.scope.model_dump() == {"batch": False, "with_extra_episodes": True}
     assert request.selection.model_dump() == {
-        "episodes": "2,4~6",
+        "expression": "2,4~6",
         "skip_preview": True,
         "start_time": "2026-01-01",
         "end_time": "2026-02-01",
@@ -327,7 +330,7 @@ def test_rpc_mapping_inherits_local_settings_without_credentials():
     )
 
     assert request.access.auth_profile == "work"
-    assert request.selection.episodes is None
+    assert request.selection.expression is None
     assert request.stream.video_quality == 116
     assert request.network.proxy == "no"
     assert request.resources.subtitle is False
