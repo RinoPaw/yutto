@@ -5,7 +5,8 @@ from urllib.parse import parse_qs, urlparse
 
 from yutto.exceptions import WrongArgumentError
 from yutto.source import (
-    AmbiguousSource,
+    AmbiguousEpisodeSource,
+    AmbiguousSeasonSource,
     BangumiEpisodeSource,
     BangumiSeasonSource,
     CheeseEpisodeSource,
@@ -122,23 +123,9 @@ def parse(value: str) -> MediaSource | None:
     if match := _MD_ID.fullmatch(value):
         return BangumiSeasonSource(id=MediaId(match.group("media_id")))
     if match := _EP_ID.fullmatch(value):
-        episode_id = EpisodeId(match.group("episode_id"))
-        return AmbiguousSource(
-            id=episode_id,
-            candidates=(
-                BangumiEpisodeSource(id=episode_id),
-                CheeseEpisodeSource(id=episode_id),
-            ),
-        )
+        return AmbiguousEpisodeSource(id=EpisodeId(match.group("episode_id")))
     if match := _SS_ID.fullmatch(value):
-        season_id = SeasonId(match.group("season_id"))
-        return AmbiguousSource(
-            id=season_id,
-            candidates=(
-                BangumiSeasonSource(id=season_id),
-                CheeseSeasonSource(id=season_id),
-            ),
-        )
+        return AmbiguousSeasonSource(id=SeasonId(match.group("season_id")))
 
     # Common complete URLs. Query parsing happens only after a matching rule
     # needs it, so unrelated patterns do not repeatedly decompose the input.
