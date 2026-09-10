@@ -3,16 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-from biliass import get_danmaku_meta_size
-from returns.result import Failure
-
+from yutto.api.danmaku import danmaku_segment_url, danmaku_xml_url, get_danmaku_segment_count
+from yutto.api.player import (
+    get_bangumi_playurl as get_bangumi_playurl_response,
+    get_cheese_playurl as get_cheese_playurl_response,
+    get_player_info,
+    get_ugc_playurl,
+    player_info_url,
+)
 from yutto.auth import get_user_info
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
-from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
+from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
 from yutto.types import AudioUrlMeta, VideoUrlMeta
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
 
 if TYPE_CHECKING:
@@ -150,19 +154,7 @@ async def get_ugc_video_playurl(
     cid: CId,
     ai_translation_language: str | None = None,
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    play_api = (
-        "https://api.bilibili.com/x/player/playurl?avid={aid}&bvid={bvid}&cid={cid}"
-        "&qn=127&type=&otype=json&fnver=0&fnval=4048&fourk=1"
-    )
-    if ai_translation_language:
-        play_api += f"&cur_language={ai_translation_language}"
-
-    play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid))
-    if isinstance(play_result, Failure):
-        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}）") from play_result.failure()
-    resp_json = play_result.unwrap()
-    if resp_json.get("data") is None:
-        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{resp_json.get('message')}")
+    resp_json = await get_ugc_playurl(scope, avid, cid, ai_translation_language)
     dash = resp_json["data"].get("dash")
     if dash is None:
         raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
@@ -180,16 +172,7 @@ async def get_bangumi_playurl(
     avid: AvId,
     cid: CId,
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    play_api = (
-        "https://api.bilibili.com/pgc/player/web/v2/playurl?avid={aid}&bvid={bvid}&cid={cid}"
-        "&qn=127&fnver=0&fnval=4048&fourk=1&support_multi_audio=true&from_client=BROWSER"
-    )
-    play_result = await Fetcher.fetch_json(scope, play_api.format(**avid.to_dict(), cid=cid))
-    if isinstance(play_result, Failure):
-        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}）") from play_result.failure()
-    resp_json = play_result.unwrap()
-    if resp_json.get("result") is None or resp_json["result"].get("video_info") is None:
-        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{resp_json.get('message')}")
+    resp_json = await get_bangumi_playurl_response(scope, avid, cid)
     video_info = resp_json["result"]["video_info"]
     if video_info.get("is_preview") == 1:
         emit_download_report(
@@ -212,25 +195,14 @@ async def get_cheese_playurl(
     episode_id: EpisodeId,
     cid: CId,
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    play_api = (
-        "https://api.bilibili.com/pugv/player/web/playurl?avid={aid}&cid={cid}"
-        "&qn=80&fnver=0&fnval=16&fourk=1&ep_id={episode_id}&from_client=BROWSER&drm_tech_type=2"
-    )
-    play_result = await Fetcher.fetch_json(
-        scope,
-        play_api.format(**avid.to_dict(), cid=cid, episode_id=episode_id),
-    )
-    if isinstance(play_result, Failure):
-        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}）") from play_result.failure()
-    resp_json = play_result.unwrap()
-    if resp_json.get("data") is None:
-        raise NoAccessPermissionError(f"无法获取该视频链接（{avid}, cid: {cid}），原因：{resp_json.get('message')}")
-    if resp_json["data"].get("is_preview") == 1:
+    resp_json = await get_cheese_playurl_response(scope, avid, episode_id, cid)
+    data = resp_json["data"]
+    if data.get("is_preview") == 1:
         emit_download_report(
             f"视频（{avid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
             ReportLevel.WARNING,
         )
-    dash = resp_json["data"].get("dash")
+    dash = data.get("dash")
     if dash is None:
         raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
     return _video_streams(dash.get("video") or []), _audio_streams(dash.get("audio") or [])
@@ -242,13 +214,7 @@ async def _resolve_subtitles(
     avid: AvId,
     cid: CId,
 ) -> list[SubtitleResource]:
-    params = avid.to_dict()
-    if isinstance(item, CheeseEpisode):
-        url = f"https://api.bilibili.com/x/player/v2?cid={cid}&aid={params['aid']}&bvid={params['bvid']}"
-    else:
-        url = f"https://api.bilibili.com/x/player/wbi/v2?aid={params['aid']}&bvid={params['bvid']}&cid={cid}"
-
-    resp_json = (await Fetcher.fetch_json(scope, url)).value_or(None)
+    resp_json = await get_player_info(scope, avid, cid, wbi=not isinstance(item, CheeseEpisode))
     if resp_json is None:
         return []
     if not data_has_chained_keys(resp_json, ["data", "subtitle", "subtitles"]):
@@ -284,22 +250,10 @@ async def _resolve_danmaku(
         "xml" if save_type == "xml" or not (await get_user_info(scope))["is_login"] else "protobuf"
     )
     if source_type == "xml":
-        return source_type, [f"http://comment.bilibili.com/{cid}.xml"]
+        return source_type, [danmaku_xml_url(cid)]
 
-    aid = avid.as_aid()
-    meta = unwrap_fetch_result(
-        await Fetcher.fetch_bin(
-            scope,
-            f"https://api.bilibili.com/x/v2/dm/web/view?type=1&oid={cid}&pid={aid.value}",
-        )
-    )
-    if meta is None:
-        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{avid}, cid: {cid}）")
-    size = get_danmaku_meta_size(meta)
-    return source_type, [
-        f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"
-        for segment_id in range(1, size + 1)
-    ]
+    size = await get_danmaku_segment_count(scope, avid, cid)
+    return source_type, [danmaku_segment_url(cid, segment_id) for segment_id in range(1, size + 1)]
 
 
 async def resolve_resource_manifest(
@@ -324,10 +278,7 @@ async def resolve_resource_manifest(
                 options.ai_translation_language,
             )
         if options.chapter_info:
-            params = avid.to_dict()
-            chapter_info_url = (
-                f"https://api.bilibili.com/x/player/v2?aid={params['aid']}&bvid={params['bvid']}&cid={item.cid}"
-            )
+            chapter_info_url = player_info_url(avid, item.cid, wbi=False)
     elif isinstance(item, BangumiEpisode):
         avid = item.avid
         if options.video or options.audio:
