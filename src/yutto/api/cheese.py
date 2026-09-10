@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 from yutto.api.common import fetch_payload
-from yutto.types import format_ids
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 async def get_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[str, Any]:
     return await fetch_payload(
         scope,
-        f"https://api.bilibili.com/pugv/view/web/season?{id.to_param()}",
+        f"https://api.bilibili.com/pugv/view/web/season?{urlencode(id.to_dict())}",
         "该课程",
-        format_ids(id),
+        str(id),
         "data",
     )
 

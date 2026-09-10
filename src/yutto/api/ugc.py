@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 from returns.result import Failure
 
@@ -14,8 +15,12 @@ if TYPE_CHECKING:
     from yutto.types import AvId
 
 
+def _query(avid: AvId) -> str:
+    return urlencode({key: value for key, value in avid.to_dict().items() if value})
+
+
 async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AvId, dict[str, Any]]:
-    api = f"https://api.bilibili.com/x/web-interface/view?{avid.to_param()}"
+    api = f"https://api.bilibili.com/x/web-interface/view?{_query(avid)}"
     result = await Fetcher.fetch_json(scope, api)
     if isinstance(result, Failure):
         raise NotFoundError(f"无法获取该视频 {avid} 信息") from result.failure()
@@ -41,7 +46,7 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AvId, d
 
 
 async def get_ugc_video_tags(scope: ExecutionScope, avid: AvId) -> list[str]:
-    api = f"https://api.bilibili.com/x/tag/archive/tags?{avid.to_param()}"
+    api = f"https://api.bilibili.com/x/tag/archive/tags?{_query(avid)}"
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
     if response["code"] != 0:
         raise NotFoundError(f"无法获取视频 {avid} 标签")
