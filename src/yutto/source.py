@@ -144,32 +144,58 @@ class MediaSource(ABC):
         return [genre] if isinstance(genre, str) and genre else []
 
 
-@dataclass(slots=True, kw_only=True)
-class AmbiguousSource(MediaSource):
-    candidates: tuple[MediaSource, ...]
+async def _resolve_bangumi_or_cheese(
+    bangumi: MediaSource,
+    cheese: MediaSource,
+    scope: ExecutionScope,
+    options: SourceOptions,
+) -> MediaResolveResult:
+    results = await asyncio.gather(
+        bangumi.resolve(scope, options),
+        cheese.resolve(scope, options),
+        return_exceptions=True,
+    )
+    successes: list[MediaResolveResult] = []
+    failures: list[BaseException] = []
+    for result in results:
+        if isinstance(result, BaseException):
+            failures.append(result)
+        else:
+            successes.append(result)
+
+    if len(successes) > 1:
+        raise WrongArgumentError("该 ID 同时存在于番剧和课程命名空间，无法自动判断")
+    if successes:
+        return successes[0]
+
+    for failure in failures:
+        if not isinstance(failure, NotFoundError):
+            raise failure
+    raise NotFoundError("未找到对应的番剧或课程内容")
+
+
+class AmbiguousEpisodeSource(MediaSource):
+    id: EpisodeId
 
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        results = await asyncio.gather(
-            *(candidate.resolve(scope, options) for candidate in self.candidates),
-            return_exceptions=True,
+        return await _resolve_bangumi_or_cheese(
+            BangumiEpisodeSource(id=self.id),
+            CheeseEpisodeSource(id=self.id),
+            scope,
+            options,
         )
-        successes: list[MediaResolveResult] = []
-        failures: list[BaseException] = []
-        for result in results:
-            if isinstance(result, BaseException):
-                failures.append(result)
-            else:
-                successes.append(result)
 
-        if len(successes) > 1:
-            raise WrongArgumentError("该 ID 同时存在于多个命名空间，无法自动判断")
-        if successes:
-            return successes[0]
 
-        for failure in failures:
-            if not isinstance(failure, NotFoundError):
-                raise failure
-        raise NotFoundError("未找到对应的内容")
+class AmbiguousSeasonSource(MediaSource):
+    id: SeasonId
+
+    async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
+        return await _resolve_bangumi_or_cheese(
+            BangumiSeasonSource(id=self.id),
+            CheeseSeasonSource(id=self.id),
+            scope,
+            options,
+        )
 
 
 def bangumi_episode_items(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -733,7 +759,8 @@ class UgcWatchLaterSource(MediaSource):
 
 
 __all__ = [
-    "AmbiguousSource",
+    "AmbiguousEpisodeSource",
+    "AmbiguousSeasonSource",
     "BangumiEpisodeSource",
     "BangumiSeasonSource",
     "CheeseEpisodeSource",

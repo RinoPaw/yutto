@@ -13,7 +13,8 @@ from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeas
 from yutto.parser import parse
 from yutto.selection import parse_selection
 from yutto.source import (
-    AmbiguousSource,
+    AmbiguousEpisodeSource,
+    AmbiguousSeasonSource,
     BangumiEpisodeSource,
     BangumiSeasonSource,
     CheeseEpisodeSource,
@@ -39,24 +40,12 @@ def _parse(value: str) -> Any:
     return parse(value)
 
 
-def _episode_source(episode_id: EpisodeId) -> AmbiguousSource:
-    return AmbiguousSource(
-        id=episode_id,
-        candidates=(
-            BangumiEpisodeSource(id=episode_id),
-            CheeseEpisodeSource(id=episode_id),
-        ),
-    )
+def _episode_source(episode_id: EpisodeId) -> AmbiguousEpisodeSource:
+    return AmbiguousEpisodeSource(id=episode_id)
 
 
-def _season_source(season_id: SeasonId) -> AmbiguousSource:
-    return AmbiguousSource(
-        id=season_id,
-        candidates=(
-            BangumiSeasonSource(id=season_id),
-            CheeseSeasonSource(id=season_id),
-        ),
-    )
+def _season_source(season_id: SeasonId) -> AmbiguousSeasonSource:
+    return AmbiguousSeasonSource(id=season_id)
 
 
 def _bangumi_season_response(*episode_ids: str) -> dict[str, Any]:
@@ -170,13 +159,13 @@ def test_parse_ugc_container_urls() -> None:
     assert isinstance(_parse("https://www.bilibili.com/list/watchlater"), UgcWatchLaterSource)
 
 
-def test_parse_bare_ids_route_to_agnostic_sources() -> None:
+def test_parse_bare_ids_route_to_specialized_ambiguous_sources() -> None:
     source = _parse("ep779775")
-    assert isinstance(source, AmbiguousSource)
+    assert isinstance(source, AmbiguousEpisodeSource)
     assert source.id == EpisodeId("779775")
 
     source = _parse("ss34184")
-    assert isinstance(source, AmbiguousSource)
+    assert isinstance(source, AmbiguousSeasonSource)
     assert source.id == SeasonId("34184")
 
     assert not isinstance(_parse("ss34184"), (BangumiSeasonSource, CheeseSeasonSource))
