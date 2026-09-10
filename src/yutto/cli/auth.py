@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 import sys
 import time
@@ -11,6 +10,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import segno
 
 from yutto._native import HttpError
+from yutto.api.account import QR_POLL_API, follow_login_redirect, generate_qr_login, request_json
 from yutto.auth import (
     USER_INFO_API,
     AuthInfo,
@@ -30,9 +30,6 @@ from yutto.utils.functional import as_sync
 if TYPE_CHECKING:
     from yutto._native import YuttoSession
     from yutto.types import UserInfo
-
-QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 
 # 这些状态码来自 B 站二维码登录返回 data.code
 QR_STATUS_NOT_SCANNED = 86101
@@ -158,22 +155,6 @@ def sanitize_url_for_log(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
-async def generate_qr_login(session: YuttoSession) -> tuple[str, str]:
-    payload = await request_json(session, QR_GENERATE_API, params={"source": "main-fe-header"})
-    code = payload.get("code")
-    if not isinstance(code, int) or code != 0:
-        raise ValueError(f"获取登录二维码失败：{payload}")
-    data_any = payload.get("data")
-    if not isinstance(data_any, dict):
-        raise ValueError(f"获取登录二维码失败，返回值异常：{payload}")
-    data = cast("dict[str, Any]", data_any)
-    login_url = data.get("url")
-    qrcode_key = data.get("qrcode_key")
-    if not isinstance(login_url, str) or not isinstance(qrcode_key, str):
-        raise ValueError(f"获取登录二维码失败，缺少 url 或 qrcode_key：{payload}")
-    return login_url, qrcode_key
-
-
 def show_qr_code(url: str, mode: str) -> None:
     qr = segno.make(url)
     if mode == "web":
@@ -234,15 +215,6 @@ async def poll_qr_login(
     raise TimeoutError(f"登录超时（>{timeout} 秒），请重试")
 
 
-async def request_json(session: YuttoSession, url: str, *, params: dict[str, str]) -> dict[str, Any]:
-    resp = await session.get(url, params=list(params.items()))
-    resp.raise_for_status()
-    payload_any = json.loads(resp.body)
-    if not isinstance(payload_any, dict):
-        raise ValueError(f"接口返回 JSON 结构异常：{url}")
-    return cast("dict[str, Any]", payload_any)
-
-
 def extract_sessdata(redirect_url: str) -> str | None:
     query = parse_qs(urlparse(redirect_url).query)
     values = query.get("SESSDATA")
@@ -263,8 +235,7 @@ async def complete_login(session: YuttoSession, redirect_url: str) -> tuple[str,
     # 登录成功后返回的 URL 需要真正请求一次，才能让 cookie jar 更新到最新值
     final_url = redirect_url
     try:
-        resp = await session.get(redirect_url)
-        final_url = resp.url
+        final_url = await follow_login_redirect(session, redirect_url)
     except HttpError as e:
         Logger.warning(f"请求登录确认 URL 失败，将尝试从返回 URL 提取 cookies：{e}")
 
