@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from biliass import BlockOptions
@@ -14,10 +14,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from yutto.downloader.downloaded import Downloaded
     from yutto.downloader.planner import DownloadPlan
-    from yutto.types import MultiLangSubtitle
-    from yutto.utils.danmaku import DanmakuData, DanmakuOptions
-    from yutto.utils.metadata import ChapterInfoData, ItemMetaData
+    from yutto.utils.danmaku import DanmakuOptions
+    from yutto.utils.metadata import ItemMetaData
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,30 +32,28 @@ class WrittenResource:
 
 
 class ArtifactWriter:
-    """Write fetched resource bodies according to a DownloadPlan."""
+    """Write already-downloaded resources according to a DownloadPlan."""
 
     def write(
         self,
         metadata: ItemMetaData,
         plan: DownloadPlan,
-        *,
-        subtitles: tuple[MultiLangSubtitle, ...] = (),
-        danmaku: DanmakuData | None = None,
-        cover_data: bytes | None = None,
-        chapter_info_data: tuple[ChapterInfoData, ...] = (),
+        downloaded: Downloaded,
     ) -> Iterator[WrittenResource]:
         resources = plan.resources
 
-        if subtitles:
+        if downloaded.subtitles:
             paths = tuple(
-                write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"]) for subtitle in subtitles
+                write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
+                for subtitle in downloaded.subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
                 paths=paths,
-                labels=tuple(subtitle["lang"] for subtitle in subtitles),
+                labels=tuple(subtitle["lang"] for subtitle in downloaded.subtitles),
             )
 
+        danmaku = downloaded.danmaku
         if danmaku is not None and danmaku["data"]:
             paths = tuple(
                 write_danmaku(
@@ -73,8 +71,13 @@ class ArtifactWriter:
             )
 
         if resources.has_metadata:
+            metadata_for_write = (
+                replace(metadata, chapter_info_data=list(downloaded.chapter_info_data))
+                if downloaded.chapter_info_data
+                else metadata
+            )
             path = write_metadata(
-                metadata,
+                metadata_for_write,
                 plan.paths.output,
                 {
                     "premiered": resources.metadata.premiered,
@@ -83,16 +86,16 @@ class ArtifactWriter:
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
-        if cover_data is not None:
-            plan.paths.cover.write_bytes(cover_data)
+        if downloaded.cover_data is not None:
+            plan.paths.cover.write_bytes(downloaded.cover_data)
             if resources.save_cover:
-                plan.paths.saved_cover.write_bytes(cover_data)
+                plan.paths.saved_cover.write_bytes(downloaded.cover_data)
                 yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
-        if chapter_info_data:
+        if downloaded.chapter_info_data:
             write_chapter_info(
                 plan.item,
-                list(chapter_info_data),
+                list(downloaded.chapter_info_data),
                 plan.paths.chapter_info,
             )
 
