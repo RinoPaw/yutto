@@ -17,6 +17,7 @@ from yutto.core.events import (
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.artifact_writer import ArtifactWriter
+from yutto.downloader.downloaded import Downloaded
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.transfer import download_files
 from yutto.media.quality import audio_quality_map, video_quality_map
@@ -26,8 +27,6 @@ from yutto.utils.functional import data_has_chained_keys
 from yutto.utils.metadata import ChapterInfoData
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from yutto.core.execution import ExecutionScope
     from yutto.downloader.planner import DownloadPlan
     from yutto.resource import ResourceManifest
@@ -97,20 +96,16 @@ class DownloadExecutor:
                 elif chapter_json is not None:
                     emit_download_report("无法获取该视频的章节信息", ReportLevel.WARNING)
 
-            metadata_for_write = (
-                replace(metadata, chapter_info_data=list(chapter_info_data)) if chapter_info_data else metadata
-            )
-
-            artifacts: list[Artifact] = []
-            emit_download_event(DownloadStageChanged(name=DownloadStage.WRITING_RESOURCES, item=plan.item))
-            for resource in artifact_writer.write(
-                metadata_for_write,
-                plan,
+            downloaded = Downloaded(
                 subtitles=tuple(subtitles),
                 danmaku=danmaku,
                 cover_data=cover_data,
                 chapter_info_data=chapter_info_data,
-            ):
+            )
+
+            artifacts: list[Artifact] = []
+            emit_download_event(DownloadStageChanged(name=DownloadStage.WRITING_RESOURCES, item=plan.item))
+            for resource in artifact_writer.write(metadata, plan, downloaded):
                 artifacts.extend(resource.artifacts)
                 if resource.kind is ArtifactKind.SUBTITLE:
                     emit_download_report(f"{', '.join(resource.labels)} 字幕已全部生成", badge="字幕")
@@ -170,7 +165,7 @@ class DownloadExecutor:
 
             emit_download_event(DownloadStageChanged(name=DownloadStage.DOWNLOADING, item=plan.item))
             emit_download_report("开始下载……")
-            downloaded = await download_files(
+            downloaded_paths = await download_files(
                 scope,
                 tuple(sources),
                 block_size=plan.block_size,
@@ -178,9 +173,12 @@ class DownloadExecutor:
             )
             try:
                 emit_download_report("下载完成！")
-                downloaded_iter = iter(downloaded)
-                video_path: Path | None = next(downloaded_iter) if plan.video is not None else None
-                audio_path: Path | None = next(downloaded_iter) if plan.audio is not None else None
+                downloaded_iter = iter(downloaded_paths)
+                downloaded = replace(
+                    downloaded,
+                    video_path=next(downloaded_iter) if plan.video is not None else None,
+                    audio_path=next(downloaded_iter) if plan.audio is not None else None,
+                )
 
                 emit_download_event(DownloadStageChanged(name=DownloadStage.POSTPROCESSING, item=plan.item))
                 if plan.requires_audio_transcode_notice:
@@ -191,14 +189,14 @@ class DownloadExecutor:
                     )
                 await MediaMuxer().mux(
                     plan,
-                    video_path=video_path,
-                    audio_path=audio_path,
-                    has_cover=cover_data is not None,
-                    has_chapter_info=bool(chapter_info_data),
+                    video_path=downloaded.video_path,
+                    audio_path=downloaded.audio_path,
+                    has_cover=downloaded.cover_data is not None,
+                    has_chapter_info=bool(downloaded.chapter_info_data),
                 )
             finally:
-                if downloaded:
-                    shutil.rmtree(downloaded[0].parent, ignore_errors=True)
+                if downloaded_paths:
+                    shutil.rmtree(downloaded_paths[0].parent, ignore_errors=True)
 
             artifacts.append(Artifact(kind=ArtifactKind.MEDIA, path=plan.paths.output))
             emit_download_event(DownloadArtifactCreated(item=plan.item, path=plan.paths.output))
