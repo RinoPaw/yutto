@@ -13,11 +13,11 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class Downloaded:
-    """Resource bodies and temporary media files already fetched for one download."""
+    """Resources already fetched for one download."""
 
     video_path: Path | None = None
     audio_path: Path | None = None
+    cover_path: Path | None = None
     subtitles: tuple[MultiLangSubtitle, ...] = ()
     danmaku: DanmakuData | None = None
-    cover_data: bytes | None = None
     chapter_info_data: tuple[ChapterInfoData, ...] = ()

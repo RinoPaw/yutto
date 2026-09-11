@@ -79,11 +79,12 @@ class DownloadExecutor:
                     values = [unwrap_fetch_result(result) for result in results]
                 danmaku["data"].extend(value for value in values if value is not None)
 
-            cover_data = (
-                unwrap_fetch_result(await Fetcher.fetch_bin(scope, manifest.cover_url))
-                if manifest.cover_url is not None
-                else None
-            )
+            cover_path = None
+            if manifest.cover_url is not None:
+                cover_data = unwrap_fetch_result(await Fetcher.fetch_bin(scope, manifest.cover_url))
+                if cover_data is not None:
+                    plan.paths.cover.write_bytes(cover_data)
+                    cover_path = plan.paths.cover
 
             chapter_info_data: tuple[ChapterInfoData, ...] = ()
             if manifest.chapter_info_url is not None:
@@ -99,7 +100,7 @@ class DownloadExecutor:
             downloaded = Downloaded(
                 subtitles=tuple(subtitles),
                 danmaku=danmaku,
-                cover_data=cover_data,
+                cover_path=cover_path,
                 chapter_info_data=chapter_info_data,
             )
 
@@ -191,7 +192,7 @@ class DownloadExecutor:
                     plan,
                     video_path=downloaded.video_path,
                     audio_path=downloaded.audio_path,
-                    has_cover=downloaded.cover_data is not None,
+                    cover_path=downloaded.cover_path,
                     has_chapter_info=bool(downloaded.chapter_info_data),
                 )
             finally:
