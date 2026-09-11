@@ -31,7 +31,7 @@ class MediaMuxer:
         *,
         video_path: Path | None = None,
         audio_path: Path | None = None,
-        has_cover: bool = False,
+        cover_path: Path | None = None,
         has_chapter_info: bool = False,
     ) -> None:
         command_builder = FFmpegCommandBuilder()
@@ -54,8 +54,8 @@ class MediaMuxer:
             output.use(audio_input)
             output.set_acodec(plan.audio_save_codec)
 
-        if plan.video is not None and has_cover:
-            cover_input = command_builder.add_video_input(plan.paths.cover)
+        if plan.video is not None and cover_path is not None:
+            cover_input = command_builder.add_video_input(cover_path)
             output.use(cover_input)
             output.set_cover(cover_input)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -86,11 +87,9 @@ class ArtifactWriter:
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
-        if downloaded.cover_data is not None:
-            plan.paths.cover.write_bytes(downloaded.cover_data)
-            if resources.save_cover:
-                plan.paths.saved_cover.write_bytes(downloaded.cover_data)
-                yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
+        if downloaded.cover_path is not None and resources.save_cover:
+            shutil.copyfile(downloaded.cover_path, plan.paths.saved_cover)
+            yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
         if downloaded.chapter_info_data:
             write_chapter_info(
