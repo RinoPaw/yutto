@@ -32,7 +32,7 @@ from yutto.server.service import (
     snapshot_summary_to_json,
     snapshot_to_json,
 )
-from yutto.types import BvId, CId
+from yutto.types import AId, CId
 from yutto.utils.functional import as_sync
 from yutto.utils.metadata import ItemMetaData
 
@@ -403,15 +403,15 @@ def test_download_result_serializes_paths_enums_and_tuples():
 
 def test_resolve_result_serializes_media_tree():
     created_at = datetime(2026, 7, 12, 11, 12, 13, tzinfo=UTC)
-    avid = BvId("BV1D84y1t76J")
+    aid = AId("808982399")
     page = UgcPage(
-        avid=avid,
+        aid=aid,
         page=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2", duration=1559),
     )
     video = UgcVideo(
-        avid=avid,
+        aid=aid,
         metadata=ItemMetaData(title="标题", owner="某UP主", tag=["标签A", "标签B"]),
         items=[page],
     )
@@ -436,12 +436,12 @@ def test_resolve_result_serializes_media_tree():
 
     assert result["failures"] == []
     assert video_wire["type"] == "UgcVideo"
-    assert video_wire["avid"] == "BV1D84y1t76J"
+    assert video_wire["aid"] == "808982399"
     assert video_metadata["title"] == "标题"
     assert video_metadata["owner"] == "某UP主"
     assert video_metadata["tag"] == ["标签A", "标签B"]
     assert page_wire["type"] == "UgcPage"
-    assert page_wire["avid"] == "BV1D84y1t76J"
+    assert page_wire["aid"] == "808982399"
     assert page_wire["page"] == 2
     assert page_wire["cid"] == "10"
     assert page_metadata["title"] == "P2"
