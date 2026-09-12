@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from yutto.types import AvId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
+    from yutto.types import AId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
     from yutto.utils.metadata import ItemMetaData
 
 
@@ -29,7 +29,7 @@ class BangumiEpisode(MediaItem):
 
     index: int
     episode_id: EpisodeId
-    avid: AvId
+    aid: AId
     cid: CId
     is_preview: bool = False
 
@@ -48,7 +48,7 @@ class CheeseEpisode(MediaItem):
 
     index: int
     episode_id: EpisodeId
-    avid: AvId
+    aid: AId
     cid: CId
 
 
@@ -64,7 +64,7 @@ class CheeseSeason(MediaContainer):
 class UgcPage(MediaItem):
     """UGC 投稿中的一个分 P。"""
 
-    avid: AvId
+    aid: AId
     page: int
     cid: CId
 
@@ -73,7 +73,7 @@ class UgcPage(MediaItem):
 class UgcVideo(MediaContainer):
     """一个 UGC 投稿，拥有一个或多个分 P。"""
 
-    avid: AvId
+    aid: AId
     page_count: int = 1
     items: list[UgcPage] = field(default_factory=list)
 
