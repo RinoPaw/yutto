@@ -49,11 +49,11 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AId, di
     return AId(data["aid"]), data
 
 
-async def get_ugc_video_tags(scope: ExecutionScope, avid: AvId) -> list[str]:
-    api = f"https://api.bilibili.com/x/tag/archive/tags?{_query(avid)}"
+async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> list[str]:
+    api = f"https://api.bilibili.com/x/tag/archive/tags?aid={aid.value}"
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
     if response["code"] != 0:
-        raise NotFoundError(f"无法获取视频 {avid} 标签")
+        raise NotFoundError(f"无法获取视频 {aid} 标签")
     return [tag["tag_name"] for tag in response["data"]]
 
 
