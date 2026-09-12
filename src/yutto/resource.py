@@ -3,13 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-from yutto.api.danmaku import danmaku_segment_url, danmaku_xml_url, get_danmaku_segment_count
+from yutto.api.danmaku import get_danmaku_segment_count
 from yutto.api.player import (
     get_bangumi_playurl as get_bangumi_playurl_response,
     get_cheese_playurl as get_cheese_playurl_response,
     get_player_info,
     get_ugc_playurl,
-    player_info_url,
 )
 from yutto.auth import get_user_info
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
@@ -250,10 +249,13 @@ async def _resolve_danmaku(
         "xml" if save_type == "xml" or not (await get_user_info(scope))["is_login"] else "protobuf"
     )
     if source_type == "xml":
-        return source_type, [danmaku_xml_url(cid)]
+        return source_type, [f"http://comment.bilibili.com/{cid}.xml"]
 
     size = await get_danmaku_segment_count(scope, aid, cid)
-    return source_type, [danmaku_segment_url(cid, segment_id) for segment_id in range(1, size + 1)]
+    return source_type, [
+        f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"
+        for segment_id in range(1, size + 1)
+    ]
 
 
 async def resolve_resource_manifest(
@@ -279,7 +281,7 @@ async def resolve_resource_manifest(
                 resources.ai_translation_language,
             )
         if resources.chapter_info:
-            chapter_info_url = player_info_url(aid, item.cid, wbi=False)
+            chapter_info_url = f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={item.cid}"
     elif isinstance(item, BangumiEpisode):
         aid = item.aid
         if resources.video or resources.audio:
