@@ -242,10 +242,11 @@ def bangumi_episode_items(result: dict[str, Any]) -> list[dict[str, Any]]:
 def parse_bangumi_episode(index: int, item: dict[str, Any]) -> BangumiEpisode:
     long_title = item["long_title"]
     title = f"{item['title']} {long_title}" if long_title else item["title"]
+    aid = AId(item["aid"]) if item.get("aid") is not None else BvId(item["bvid"]).as_aid()
     return BangumiEpisode(
         index=index,
         episode_id=EpisodeId(str(item["id"])),
-        avid=BvId(item["bvid"]),
+        aid=aid,
         cid=CId(item["cid"]),
         is_preview=item.get("badge") == "预告",
         metadata=ItemMetaData(
@@ -385,7 +386,7 @@ def parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
     return CheeseEpisode(
         index=index,
         episode_id=EpisodeId(str(item["id"])),
-        avid=AId(item["aid"]),
+        aid=AId(item["aid"]),
         cid=CId(item["cid"]),
         metadata=ItemMetaData(
             title=title,
@@ -465,8 +466,8 @@ class UgcVideoSource(MediaSource):
             )
 
     async def _resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
-        resolved_avid, video_info = await get_ugc_video_info(scope, self.id)
-        tags = await get_ugc_video_tags(scope, resolved_avid) if options.fetch_tags else []
+        resolved_aid, video_info = await get_ugc_video_info(scope, self.id)
+        tags = await get_ugc_video_tags(scope, resolved_aid) if options.fetch_tags else []
         dateadded = get_time_stamp_by_now()
 
         page_items: list[dict[str, Any]] = list(video_info["pages"])
@@ -480,7 +481,7 @@ class UgcVideoSource(MediaSource):
 
         pages = [
             UgcPage(
-                avid=resolved_avid,
+                aid=resolved_aid,
                 page=index,
                 cid=CId(page_items[index - 1]["cid"]),
                 metadata=self._make_ugc_metadata(
@@ -495,7 +496,7 @@ class UgcVideoSource(MediaSource):
         ]
         return MediaResolveResult(
             media=UgcVideo(
-                avid=resolved_avid,
+                aid=resolved_aid,
                 page_count=len(page_items),
                 metadata=self._make_ugc_metadata(
                     video_info,
