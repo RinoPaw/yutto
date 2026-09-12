@@ -9,7 +9,7 @@ from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.types import AvId, CId
+    from yutto.types import AId, CId
 
 
 def danmaku_xml_url(cid: CId) -> str:
@@ -22,10 +22,9 @@ def danmaku_segment_url(cid: CId, segment_index: int) -> str:
 
 async def get_danmaku_segment_count(
     scope: ExecutionScope,
-    avid: AvId,
+    aid: AId,
     cid: CId,
 ) -> int:
-    aid = avid.as_aid()
     meta = unwrap_fetch_result(
         await Fetcher.fetch_bin(
             scope,
@@ -33,7 +32,7 @@ async def get_danmaku_segment_count(
         )
     )
     if meta is None:
-        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{avid}, cid: {cid}）")
+        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{aid}, cid: {cid}）")
     return get_danmaku_meta_size(meta)
 
 
