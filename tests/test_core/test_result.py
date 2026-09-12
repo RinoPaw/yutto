@@ -16,7 +16,7 @@ from yutto.core.result import (
     ResolveResult,
 )
 from yutto.media import UgcPage, UgcVideo
-from yutto.types import BvId, CId
+from yutto.types import AId, CId
 from yutto.utils.metadata import ItemMetaData
 
 pytestmark = pytest.mark.processor
@@ -32,15 +32,15 @@ def test_result_models_are_frozen_and_reject_extra_fields():
 
 
 def test_resolve_result_keeps_media_tree_without_flat_projection():
-    avid = BvId("BV1D84y1t76J")
+    aid = AId("808982399")
     page = UgcPage(
-        avid=avid,
+        aid=aid,
         page=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2"),
     )
     video = UgcVideo(
-        avid=avid,
+        aid=aid,
         metadata=ItemMetaData(title="标题"),
         items=[page],
     )
