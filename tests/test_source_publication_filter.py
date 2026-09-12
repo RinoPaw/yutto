@@ -26,10 +26,11 @@ def _filter(start: int, end: int) -> PublicationTimeFilter:
     )
 
 
-def _video_response(bvid: str, title: str, pubdate: int) -> dict[str, Any]:
+def _video_response(aid: int, bvid: str, title: str, pubdate: int) -> dict[str, Any]:
     return {
         "code": 0,
         "data": {
+            "aid": aid,
             "bvid": bvid,
             "title": title,
             "desc": "",
@@ -71,9 +72,9 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
                 }
             )
         if "/x/web-interface/view?bvid=BVOLD" in url:
-            return Success(_video_response("BVOLD", "旧视频", 100))
+            return Success(_video_response(100, "BVOLD", "旧视频", 100))
         if "/x/web-interface/view?bvid=BVKEEP" in url:
-            return Success(_video_response("BVKEEP", "保留视频", 300))
+            return Success(_video_response(300, "BVKEEP", "保留视频", 300))
         raise AssertionError(f"unexpected fetch url: {url}")
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
@@ -120,7 +121,7 @@ def test_space_source_filters_and_stops_old_pages_before_video_resolution(monkey
                 }
             )
         if "/x/web-interface/view?bvid=BVKEEP" in url:
-            return Success(_video_response("BVKEEP", "保留视频", 300))
+            return Success(_video_response(300, "BVKEEP", "保留视频", 300))
         if "/x/web-interface/view?bvid=BVOLD" in url:
             raise AssertionError("old video should be filtered before resolving its details")
         raise AssertionError(f"unexpected fetch url: {url}")
