@@ -11,7 +11,7 @@ from yutto.download_manager import DownloadManager
 from yutto.exceptions import NotFoundError
 from yutto.media import UgcPage, UgcSeries, UgcVideo
 from yutto.source import MediaResolveFailure, MediaResolveResult
-from yutto.types import BvId, CId, SeriesId
+from yutto.types import AId, BvId, CId, SeriesId
 from yutto.utils.metadata import ItemMetaData
 
 
@@ -19,6 +19,7 @@ def _ugc_response() -> dict[str, Any]:
     return {
         "code": 0,
         "data": {
+            "aid": 808982399,
             "bvid": "BV1D84y1t76J",
             "title": "投稿",
             "desc": "简介",
@@ -47,15 +48,15 @@ def _install_manager_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _series_with_one_video() -> UgcSeries:
-    avid = BvId("BVGOOD")
+    aid = AId("123")
     return UgcSeries(
         series_id=SeriesId("456"),
         metadata=ItemMetaData(title="系列"),
         items=[
             UgcVideo(
-                avid=avid,
+                aid=aid,
                 metadata=ItemMetaData(title="可用视频"),
-                items=[UgcPage(avid=avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+                items=[UgcPage(aid=aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
             )
         ],
     )
@@ -83,7 +84,7 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
     assert result.media.metadata.title == "投稿"
     assert [page.page for page in result.media.items] == [3, 1]
     assert [page.metadata.title for page in result.media.items] == ["P3", "P1"]
-    assert all(page.avid == result.media.avid for page in result.media.items)
+    assert all(page.aid == result.media.aid for page in result.media.items)
 
 
 def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: pytest.MonkeyPatch) -> None:
