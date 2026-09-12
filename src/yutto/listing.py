@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from yutto.path_templates import PathTemplateVariableDict
-    from yutto.types import AvId
+    from yutto.types import AId
     from yutto.utils.filter import PublicationTimeFilter
 
 MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
@@ -130,7 +130,7 @@ def _owner(media: MediaItem, parent: MediaContainer | None) -> tuple[str, str]:
 def _path_variables(
     parent: BangumiSeason | CheeseSeason | UgcVideo | None,
     item: BangumiEpisode | CheeseEpisode | UgcPage,
-    avid: AvId,
+    aid: AId,
     *,
     index: int,
     name: str | None = None,
@@ -147,8 +147,8 @@ def _path_variables(
     )
     return {
         "id": index,
-        "aid": str(avid.as_aid()),
-        "bvid": str(avid.as_bvid()),
+        "aid": str(aid),
+        "bvid": str(aid.as_bvid()),
         "name": item.metadata.title if name is None else name,
         "title": default_title if title is None else title,
         "username": owner if username is None else username,
@@ -228,7 +228,7 @@ def _resolve_media_path(
         variables = _path_variables(
             video,
             item,
-            video.avid,
+            video.aid,
             index=item.page,
             name=name,
             title=title,
@@ -241,18 +241,18 @@ def _resolve_media_path(
         parent = ancestry[-1] if ancestry else None
         if parent is not None and not isinstance(parent, BangumiSeason):
             raise TypeError("BangumiEpisode parent must be BangumiSeason")
-        avid = item.avid
+        aid = item.aid
         index = item.index
     elif isinstance(item, CheeseEpisode):
         parent = ancestry[-1] if ancestry else None
         if parent is not None and not isinstance(parent, CheeseSeason):
             raise TypeError("CheeseEpisode parent must be CheeseSeason")
-        avid = item.avid
+        aid = item.aid
         index = item.index
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
-    variables = _path_variables(parent, item, avid, index=index, name=_episode_name(item))
+    variables = _path_variables(parent, item, aid, index=index, name=_episode_name(item))
     auto_path = "{name}" if parent is None else "{title}/{name}"
     return Path(resolve_path_template(options.subpath_template, auto_path, variables))
 
