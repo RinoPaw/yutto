@@ -22,7 +22,7 @@ from yutto.media import (
     UgcVideo,
     UgcWatchLater,
 )
-from yutto.types import AId, BvId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
+from yutto.types import AId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
 from yutto.utils.filter import PublicationTimeFilter
 from yutto.utils.metadata import ItemMetaData
 
@@ -32,26 +32,26 @@ def _paths(media: Media, *, template: str = "{auto}") -> list[Path]:
 
 
 def test_root_ugc_path_uses_original_page_count() -> None:
-    avid = BvId("BV1D84y1t76J")
+    aid = AId("808982399")
     single_page = UgcVideo(
-        avid=avid,
+        aid=aid,
         page_count=1,
         metadata=ItemMetaData(title="投稿", owner="UP"),
-        items=[UgcPage(avid=avid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1"))],
+        items=[UgcPage(aid=aid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1"))],
     )
     selected_from_multi_page = UgcVideo(
-        avid=avid,
+        aid=aid,
         page_count=3,
         metadata=ItemMetaData(title="投稿", owner="UP"),
-        items=[UgcPage(avid=avid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3"))],
+        items=[UgcPage(aid=aid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3"))],
     )
     multi_selection = UgcVideo(
-        avid=avid,
+        aid=aid,
         page_count=3,
         metadata=ItemMetaData(title="投稿", owner="UP"),
         items=[
-            UgcPage(avid=avid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
-            UgcPage(avid=avid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),
+            UgcPage(aid=aid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
+            UgcPage(aid=aid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),
         ],
     )
 
@@ -64,7 +64,7 @@ def test_direct_episode_and_season_tree_shapes_choose_different_auto_paths() -> 
     episode = BangumiEpisode(
         index=4,
         episode_id=EpisodeId("1004"),
-        avid=BvId("BV1D84y1t76J"),
+        aid=AId("808982399"),
         cid=CId("456"),
         metadata=ItemMetaData(title="4 第四话"),
     )
@@ -82,7 +82,7 @@ def test_bangumi_preview_prefixes_path_without_mutating_metadata() -> None:
     episode = BangumiEpisode(
         index=2,
         episode_id=EpisodeId("1002"),
-        avid=BvId("BV1D84y1t76J"),
+        aid=AId("808982399"),
         cid=CId("456"),
         is_preview=True,
         metadata=ItemMetaData(title="2 第二话"),
@@ -101,7 +101,7 @@ def test_cheese_path_uses_original_episode_index() -> None:
     episode = CheeseEpisode(
         index=7,
         episode_id=EpisodeId("7007"),
-        avid=AId("123"),
+        aid=AId("123"),
         cid=CId("456"),
         metadata=ItemMetaData(title="第七节"),
     )
@@ -115,19 +115,19 @@ def test_cheese_path_uses_original_episode_index() -> None:
 
 
 def test_nested_ugc_paths_follow_media_hierarchy() -> None:
-    single_avid = BvId("BV1D84y1t76J")
+    single_aid = AId("101")
     single = UgcVideo(
-        avid=single_avid,
+        aid=single_aid,
         metadata=ItemMetaData(title="单P", owner="UP"),
-        items=[UgcPage(avid=single_avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+        items=[UgcPage(aid=single_aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
     )
-    multi_avid = BvId("BV1D84y1t76K")
+    multi_aid = AId("102")
     multi = UgcVideo(
-        avid=multi_avid,
+        aid=multi_aid,
         metadata=ItemMetaData(title="多P", owner="UP"),
         items=[
-            UgcPage(avid=multi_avid, page=1, cid=CId("201"), metadata=ItemMetaData(title="第一段")),
-            UgcPage(avid=multi_avid, page=2, cid=CId("202"), metadata=ItemMetaData(title="第二段")),
+            UgcPage(aid=multi_aid, page=1, cid=CId("201"), metadata=ItemMetaData(title="第一段")),
+            UgcPage(aid=multi_aid, page=2, cid=CId("202"), metadata=ItemMetaData(title="第二段")),
         ],
     )
 
@@ -165,11 +165,11 @@ def test_nested_ugc_paths_follow_media_hierarchy() -> None:
 
 
 def test_space_and_watch_later_paths_keep_nested_page_layouts() -> None:
-    avid = BvId("BV1D84y1t76J")
+    aid = AId("123")
     video = UgcVideo(
-        avid=avid,
+        aid=aid,
         metadata=ItemMetaData(title="投稿", owner="视频UP"),
-        items=[UgcPage(avid=avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+        items=[UgcPage(aid=aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
     )
     space = UgcSpace(
         mid=MId("123"),
@@ -183,20 +183,20 @@ def test_space_and_watch_later_paths_keep_nested_page_layouts() -> None:
 
 
 def test_filter_media_tree_preserves_hierarchy_and_drops_empty_nested_branches() -> None:
-    first_avid = BvId("BV1D84y1t76J")
+    first_aid = AId("101")
     first = UgcVideo(
-        avid=first_avid,
+        aid=first_aid,
         metadata=ItemMetaData(title="A"),
         items=[
-            UgcPage(avid=first_avid, page=1, cid=CId("101"), metadata=ItemMetaData(title="A1")),
-            UgcPage(avid=first_avid, page=2, cid=CId("102"), metadata=ItemMetaData(title="A2")),
+            UgcPage(aid=first_aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="A1")),
+            UgcPage(aid=first_aid, page=2, cid=CId("102"), metadata=ItemMetaData(title="A2")),
         ],
     )
-    second_avid = BvId("BV1D84y1t76K")
+    second_aid = AId("102")
     second = UgcVideo(
-        avid=second_avid,
+        aid=second_aid,
         metadata=ItemMetaData(title="B"),
-        items=[UgcPage(avid=second_avid, page=1, cid=CId("201"), metadata=ItemMetaData(title="B1"))],
+        items=[UgcPage(aid=second_aid, page=1, cid=CId("201"), metadata=ItemMetaData(title="B1"))],
     )
     root = UgcSeries(
         series_id=SeriesId("99"),
@@ -214,17 +214,17 @@ def test_filter_media_tree_preserves_hierarchy_and_drops_empty_nested_branches()
 
 
 def test_publication_filter_keeps_empty_root_container() -> None:
-    avid = BvId("BV1D84y1t76J")
+    aid = AId("123")
     root = UgcSeries(
         series_id=SeriesId("99"),
         metadata=ItemMetaData(title="系列"),
         items=[
             UgcVideo(
-                avid=avid,
+                aid=aid,
                 metadata=ItemMetaData(title="A"),
                 items=[
                     UgcPage(
-                        avid=avid,
+                        aid=aid,
                         page=1,
                         cid=CId("101"),
                         metadata=ItemMetaData(title="A1", premiered=1_700_000_000),
