@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from yutto.core.request import DownloadRequest
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest, resolve_resource_manifest
-from yutto.types import BvId, CId
+from yutto.types import AId, CId
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 _SCOPE = cast("ExecutionScope", None)
 
 
-def test_ugc_resource_manifest_uses_page_avid(monkeypatch: pytest.MonkeyPatch) -> None:
-    avid = BvId("BV1D84y1t76J")
+def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) -> None:
+    aid = AId("808982399")
     page = UgcPage(
-        avid=avid,
+        aid=aid,
         page=1,
         cid=CId(123),
         metadata=ItemMetaData(title="P1"),
@@ -40,7 +40,7 @@ def test_ugc_resource_manifest_uses_page_avid(monkeypatch: pytest.MonkeyPatch) -
 
     request = DownloadRequest.model_validate(
         {
-            "source": {"url": str(avid)},
+            "source": {"url": "BV1D84y1t76J"},
             "resources": {
                 "subtitle": False,
                 "cover": False,
@@ -51,17 +51,17 @@ def test_ugc_resource_manifest_uses_page_avid(monkeypatch: pytest.MonkeyPatch) -
     manifest = asyncio.run(resolve_resource_manifest(_SCOPE, page, request))
 
     assert isinstance(manifest, ResourceManifest)
-    assert page.avid == avid
-    assert calls[0][1] == page.avid
+    assert page.aid == aid
+    assert calls[0][1] == page.aid
     assert calls[0][2] == page.cid
-    assert calls[1][1] == page.avid
+    assert calls[1][1] == page.aid
     assert calls[1][2] == page.cid
     assert manifest.danmaku_urls == ("https://example.test/danmaku.xml",)
 
 
 def test_resource_manifest_keeps_cover_as_url() -> None:
     page = UgcPage(
-        avid=BvId("BV1D84y1t76J"),
+        aid=AId("808982399"),
         page=1,
         cid=CId(123),
         metadata=ItemMetaData(title="P1", thumb="https://example.test/cover.jpg"),
