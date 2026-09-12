@@ -12,14 +12,6 @@ if TYPE_CHECKING:
     from yutto.types import AId, CId
 
 
-def danmaku_xml_url(cid: CId) -> str:
-    return f"http://comment.bilibili.com/{cid}.xml"
-
-
-def danmaku_segment_url(cid: CId, segment_index: int) -> str:
-    return f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_index}"
-
-
 async def get_danmaku_segment_count(
     scope: ExecutionScope,
     aid: AId,
@@ -36,4 +28,4 @@ async def get_danmaku_segment_count(
     return get_danmaku_meta_size(meta)
 
 
-__all__ = ["danmaku_segment_url", "danmaku_xml_url", "get_danmaku_segment_count"]
+__all__ = ["get_danmaku_segment_count"]
