@@ -126,8 +126,8 @@ def test_space_source_filters_and_stops_old_pages_before_video_resolution(monkey
             raise AssertionError("old video should be filtered before resolving its details")
         raise AssertionError(f"unexpected fetch url: {url}")
 
-    monkeypatch.setattr("yutto.api.space.get_wbi_img", fake_get_wbi_img)
-    monkeypatch.setattr("yutto.api.space.encode_wbi", fake_encode_wbi)
+    monkeypatch.setattr("yutto.api.ugc.get_wbi_img", fake_get_wbi_img)
+    monkeypatch.setattr("yutto.api.ugc.encode_wbi", fake_encode_wbi)
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
 
     options = SourceOptions(
