@@ -11,7 +11,7 @@ from yutto.exceptions import NotFoundError
 from yutto.media import UgcCollection, UgcFav, UgcSeries
 from yutto.selection import parse_selection
 from yutto.source import SourceOptions, UgcCollectionSource, UgcFavSource, UgcSeriesSource
-from yutto.types import BvId, CollectionId, FId, MId, SeriesId
+from yutto.types import AId, BvId, CollectionId, FId, MId, SeriesId
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -39,10 +39,11 @@ def _install_fetcher_stub(
     return calls
 
 
-def _video_response(bvid: str, title: str, page_count: int) -> dict[str, Any]:
+def _video_response(aid: int, bvid: str, title: str, page_count: int) -> dict[str, Any]:
     return {
         "code": 0,
         "data": {
+            "aid": aid,
             "bvid": bvid,
             "title": title,
             "desc": "简介",
@@ -86,7 +87,7 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
                 "code": 0,
                 "data": [{"tag_name": "标签"}],
             },
-            "/x/web-interface/view?bvid=BVSECOND": _video_response("BVSECOND", "第二个", 2),
+            "/x/web-interface/view?bvid=BVSECOND": _video_response(200, "BVSECOND", "第二个", 2),
         },
     )
 
@@ -105,7 +106,7 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     assert [page.metadata.title for page in result.media.items[0].items] == ["P1", "P2"]
     assert all(page.metadata.owner == "UP" for page in result.media.items[0].items)
     assert all(page.metadata.tag == ["标签"] for page in result.media.items[0].items)
-    assert all(page.avid == BvId("BVSECOND") for page in result.media.items[0].items)
+    assert all(page.aid == AId("200") for page in result.media.items[0].items)
 
     assert any("mid=123" in call and "series_id=456" in call for call in calls)
     assert any("bvid=BVSECOND" in call for call in calls)
@@ -126,7 +127,7 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
                     ],
                 },
             },
-            "/x/web-interface/view?bvid=BVFIRST": _video_response("BVFIRST", "合集视频", 2),
+            "/x/web-interface/view?bvid=BVFIRST": _video_response(100, "BVFIRST", "合集视频", 2),
         },
     )
 
@@ -145,7 +146,7 @@ def test_collection_uses_archives_metadata_and_resolves_selected_video(monkeypat
     assert result.media.items[0].metadata.genre == ["知识"]
     assert result.media.items[0].metadata.tag == []
     assert [page.metadata.title for page in result.media.items[0].items] == ["P1", "P2"]
-    assert all(page.avid == BvId("BVFIRST") for page in result.media.items[0].items)
+    assert all(page.aid == AId("100") for page in result.media.items[0].items)
     assert any("/x/polymer/web-space/seasons_archives_list" in call for call in calls)
     assert not any("/x/tag/archive/tags" in call for call in calls)
     assert not any("seasons_series_detail" in call for call in calls)
@@ -174,8 +175,8 @@ def test_favourite_preserves_folder_owner_and_item_titles(monkeypatch: pytest.Mo
                     "has_more": False,
                 },
             },
-            "/x/web-interface/view?bvid=BVSINGLE": _video_response("BVSINGLE", "原始单P标题", 1),
-            "/x/web-interface/view?bvid=BVMULTI": _video_response("BVMULTI", "原始多P标题", 2),
+            "/x/web-interface/view?bvid=BVSINGLE": _video_response(101, "BVSINGLE", "原始单P标题", 1),
+            "/x/web-interface/view?bvid=BVMULTI": _video_response(102, "BVMULTI", "原始多P标题", 2),
         },
     )
     options = replace(_DEFAULT_OPTIONS, selection=parse_selection("1~2"))
@@ -211,9 +212,9 @@ def test_series_keeps_successes_and_records_expected_child_failure(monkeypatch: 
                     ]
                 },
             },
-            "/x/web-interface/view?bvid=BVFIRST": _video_response("BVFIRST", "第一个", 1),
+            "/x/web-interface/view?bvid=BVFIRST": _video_response(100, "BVFIRST", "第一个", 1),
             "/x/web-interface/view?bvid=BVBAD": NotFoundError("视频已失效"),
-            "/x/web-interface/view?bvid=BVTHIRD": _video_response("BVTHIRD", "第三个", 1),
+            "/x/web-interface/view?bvid=BVTHIRD": _video_response(300, "BVTHIRD", "第三个", 1),
         },
     )
     options = replace(_DEFAULT_OPTIONS, selection=parse_selection("1~3"))
@@ -245,7 +246,7 @@ def test_series_programming_error_aborts_task_group(monkeypatch: pytest.MonkeyPa
                     ]
                 },
             },
-            "/x/web-interface/view?bvid=BVFIRST": _video_response("BVFIRST", "第一个", 1),
+            "/x/web-interface/view?bvid=BVFIRST": _video_response(100, "BVFIRST", "第一个", 1),
             "/x/web-interface/view?bvid=BVBROKEN": TypeError("programming error"),
         },
     )
