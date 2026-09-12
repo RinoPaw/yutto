@@ -75,11 +75,6 @@ async def get_cheese_playurl(
     return response
 
 
-def player_info_url(aid: AId, cid: CId, *, wbi: bool) -> str:
-    endpoint = "https://api.bilibili.com/x/player/wbi/v2" if wbi else "https://api.bilibili.com/x/player/v2"
-    return f"{endpoint}?aid={aid}&cid={cid}"
-
-
 async def get_player_info(
     scope: ExecutionScope,
     aid: AId,
@@ -87,7 +82,8 @@ async def get_player_info(
     *,
     wbi: bool,
 ) -> dict[str, Any] | None:
-    return (await Fetcher.fetch_json(scope, player_info_url(aid, cid, wbi=wbi))).value_or(None)
+    endpoint = "https://api.bilibili.com/x/player/wbi/v2" if wbi else "https://api.bilibili.com/x/player/v2"
+    return (await Fetcher.fetch_json(scope, f"{endpoint}?aid={aid}&cid={cid}")).value_or(None)
 
 
 __all__ = [
@@ -95,5 +91,4 @@ __all__ = [
     "get_cheese_playurl",
     "get_player_info",
     "get_ugc_playurl",
-    "player_info_url",
 ]
