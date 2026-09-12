@@ -23,7 +23,7 @@ def _query(avid: AvId) -> str:
     return urlencode({key: value for key, value in avid.to_dict().items() if value})
 
 
-async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AvId, dict[str, Any]]:
+async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AId, dict[str, Any]]:
     api = f"https://api.bilibili.com/x/web-interface/view?{_query(avid)}"
     result = await Fetcher.fetch_json(scope, api)
     if isinstance(result, Failure):
@@ -42,11 +42,11 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AvId, d
     assert data is not None, "响应数据无 data 域"
 
     if data.get("forward"):
-        forward_avid = AId(data["forward"])
-        emit_download_report(f"视频 {avid} 撞车了哦！正在跳转到原视频 {forward_avid}～")
-        return await get_ugc_video_info(scope, forward_avid)
+        forward_aid = AId(data["forward"])
+        emit_download_report(f"视频 {avid} 撞车了哦！正在跳转到原视频 {forward_aid}～")
+        return await get_ugc_video_info(scope, forward_aid)
 
-    return avid, data
+    return AId(data["aid"]), data
 
 
 async def get_ugc_video_tags(scope: ExecutionScope, avid: AvId) -> list[str]:
