@@ -22,7 +22,7 @@ from yutto.utils.functional import data_has_chained_keys
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.core.request import DownloadRequest
-    from yutto.types import AvId, CId, EpisodeId
+    from yutto.types import AId, CId, EpisodeId
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
 SubtitleResource: TypeAlias = tuple[str, str]
@@ -150,14 +150,14 @@ def show_ai_translation_language(resp_json: dict[str, Any], ai_translation_langu
 
 async def get_ugc_video_playurl(
     scope: ExecutionScope,
-    avid: AvId,
+    aid: AId,
     cid: CId,
     ai_translation_language: str | None = None,
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    resp_json = await get_ugc_playurl(scope, avid, cid, ai_translation_language)
+    resp_json = await get_ugc_playurl(scope, aid, cid, ai_translation_language)
     dash = resp_json["data"].get("dash")
     if dash is None:
-        raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
+        raise UnSupportedTypeError(f"该视频（{aid}, cid: {cid}）尚不支持 DASH 格式")
 
     videos = _video_streams(dash.get("video") or [])
     audios = _audio_streams(dash.get("audio") or [])
@@ -169,19 +169,19 @@ async def get_ugc_video_playurl(
 
 async def get_bangumi_playurl(
     scope: ExecutionScope,
-    avid: AvId,
+    aid: AId,
     cid: CId,
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    resp_json = await get_bangumi_playurl_response(scope, avid, cid)
+    resp_json = await get_bangumi_playurl_response(scope, aid, cid)
     video_info = resp_json["result"]["video_info"]
     if video_info.get("is_preview") == 1:
         emit_download_report(
-            f"视频（{avid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
+            f"视频（{aid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
             ReportLevel.WARNING,
         )
     dash = video_info.get("dash")
     if dash is None:
-        raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
+        raise UnSupportedTypeError(f"该视频（{aid}, cid: {cid}）尚不支持 DASH 格式")
 
     videos = _video_streams(dash.get("video") or [])
     audios = _audio_streams(dash.get("audio") or [])
@@ -191,36 +191,36 @@ async def get_bangumi_playurl(
 
 async def get_cheese_playurl(
     scope: ExecutionScope,
-    avid: AvId,
+    aid: AId,
     episode_id: EpisodeId,
     cid: CId,
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
-    resp_json = await get_cheese_playurl_response(scope, avid, episode_id, cid)
+    resp_json = await get_cheese_playurl_response(scope, aid, episode_id, cid)
     data = resp_json["data"]
     if data.get("is_preview") == 1:
         emit_download_report(
-            f"视频（{avid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
+            f"视频（{aid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
             ReportLevel.WARNING,
         )
     dash = data.get("dash")
     if dash is None:
-        raise UnSupportedTypeError(f"该视频（{avid}, cid: {cid}）尚不支持 DASH 格式")
+        raise UnSupportedTypeError(f"该视频（{aid}, cid: {cid}）尚不支持 DASH 格式")
     return _video_streams(dash.get("video") or []), _audio_streams(dash.get("audio") or [])
 
 
 async def _resolve_subtitles(
     scope: ExecutionScope,
     item: MediaItem,
-    avid: AvId,
+    aid: AId,
     cid: CId,
 ) -> list[SubtitleResource]:
-    resp_json = await get_player_info(scope, avid, cid, wbi=not isinstance(item, CheeseEpisode))
+    resp_json = await get_player_info(scope, aid, cid, wbi=not isinstance(item, CheeseEpisode))
     if resp_json is None:
         return []
     if not data_has_chained_keys(resp_json, ["data", "subtitle", "subtitles"]):
         if not isinstance(item, UgcPage):
             emit_download_report(
-                f"无法获取该视频的字幕（{avid}, cid: {cid}），原因：{resp_json.get('message')}",
+                f"无法获取该视频的字幕（{aid}, cid: {cid}），原因：{resp_json.get('message')}",
                 ReportLevel.WARNING,
             )
         return []
@@ -230,7 +230,7 @@ async def _resolve_subtitles(
         subtitle_url = sub_info["subtitle_url"]
         if subtitle_url is None or not subtitle_url.strip():
             emit_download_report(
-                f"跳过无效的字幕URL（{avid}, cid: {cid}），语言：{sub_info.get('lan_doc', '未知')}",
+                f"跳过无效的字幕URL（{aid}, cid: {cid}），语言：{sub_info.get('lan_doc', '未知')}",
                 ReportLevel.WARNING,
             )
             continue
@@ -242,7 +242,7 @@ async def _resolve_subtitles(
 
 async def _resolve_danmaku(
     scope: ExecutionScope,
-    avid: AvId,
+    aid: AId,
     cid: CId,
     save_type: DanmakuSaveType,
 ) -> tuple[DanmakuSourceType, list[str]]:
@@ -252,7 +252,7 @@ async def _resolve_danmaku(
     if source_type == "xml":
         return source_type, [danmaku_xml_url(cid)]
 
-    size = await get_danmaku_segment_count(scope, avid, cid)
+    size = await get_danmaku_segment_count(scope, aid, cid)
     return source_type, [danmaku_segment_url(cid, segment_id) for segment_id in range(1, size + 1)]
 
 
@@ -270,29 +270,29 @@ async def resolve_resource_manifest(
     chapter_info_url: str | None = None
 
     if isinstance(item, UgcPage):
-        avid = item.avid
+        aid = item.aid
         if resources.video or resources.audio:
             videos, audios = await get_ugc_video_playurl(
                 scope,
-                avid,
+                aid,
                 item.cid,
                 resources.ai_translation_language,
             )
         if resources.chapter_info:
-            chapter_info_url = player_info_url(avid, item.cid, wbi=False)
+            chapter_info_url = player_info_url(aid, item.cid, wbi=False)
     elif isinstance(item, BangumiEpisode):
-        avid = item.avid
+        aid = item.aid
         if resources.video or resources.audio:
-            videos, audios = await get_bangumi_playurl(scope, avid, item.cid)
+            videos, audios = await get_bangumi_playurl(scope, aid, item.cid)
     elif isinstance(item, CheeseEpisode):
-        avid = item.avid
+        aid = item.aid
         if resources.video or resources.audio:
-            videos, audios = await get_cheese_playurl(scope, avid, item.episode_id, item.cid)
+            videos, audios = await get_cheese_playurl(scope, aid, item.episode_id, item.cid)
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
     if resources.subtitle:
-        subtitles = await _resolve_subtitles(scope, item, avid, item.cid)
+        subtitles = await _resolve_subtitles(scope, item, aid, item.cid)
     if not resources.video:
         videos = []
     if not resources.audio:
@@ -303,7 +303,7 @@ async def resolve_resource_manifest(
     if resources.danmaku:
         danmaku_source_type, danmaku_urls = await _resolve_danmaku(
             scope,
-            avid,
+            aid,
             item.cid,
             request.danmaku.format,
         )
