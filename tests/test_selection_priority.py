@@ -43,7 +43,7 @@ def _bangumi_response() -> dict[str, Any]:
                     "title": str(index),
                     "long_title": f"第{index}话",
                     "cid": 100 + index,
-                    "bvid": f"BV{episode_id}",
+                    "bvid": "BV1D84y1t76J",
                     "badge": "",
                     "share_copy": f"番剧 第{index}话",
                     "cover": f"https://img/{index}.jpg",
@@ -80,6 +80,7 @@ def _ugc_response() -> dict[str, Any]:
     return {
         "code": 0,
         "data": {
+            "aid": 808982399,
             "bvid": "BV1D84y1t76J",
             "title": "投稿",
             "desc": "简介",
