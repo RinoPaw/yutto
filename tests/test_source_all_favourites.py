@@ -20,6 +20,7 @@ def _video_response() -> dict[str, Any]:
     return {
         "code": 0,
         "data": {
+            "aid": 123,
             "bvid": "BVSINGLE",
             "title": "原始标题",
             "desc": "简介",
