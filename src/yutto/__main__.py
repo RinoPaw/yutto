@@ -1,63 +1,43 @@
 from __future__ import annotations
 
 import asyncio
-import copy
-import os
-import re
-import shlex
 import sys
 from typing import TYPE_CHECKING
 
-from yutto.auth import validate_user_info
 from yutto.cli.auth import run_auth
-from yutto.cli.cli import cli, handle_default_subcommand
+from yutto.cli.auth_announcer import CliAuthAnnouncer
 from yutto.cli.event_renderer import CliApplicationEventRenderer
-from yutto.cli.input import file_scheme_parser
+from yutto.cli.input import expand_download_args
+from yutto.cli.parser import build_parser, normalize_argv
 from yutto.cli.request_adapter import download_request_from_namespace
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, YuttoBaseException
-from yutto.utils.console.logger import Badge, Logger
+from yutto.utils.console.logger import Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
-from yutto.validator import (
-    hydrate_auth,
-    initial_validation,
-    validate_basic_arguments,
-)
+from yutto.validator import hydrate_auth, initial_validation, validate_basic_arguments
 
 if TYPE_CHECKING:
     import argparse
 
     from yutto.auth import AuthInfo
-    from yutto.core.execution import ExecutionScope
     from yutto.core.request import DownloadRequest
 
 
-class _CliAuthAnnouncer:
-    """Announce each effective credential once without sharing request caches."""
-
-    def __init__(self):
-        self._announced_credentials: set[tuple[str | None, str | None]] = set()
-
-    async def __call__(self, scope: ExecutionScope, request: DownloadRequest) -> None:
-        credentials = (
-            scope.session.cookie("SESSDATA"),
-            scope.session.cookie("bili_jct"),
-        )
-        if credentials in self._announced_credentials:
-            return
-        self._announced_credentials.add(credentials)
-        await announce_cli_auth(scope, request)
+# Compatibility aliases for code that imported these entrypoint helpers directly.
+cli = build_parser
+handle_default_subcommand = normalize_argv
 
 
-def main():
+def main() -> None:
     parser = cli()
     renderer = CliApplicationEventRenderer()
     with bind_download_report_sink(renderer.report):
         args = parser.parse_args(handle_default_subcommand(sys.argv[1:]))
+
     match args.command:
         case "download":
             renderer.progress_enabled = not args.no_progress and sys.stdout.isatty()
@@ -77,15 +57,16 @@ def main():
 
                     scope_factory = RequestExecutionScopeFactory(
                         resolve_credentials,
-                        on_open=_CliAuthAnnouncer(),
+                        on_open=CliAuthAnnouncer(),
                     )
                     run_download(scope_factory, requests, renderer, jobs=args.jobs)
-                except YuttoBaseException as e:
-                    Logger.error(e.message)
-                    sys.exit(e.code.value)
+                except YuttoBaseException as error:
+                    Logger.error(error.message)
+                    sys.exit(error.code.value)
                 except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
                     Logger.info("已终止下载，再次运行即可继续下载～")
                     sys.exit(ErrorCode.PAUSED_DOWNLOAD.value)
+
         case "auth":
             run_auth(args)
 
@@ -97,15 +78,20 @@ def main():
                     run_server_command(args)
             except KeyboardInterrupt:
                 Logger.info("yutto server 已停止")
-            except YuttoBaseException as e:
-                Logger.error(e.message)
-                sys.exit(e.code.value)
-            except (OSError, ValueError) as e:
-                Logger.error(str(e))
+            except YuttoBaseException as error:
+                Logger.error(error.message)
+                sys.exit(error.code.value)
+            except (OSError, ValueError) as error:
+                Logger.error(str(error))
                 sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
         case _:
             raise ValueError("Invalid command")
+
+
+def flatten_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[argparse.Namespace]:
+    """Compatibility wrapper around the CLI input-expansion layer."""
+    return expand_download_args(args, parser, validate=validate_basic_arguments)
 
 
 @as_sync
@@ -115,7 +101,7 @@ async def run_download(
     renderer: CliApplicationEventRenderer,
     *,
     jobs: int = 1,
-):
+) -> None:
     async with renderer:
         application = YuttoApplication(
             scope_factory,
@@ -124,42 +110,6 @@ async def run_download(
         )
         with bind_download_report_sink(renderer.report):
             await application.download_all(requests)
-
-
-async def announce_cli_auth(scope: ExecutionScope, _request: DownloadRequest) -> None:
-    if scope.session.cookie("SESSDATA") is None:
-        Logger.info(
-            "未提供登录认证信息，无法下载高清视频、字幕等资源哦～请通过 `--auth` 参数提供认证信息，或者先使用 `yutto auth login` 登录存储认证信息后再下载～"
-        )
-        return
-    if await validate_user_info(scope, {"vip_status": True, "is_login": True}):
-        Logger.custom("成功以大会员身份登录～", badge=Badge("大会员", fore="white", back="magenta", style=["bold"]))
-    else:
-        Logger.warning("以非大会员身份登录，注意无法下载会员专享剧集喔～")
-
-
-def flatten_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[argparse.Namespace]:
-    """递归展平列表参数"""
-    args = copy.copy(args)
-    validate_basic_arguments(args)
-    # 查看是否存在于 alias 中
-    alias_map: dict[str, str] = args.aliases if args.aliases is not None else {}
-    if args.url in alias_map:
-        args.url = alias_map[args.url]
-
-    # 是否为下载列表
-    if re.match(r"file://", args.url) or os.path.isfile(args.url):  # noqa: PTH113
-        args_list: list[argparse.Namespace] = []
-        # TODO: 如果是相对路径，需要相对于当前 list 路径
-        for line in file_scheme_parser(args.url):
-            local_args = parser.parse_args(handle_default_subcommand(shlex.split(line)), args)
-            if local_args.no_inherit:
-                local_args = parser.parse_args(handle_default_subcommand(shlex.split(line)))
-            Logger.debug(f"列表参数: {local_args}")
-            args_list += flatten_args(local_args, parser)
-        return args_list
-    else:
-        return [args]
 
 
 if __name__ == "__main__":

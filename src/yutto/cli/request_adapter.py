@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any, cast
 from yutto.core.request import DownloadRequest
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Callable
+
+    import argparse
 
     from yutto.cli.settings import YuttoSettings
 
@@ -23,7 +24,7 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
 
     request: dict[str, Any] = {
         "source": {
-            "url": args.url,
+            "url": args.source,
         },
         "access": {
             "auth_profile": args.auth_profile,
@@ -34,8 +35,8 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
         "selection": {
             "expression": selection_expr,
             "skip_preview": args.skip_preview,
-            "start_time": args.batch_filter_start_time,
-            "end_time": args.batch_filter_end_time,
+            "start_time": args.publication_start_time,
+            "end_time": args.publication_end_time,
         },
         "resources": {
             "video": args.require_video,
@@ -64,12 +65,12 @@ def download_request_from_namespace(args: argparse.Namespace) -> DownloadRequest
             "audio_only_format": args.output_format_audio_only,
             "overwrite": args.overwrite,
             "subpath_template": args.subpath_template,
-            "metadata_format_premiered": args.metadata_format_premiered,
+            "metadata_format_premiered": args.metadata_premiered_format,
         },
         "network": {
             "proxy": args.proxy,
             "fetch_workers": args.fetch_workers,
-            "download_workers": args.num_workers,
+            "download_workers": args.download_workers,
             "block_size_bytes": int(args.block_size * MEBIBYTE),
             "download_interval": args.download_interval,
             "banned_mirrors_pattern": args.banned_mirrors_pattern,
