@@ -23,9 +23,26 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Mapping
     from pathlib import Path
+    from typing import Protocol
 
+    from yutto.cli.settings import YuttoSettings
     from yutto.core.events import DownloadEventSink
     from yutto.core.execution import ExecutionScopeFactory
+
+    class ServerCommandOptions(Protocol):
+        server_settings: YuttoSettings
+        ffmpeg_path: str
+        host: str
+        port: int
+        allow_origin: tuple[str, ...]
+        token_file: Path | None
+        download_root: Path
+        tmp_root: Path | None
+        auth_file: Path | None
+        max_fetch_workers: int
+        max_download_workers: int
+        task_limit: int
+        jobs: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +109,12 @@ def _read_server_token(token_file: Path) -> str:
     return token
 
 
-def build_server(args: argparse.Namespace, token: str, *, ffmpeg: FFmpeg | None = None) -> YuttoWebSocketServer:
+def build_server(
+    args: argparse.Namespace | ServerCommandOptions,
+    token: str,
+    *,
+    ffmpeg: FFmpeg | None = None,
+) -> YuttoWebSocketServer:
     ffmpeg = ffmpeg or FFmpeg()
     policy = ServerPolicy(
         ServerPolicyOptions(
@@ -110,8 +132,7 @@ def build_server(args: argparse.Namespace, token: str, *, ffmpeg: FFmpeg | None 
     policy.prepare_request(default_request)
     policy.resolve_credentials(default_request)
     scope_factory = policy.build_scope_factory()
-    # download 与 resolve 两个 runtime 共享同一事件序号空间与全局任务容量，
-    # 维持 v1 契约：`seq` 全局递增可去重、`--task-limit` 是两类任务的总量
+
     event_seq_allocator = monotonic_seq_allocator()
     task_capacity = TaskCapacityPool(args.task_limit)
     path_leases = DownloadPathLeasePool()
@@ -167,7 +188,7 @@ def _build_download_application(
 
 
 @as_sync
-async def run_server_command(args: argparse.Namespace) -> None:
+async def run_server_command(args: argparse.Namespace | ServerCommandOptions) -> None:
     FFmpeg.setup_ffmpeg_path(args.ffmpeg_path)
     ffmpeg = FFmpeg()
     token = resolve_server_token(args.token_file)

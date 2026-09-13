@@ -28,7 +28,7 @@ class AccessSpec(_RequestModel):
 
 
 class SelectionSpec(_RequestModel):
-    """Selection expression and filters for the current source selection domain."""
+    """Selection expression and publication-time filters for the current source."""
 
     expression: str | None = None
     skip_preview: bool = False
@@ -37,7 +37,7 @@ class SelectionSpec(_RequestModel):
 
 
 class ResourceSpec(_RequestModel):
-    """Resources that should be present in the resulting download."""
+    """Resources to fetch, process, or preserve in the resulting artifact."""
 
     video: bool = True
     audio: bool = True
@@ -105,8 +105,8 @@ class NetworkSpec(_RequestModel):
     """Network access and transfer concurrency preferences."""
 
     proxy: str = "auto"
-    fetch_workers: int = 8
-    download_workers: int = 8
+    fetch_workers: int = Field(default=8, gt=0)
+    download_workers: int = Field(default=8, gt=0)
     block_size_bytes: int = 512 * 1024
     download_interval: int = 0
     banned_mirrors_pattern: str | None = None
