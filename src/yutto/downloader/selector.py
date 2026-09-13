@@ -3,33 +3,26 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from yutto.exceptions import CryptoError
-from yutto.media.codec import (
+from yutto.stream import (
     gen_acodec_priority,
-    gen_vcodec_priority,
-)
-from yutto.media.quality import (
     gen_audio_quality_priority,
+    gen_vcodec_priority,
     gen_video_quality_priority,
     is_encrypted_audio_quality,
 )
 
 if TYPE_CHECKING:
-    from yutto.media.codec import (
-        AudioCodec,
-        VideoCodec,
-    )
-    from yutto.media.quality import (
-        AudioQuality,
-        VideoQuality,
-    )
+    from collections.abc import Sequence
+
+    from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
 def select_video(
-    videos: list[VideoUrlMeta],
+    videos: Sequence[VideoUrlMeta],
     video_quality: VideoQuality = 127,
     video_codec: VideoCodec = "hevc",
-    video_download_codec_priority: list[VideoCodec] | None = None,
+    video_download_codec_priority: Sequence[VideoCodec] | None = None,
 ) -> VideoUrlMeta | None:
     video_quality_priority = gen_video_quality_priority(video_quality)
     video_codec_priority = (
@@ -51,7 +44,7 @@ def select_video(
 
 
 def select_audio(
-    audios: list[AudioUrlMeta],
+    audios: Sequence[AudioUrlMeta],
     audio_quality: AudioQuality = 30280,
     audio_codec: AudioCodec = "mp4a",
 ) -> AudioUrlMeta | None:

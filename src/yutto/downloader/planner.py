@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from yutto.downloader.selector import select_audio, select_video
@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.core.request import DownloadRequest
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.media.quality import AudioQuality, VideoQuality
-    from yutto.types import AudioUrlMeta, EpisodeData, VideoUrlMeta
+    from yutto.resource import ResourceManifest
+    from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
+    from yutto.types import AudioUrlMeta, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
 
 
@@ -21,8 +21,6 @@ class DownloadPaths:
     output_dir: Path
     temporary_dir: Path
     output: Path
-    video: Path
-    audio: Path
     cover: Path
     saved_cover: Path
     chapter_info: Path
@@ -31,8 +29,6 @@ class DownloadPaths:
 @dataclass(frozen=True, slots=True)
 class VideoStream:
     index: int
-    url: str = field(repr=False)
-    mirrors: tuple[str, ...] = field(repr=False)
     codec: VideoCodec
     width: int
     height: int
@@ -42,8 +38,6 @@ class VideoStream:
 @dataclass(frozen=True, slots=True)
 class AudioStream:
     index: int
-    url: str = field(repr=False)
-    mirrors: tuple[str, ...] = field(repr=False)
     codec: AudioCodec
     quality: AudioQuality
 
@@ -72,7 +66,7 @@ class MetadataPlan:
 
 @dataclass(frozen=True, slots=True)
 class DownloadResources:
-    """Frozen write policy; large extractor payloads remain in EpisodeData."""
+    """Frozen write policy derived from DownloadRequest and ResourceManifest."""
 
     subtitle_languages: tuple[str, ...]
     has_danmaku: bool
@@ -89,7 +83,7 @@ class DownloadResources:
 
 @dataclass(frozen=True, slots=True)
 class DownloadPlan:
-    """A side-effect-free description of one download."""
+    """A side-effect-free description of one download; resource URLs stay in ResourceManifest."""
 
     item: str
     paths: DownloadPaths
@@ -111,36 +105,42 @@ class DownloadPlan:
 
 
 class DownloadPlanner:
-    """Turn extractor data plus a request into a pure download plan."""
+    """Turn a ResourceManifest plus a path and DownloadRequest into a pure download plan."""
 
-    def plan(self, episode_data: EpisodeData, request: DownloadRequest) -> DownloadPlan:
+    def plan(self, resources: ResourceManifest, path: Path, request: DownloadRequest) -> DownloadPlan:
+        resource_options = request.resources
+        stream = request.stream
+        output = request.output
+        network = request.network
+        danmaku = request.danmaku
+
         video_candidate = select_video(
-            episode_data["videos"],
-            request.stream.video_quality,
-            request.stream.video_download_codec,
-            request.stream.video_download_codec_priority,
+            resources.videos,
+            stream.video_quality,
+            stream.video_download_codec,
+            stream.video_download_codec_priority,
         )
         audio_candidate = select_audio(
-            episode_data["audios"],
-            request.stream.audio_quality,
-            request.stream.audio_download_codec,
+            resources.audios,
+            stream.audio_quality,
+            stream.audio_download_codec,
         )
-        video_meta = video_candidate if request.resources.video else None
-        audio_meta = audio_candidate if request.resources.audio else None
+        video_meta = video_candidate if resource_options.video else None
+        audio_meta = audio_candidate if resource_options.audio else None
         suffix = resolve_output_suffix(video_meta, audio_meta, request)
         paths = resolve_paths(
-            request.output.directory,
-            request.output.temporary_directory or request.output.directory,
-            episode_data["info"]["path"],
+            output.directory,
+            output.temporary_directory or output.directory,
+            path,
             suffix,
         )
 
-        video_save_codec = request.stream.video_save_codec
+        video_save_codec = stream.video_save_codec
         attach_hvc1_tag = should_attach_hvc1_tag(video_meta, video_save_codec)
         if video_meta is not None and video_meta["codec"] == video_save_codec:
             video_save_codec = "copy"
 
-        requested_audio_save_codec = request.stream.audio_save_codec
+        requested_audio_save_codec = stream.audio_save_codec
         audio_save_codec = (
             resolve_audio_save_codec(audio_meta["codec"], requested_audio_save_codec, suffix)
             if audio_meta is not None
@@ -148,60 +148,56 @@ class DownloadPlanner:
         )
 
         selected_video_index = (
-            episode_data["videos"].index(video_candidate)
-            if video_candidate is not None and request.resources.video
-            else -1
+            resources.videos.index(video_candidate) if video_candidate is not None and resource_options.video else -1
         )
         selected_audio_index = (
-            episode_data["audios"].index(audio_candidate)
-            if audio_candidate is not None and request.resources.audio
-            else -1
+            resources.audios.index(audio_candidate) if audio_candidate is not None and resource_options.audio else -1
         )
-        resources = DownloadResources(
-            subtitle_languages=tuple(subtitle["lang"] for subtitle in episode_data["subtitles"]),
-            has_danmaku=bool(episode_data["danmaku"]["data"]),
-            danmaku_save_type=episode_data["danmaku"]["save_type"],
-            has_metadata=episode_data["metadata"] is not None,
-            has_cover=episode_data["cover_data"] is not None,
-            has_chapter_info=bool(episode_data["chapter_info_data"]),
-            save_cover=request.resources.save_cover,
+        resource_plan = DownloadResources(
+            subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
+            has_danmaku=bool(resources.danmaku_urls),
+            danmaku_save_type=resources.danmaku_save_type,
+            has_metadata=resource_options.metadata,
+            has_cover=resources.cover_url is not None,
+            has_chapter_info=resources.chapter_info_url is not None,
+            save_cover=resource_options.save_cover,
             danmaku_width=video_candidate["width"] if video_candidate is not None else 1920,
             danmaku_height=video_candidate["height"] if video_candidate is not None else 1080,
             metadata=MetadataPlan(
-                premiered=request.output.metadata_format_premiered,
+                premiered=output.metadata_format_premiered,
                 dateadded=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
-                font_size=request.danmaku.font_size,
-                font=request.danmaku.font,
-                opacity=request.danmaku.opacity,
-                display_region_ratio=request.danmaku.display_region_ratio,
-                speed=request.danmaku.speed,
-                block_top=request.danmaku.block_top,
-                block_bottom=request.danmaku.block_bottom,
-                block_scroll=request.danmaku.block_scroll,
-                block_reverse=request.danmaku.block_reverse,
-                block_special=request.danmaku.block_special,
-                block_colorful=request.danmaku.block_colorful,
-                block_keyword_patterns=tuple(request.danmaku.block_keyword_patterns),
+                font_size=danmaku.font_size,
+                font=danmaku.font,
+                opacity=danmaku.opacity,
+                display_region_ratio=danmaku.display_region_ratio,
+                speed=danmaku.speed,
+                block_top=danmaku.block_top,
+                block_bottom=danmaku.block_bottom,
+                block_scroll=danmaku.block_scroll,
+                block_reverse=danmaku.block_reverse,
+                block_special=danmaku.block_special,
+                block_colorful=danmaku.block_colorful,
+                block_keyword_patterns=tuple(danmaku.block_keyword_patterns),
             ),
         )
         return DownloadPlan(
-            item=episode_data["info"]["path"].name,
+            item=path.name,
             paths=paths,
             video=freeze_video_stream(video_meta, selected_video_index),
             audio=freeze_audio_stream(audio_meta, selected_audio_index),
-            media_requested=request.resources.video or request.resources.audio,
+            media_requested=resource_options.video or resource_options.audio,
             video_save_codec=video_save_codec,
             audio_save_codec=audio_save_codec,
             attach_hvc1_tag=attach_hvc1_tag,
             requires_audio_transcode_notice=(
                 audio_meta is not None and audio_save_codec not in {requested_audio_save_codec, "copy"}
             ),
-            overwrite=request.output.overwrite,
-            block_size=request.network.block_size_bytes,
-            banned_mirrors_pattern=request.network.banned_mirrors_pattern,
-            resources=resources,
+            overwrite=output.overwrite,
+            block_size=network.block_size_bytes,
+            banned_mirrors_pattern=network.banned_mirrors_pattern,
+            resources=resource_plan,
         )
 
 
@@ -222,8 +218,6 @@ def resolve_paths(
         output_dir=output_dir,
         temporary_dir=temporary_dir,
         output=output_dir / f"{filename}{output_suffix}",
-        video=temporary_dir / f"{filename}_video.m4s",
-        audio=temporary_dir / f"{filename}_audio.m4s",
         cover=temporary_dir / f"{filename}_cover.jpg",
         saved_cover=output_dir / f"{filename}-poster.jpg",
         chapter_info=temporary_dir / f"{filename}_chapter_info.ini",
@@ -235,17 +229,19 @@ def resolve_output_suffix(
     audio: AudioUrlMeta | None,
     request: DownloadRequest,
 ) -> str:
+    output = request.output
+    stream = request.stream
     if video is None:
-        if request.output.audio_only_format != "infer":
-            return f".{request.output.audio_only_format}"
-        if audio is not None and audio["codec"] == "flac" and request.stream.audio_save_codec in {"copy", "flac"}:
+        if output.audio_only_format != "infer":
+            return f".{output.audio_only_format}"
+        if audio is not None and audio["codec"] == "flac" and stream.audio_save_codec in {"copy", "flac"}:
             return ".flac"
-        if audio is not None and audio["codec"] == "eac3" and request.stream.audio_save_codec in {"copy", "eac3"}:
+        if audio is not None and audio["codec"] == "eac3" and stream.audio_save_codec in {"copy", "eac3"}:
             return ".mkv"
         return ".m4a"
 
-    if request.output.format != "infer":
-        return f".{request.output.format}"
+    if output.format != "infer":
+        return f".{output.format}"
     if audio is not None and audio["codec"] == "flac":
         return ".mkv"
     return ".mp4"
@@ -256,8 +252,6 @@ def freeze_video_stream(video: VideoUrlMeta | None, index: int) -> VideoStream |
         return None
     return VideoStream(
         index=index,
-        url=video["url"],
-        mirrors=tuple(video["mirrors"]),
         codec=video["codec"],
         width=video["width"],
         height=video["height"],
@@ -270,8 +264,6 @@ def freeze_audio_stream(audio: AudioUrlMeta | None, index: int) -> AudioStream |
         return None
     return AudioStream(
         index=index,
-        url=audio["url"],
-        mirrors=tuple(audio["mirrors"]),
         codec=audio["codec"],
         quality=audio["quality"],
     )

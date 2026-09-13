@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from yutto._native import TransferWorkerLimit, wait_for_transfer
-from yutto.core.events import DownloadStage, DownloadStageChanged
-from yutto.core.operation import emit_download_event, emit_download_report
 from yutto.downloader.progressbar import show_progress
 from yutto.exceptions import MaxRetryError
 from yutto.utils.asynclib import NoSuccessfulResultError, make_coroutine_factory, race_for_first_success
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Sequence
     from typing import Any
 
     from yutto.core.execution import ExecutionScope
-    from yutto.downloader.planner import DownloadPlan
 
 
 def create_mirrors_filter(banned_mirrors_pattern: str | None) -> Callable[[list[str]], list[str]]:
@@ -54,63 +55,77 @@ async def _probe_media_size(scope: ExecutionScope, url: str, mirrors: Iterable[s
         )
 
 
-async def download_video_and_audio(scope: ExecutionScope, plan: DownloadPlan) -> None:
-    """Download all media through the native Haya transfer core."""
-    handles = []
-    wait_tasks: list[asyncio.Task[int]] = []
-    progress_task: asyncio.Task[None] | None = None
-    mirrors_filter = create_mirrors_filter(plan.banned_mirrors_pattern)
+async def download_files(
+    scope: ExecutionScope,
+    sources: Sequence[tuple[str, Sequence[str]]],
+    *,
+    block_size: int,
+    banned_mirrors_pattern: str | None,
+) -> tuple[Path, ...]:
+    """Download URL candidates into transfer-owned temporary files and return those files."""
 
-    emit_download_event(DownloadStageChanged(name=DownloadStage.DOWNLOADING, item=plan.item))
-    emit_download_report("开始下载……")
+    if not sources:
+        return ()
+
+    staging_directory = Path(tempfile.mkdtemp(prefix="yutto-download-"))
+    mirrors_filter = create_mirrors_filter(banned_mirrors_pattern)
+    prepared_transfers: list[tuple[list[str], Path, int]] = []
+
     try:
-        prepared_transfers = []
-        for stream, target in (
-            (plan.video, plan.paths.video),
-            (plan.audio, plan.paths.audio),
-        ):
-            if stream is None:
-                continue
-            mirrors = mirrors_filter(list(stream.mirrors))
-            size = await _probe_media_size(scope, stream.url, mirrors)
-            prepared_transfers.append(([stream.url, *mirrors], target, size))
+        for index, (url, mirrors) in enumerate(sources):
+            filtered_mirrors = mirrors_filter(list(mirrors))
+            size = await _probe_media_size(scope, url, filtered_mirrors)
+            suffix = Path(urlsplit(url).path).suffix or ".bin"
+            target = staging_directory / f"{index:02}{suffix}.part"
+            prepared_transfers.append(([url, *filtered_mirrors], target, size))
 
-        total_size = sum(size for _, _, size in prepared_transfers)
+        handles = []
+        wait_tasks: list[asyncio.Task[int]] = []
+        progress_task: asyncio.Task[None] | None = None
         worker_limit = TransferWorkerLimit(scope.download_workers)
         batch_size = 1 if scope.download_workers == 1 else len(prepared_transfers)
-        for batch_start in range(0, len(prepared_transfers), batch_size):
-            batch_tasks = []
-            for sources, target, size in prepared_transfers[batch_start : batch_start + batch_size]:
-                handle = scope.session.start_transfer(
-                    sources,
-                    target,
-                    size,
-                    overwrite=plan.overwrite,
-                    workers=scope.download_workers,
-                    block_size=plan.block_size,
-                    worker_limit=worker_limit,
-                )
-                handles.append(handle)
-                wait_task = asyncio.create_task(wait_for_transfer(handle))
-                wait_tasks.append(wait_task)
-                batch_tasks.append(wait_task)
 
-            progress_task = asyncio.create_task(show_progress(handles, total_size, item=plan.item))
-            await _wait_for_native_transfers(batch_tasks)
-            await progress_task
-            progress_task = None
-        emit_download_report("下载完成！")
-    finally:
-        if progress_task is not None:
-            if not progress_task.done():
-                progress_task.cancel()
-            await asyncio.gather(progress_task, return_exceptions=True)
-        cleanup_task = asyncio.create_task(_cancel_and_reap_native_transfers(handles, wait_tasks))
         try:
-            await asyncio.shield(cleanup_task)
-        except asyncio.CancelledError:
-            await cleanup_task
-            raise
+            for batch_start in range(0, len(prepared_transfers), batch_size):
+                batch_tasks = []
+                batch_handles = []
+                for source_urls, target, size in prepared_transfers[batch_start : batch_start + batch_size]:
+                    handle = scope.session.start_transfer(
+                        source_urls,
+                        target,
+                        size,
+                        overwrite=False,
+                        workers=scope.download_workers,
+                        block_size=block_size,
+                        worker_limit=worker_limit,
+                    )
+                    handles.append(handle)
+                    batch_handles.append(handle)
+                    wait_task = asyncio.create_task(wait_for_transfer(handle))
+                    wait_tasks.append(wait_task)
+                    batch_tasks.append(wait_task)
+
+                total_size = sum(size for _, _, size in prepared_transfers[batch_start : batch_start + batch_size])
+                progress_task = asyncio.create_task(show_progress(batch_handles, total_size))
+                await _wait_for_native_transfers(batch_tasks)
+                await progress_task
+                progress_task = None
+        finally:
+            if progress_task is not None:
+                if not progress_task.done():
+                    progress_task.cancel()
+                await asyncio.gather(progress_task, return_exceptions=True)
+            cleanup_task = asyncio.create_task(_cancel_and_reap_native_transfers(handles, wait_tasks))
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                await cleanup_task
+                raise
+    except BaseException:
+        shutil.rmtree(staging_directory, ignore_errors=True)
+        raise
+
+    return tuple(target for _, target, _ in prepared_transfers)
 
 
 async def _wait_for_native_transfers(wait_tasks: Iterable[asyncio.Task[int]]) -> None:
@@ -125,10 +140,3 @@ async def _cancel_and_reap_native_transfers(handles: Iterable[Any], wait_tasks: 
         if not handle.done():
             handle.cancel()
     await asyncio.gather(*wait_tasks, return_exceptions=True)
-
-
-def cleanup_temporary_media(plan: DownloadPlan) -> None:
-    if plan.video is not None:
-        plan.paths.video.unlink(missing_ok=True)
-    if plan.audio is not None:
-        plan.paths.audio.unlink(missing_ok=True)

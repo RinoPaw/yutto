@@ -3,16 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-    from pathlib import Path
-    from typing import Any
+    from typing import Self
 
-    from yutto.core.result import ResolvedItem
     from yutto.media.codec import AudioCodec, VideoCodec
     from yutto.media.quality import AudioQuality, VideoQuality
-    from yutto.utils.danmaku import DanmakuData, DanmakuSaveType
-    from yutto.utils.filter import PublicationTimeFilter
-    from yutto.utils.metadata import ChapterInfoData, MetaData
     from yutto.utils.subtitle import SubtitleData
 
 
@@ -37,33 +31,7 @@ class BilibiliId(NamedTuple):
 
 
 class AvId(BilibiliId):
-    """AId 与 BvId 的统一，大多数 API 只需要其中一种即可正常工作
-
-    ### Examples
-
-    ``` python
-    # 初始化
-    # 这两个 Id 事实上是完全一样的，指向同一个资源
-    # 因此我们只获取其一即可，在能够获取 BvId 的情况下建议使用 BvId
-    aid = AId("808982399")
-    bvid = BvId("BV1f34y1k7D5")
-
-    # 使用
-    # 由于 B 站大多数需要 aid/bvid 的接口都是只提供其一即可，
-    # 因此我们可以直接这样通过格式化的方式来产生一个合法的接口链接
-    api = "https://api.bilibili.com/x/player/pagelist?aid={aid}&bvid={bvid}&jsonp=jsonp"
-    api = api.format(aid=aid.value, bvid="")
-    api = api.format(aid="", bvid=bvid.value)
-
-    # 为了方便，继承了 AvId 的 AId 和 BvId 都可以通过 to_dict 方法简化这一步
-    api = api.format(**aid.to_dict())
-    api = api.format(**bvid.to_dict())
-    # 这样就完全屏蔽了 aid 和 bvid 的差异了
-    ```
-    """
-
-    # id conversion based on
-    # https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/bvid_desc.md
+    """AId 与 BvId 的统一，大多数 API 只需要其中一种即可正常工作。"""
 
     XOR_CODE = 23442827791579
     MASK_CODE = 2251799813685247
@@ -117,7 +85,10 @@ class AvId(BilibiliId):
 class AId(AvId):
     """AID"""
 
-    def to_dict(self):
+    def __new__(cls, aid: object) -> Self:
+        return super().__new__(cls, str(aid))
+
+    def to_dict(self) -> dict[str, str]:
         return {"aid": self.value, "bvid": ""}
 
     def to_url(self) -> str:
@@ -127,11 +98,8 @@ class AId(AvId):
 class BvId(AvId):
     """BVID"""
 
-    def to_dict(self):
-        return {
-            "aid": "",
-            "bvid": self.value,
-        }
+    def to_dict(self) -> dict[str, str]:
+        return {"aid": "", "bvid": self.value}
 
     def to_url(self) -> str:
         return f"https://www.bilibili.com/video/{self.value}"
@@ -140,56 +108,60 @@ class BvId(AvId):
 class CId(BilibiliId):
     """视频 ID"""
 
-    def to_dict(self):
+    def __new__(cls, cid: object) -> Self:
+        return super().__new__(cls, str(cid))
+
+    def to_dict(self) -> dict[str, str]:
         return {"cid": self.value}
 
 
 class EpisodeId(BilibiliId):
     """番剧剧集 ID"""
 
-    def to_dict(self):
-        return {"episode_id": self.value}
+    def to_dict(self) -> dict[str, str]:
+        return {"ep_id": self.value}
 
 
 class MediaId(BilibiliId):
     """番剧 ID"""
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {"media_id": self.value}
 
 
 class SeasonId(BilibiliId):
     """番剧（季） ID"""
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {"season_id": self.value}
 
 
 class MId(BilibiliId):
     """用户 ID"""
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {"mid": self.value}
 
 
 class FId(BilibiliId):
     """收藏夹 ID"""
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {"fid": self.value}
 
 
 class SeriesId(BilibiliId):
-    """视频合集 ID"""
+    """视频系列 ID"""
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {"series_id": self.value}
 
 
-def format_ids(*id: BilibiliId):
-    id_dicts = [i.to_dict() for i in id]
-    formatted_ids = [f"{k}: {v}" for i in id_dicts for k, v in i.items() if v]
-    return ", ".join(formatted_ids)
+class CollectionId(BilibiliId):
+    """UGC 视频合集 ID"""
+
+    def to_dict(self) -> dict[str, str]:
+        return {"season_id": self.value}
 
 
 class VideoUrlMeta(TypedDict):
@@ -215,50 +187,6 @@ class MultiLangSubtitle(TypedDict):
     lines: SubtitleData
 
 
-class ExtractorOptions(TypedDict):
-    episodes: str
-    with_extra_episodes: bool
-    skip_preview: bool
-    require_video: bool
-    require_audio: bool
-    require_danmaku: bool
-    require_subtitle: bool
-    require_metadata: bool
-    require_cover: bool
-    require_chapter_info: bool
-    danmaku_format: DanmakuSaveType
-    subpath_template: str
-    ai_translation_language: str | None
-    publication_time_filter: PublicationTimeFilter
-
-
-class EpisodeInfo(TypedDict):
-    """下载期条目信息：不可变 listing 快照与可调整的实际路径。"""
-
-    listing: ResolvedItem
-    path: Path  # 初始等于 listing.planned_path，下载时可能因去重而调整
-
-
-class EpisodeData(TypedDict):
-    """剧集数据 = canonical listing + 下载期路径 + 下载所需的资源数据。"""
-
-    info: EpisodeInfo
-    videos: list[VideoUrlMeta]
-    audios: list[AudioUrlMeta]
-    subtitles: list[MultiLangSubtitle]
-    metadata: MetaData | None
-    danmaku: DanmakuData
-    cover_data: bytes | None
-    chapter_info_data: list[ChapterInfoData]
-
-
-class ResolvableEpisode(NamedTuple):
-    """listing 阶段产出的条目：info 立即可用，data 在下载前按需创建并解析"""
-
-    info: EpisodeInfo
-    resolve_data: Callable[[], Coroutine[Any, Any, EpisodeData | None]]
-
-
 class FavouriteMetaData(TypedDict):
     fid: FId
     title: str
@@ -268,8 +196,8 @@ class FavouriteVideoData(TypedDict):
     """收藏夹条目的元数据，含完整视频标题与分 p 数量"""
 
     avid: AvId
-    title: str  # B 站返回的视频标题（人工填写）
-    page: int  # 视频分 p 数量
+    title: str
+    page: int
 
 
 class UserInfo(TypedDict):

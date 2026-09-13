@@ -1,39 +1,46 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
-import copy
-import os
-import re
-import shlex
 import sys
 from typing import TYPE_CHECKING
 
-from yutto.api.user_info import validate_user_info
-from yutto.cli.cli import cli, handle_default_subcommand
+from yutto.auth import validate_user_info
+from yutto.cli.auth import run_auth
+from yutto.cli.bootstrap import load_cli_settings, parse_bootstrap_args
+from yutto.cli.command import (
+    download_layer_from_namespace,
+    resolve_auth_command,
+    resolve_download_command,
+    resolve_download_runtime_options,
+    resolve_serve_command,
+)
+from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
-from yutto.cli.request_adapter import download_request_from_namespace
+from yutto.cli.input import expand_download_layers
+from yutto.cli.parser import build_parser
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, YuttoBaseException
-from yutto.input_parser import file_scheme_parser
-from yutto.login import run_auth
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
 from yutto.validator import (
-    hydrate_auth,
-    initial_validation,
+    configure_cli,
+    resolve_credentials,
     validate_basic_arguments,
+    validate_download_request,
 )
 
 if TYPE_CHECKING:
-    import argparse
-
     from yutto.auth import AuthInfo
     from yutto.core.execution import ExecutionScope
     from yutto.core.request import DownloadRequest
+
+
+cli = build_parser
 
 
 class _CliAuthAnnouncer:
@@ -53,55 +60,78 @@ class _CliAuthAnnouncer:
         await announce_cli_auth(scope, request)
 
 
-def main():
+def main() -> None:
+    raw_argv = sys.argv[1:]
+    try:
+        settings = load_cli_settings(parse_bootstrap_args(raw_argv))
+    except (OSError, ValueError) as error:
+        Logger.error(str(error))
+        sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
+
     parser = cli()
     renderer = CliApplicationEventRenderer()
     with bind_download_report_sink(renderer.report):
-        args = parser.parse_args(handle_default_subcommand(sys.argv[1:]))
+        args = parser.parse_args(normalize_argv(raw_argv))
+
     match args.command:
         case "download":
-            renderer.progress_enabled = not args.no_progress and sys.stdout.isatty()
-            with bind_download_report_sink(renderer.report):
-                try:
-                    initial_validation(args)
-                    FFmpeg.setup_ffmpeg_path(args.ffmpeg_path)
-                    args_list = flatten_args(args, parser)
-                    auth_list = [hydrate_auth(item) for item in args_list]
-                    requests = [download_request_from_namespace(item) for item in args_list]
+            try:
+                runtime = resolve_download_runtime_options(args, settings)
+                renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
+
+                with bind_download_report_sink(renderer.report):
+                    configure_cli(runtime)
+                    FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
+                    ffmpeg = FFmpeg()
+                    outer_layer = download_layer_from_namespace(args)
+                    outer_command = resolve_download_command(outer_layer, settings)
+                    validate_download_request(outer_command.request, ffmpeg)
+
+                    layers = expand_download_layers(outer_layer, parser, settings)
+                    commands = [resolve_download_command(layer, settings) for layer in layers]
+                    for command in commands:
+                        validate_download_request(command.request, ffmpeg)
+
+                    auth_list = [resolve_credentials(command.credentials) for command in commands]
+                    requests = [command.request for command in commands]
                     credentials_by_request = {
                         id(request): auth for request, auth in zip(requests, auth_list, strict=True)
                     }
 
-                    def resolve_credentials(request: DownloadRequest) -> AuthInfo | None:
+                    def resolve_request_credentials(request: DownloadRequest) -> AuthInfo | None:
                         return credentials_by_request[id(request)]
 
                     scope_factory = RequestExecutionScopeFactory(
-                        resolve_credentials,
+                        resolve_request_credentials,
                         on_open=_CliAuthAnnouncer(),
                     )
-                    run_download(scope_factory, requests, renderer, jobs=args.jobs)
-                except YuttoBaseException as e:
-                    Logger.error(e.message)
-                    sys.exit(e.code.value)
-                except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
-                    Logger.info("已终止下载，再次运行即可继续下载～")
-                    sys.exit(ErrorCode.PAUSED_DOWNLOAD.value)
+                    run_download(scope_factory, requests, renderer, jobs=runtime.jobs)
+            except YuttoBaseException as error:
+                Logger.error(error.message)
+                sys.exit(error.code.value)
+            except ValueError as error:
+                Logger.error(str(error))
+                sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
+            except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
+                Logger.info("已终止下载，再次运行即可继续下载～")
+                sys.exit(ErrorCode.PAUSED_DOWNLOAD.value)
+
         case "auth":
-            run_auth(args)
+            run_auth(resolve_auth_command(args, settings))
 
         case "serve":
             from yutto.server.command import run_server_command
 
             try:
                 with bind_download_report_sink(renderer.report):
-                    run_server_command(args)
+                    run_server_command(resolve_serve_command(args, settings))
             except KeyboardInterrupt:
                 Logger.info("yutto server 已停止")
-            except YuttoBaseException as e:
-                Logger.error(e.message)
-                sys.exit(e.code.value)
-            except (OSError, ValueError) as e:
-                Logger.error(str(e))
+            except YuttoBaseException as error:
+                Logger.error(error.message)
+                sys.exit(error.code.value)
+            except (OSError, ValueError) as error:
+                Logger.error(str(error))
                 sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
         case _:
@@ -115,7 +145,7 @@ async def run_download(
     renderer: CliApplicationEventRenderer,
     *,
     jobs: int = 1,
-):
+) -> None:
     async with renderer:
         application = YuttoApplication(
             scope_factory,
@@ -139,27 +169,22 @@ async def announce_cli_auth(scope: ExecutionScope, _request: DownloadRequest) ->
 
 
 def flatten_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[argparse.Namespace]:
-    """递归展平列表参数"""
-    args = copy.copy(args)
-    validate_basic_arguments(args)
-    # 查看是否存在于 alias 中
-    alias_map: dict[str, str] = args.aliases if args.aliases is not None else {}
-    if args.url in alias_map:
-        args.url = alias_map[args.url]
+    """Compatibility wrapper for the old Namespace-based task-list API."""
+    from yutto.cli.settings import YuttoSettings
 
-    # 是否为下载列表
-    if re.match(r"file://", args.url) or os.path.isfile(args.url):  # noqa: PTH113
-        args_list: list[argparse.Namespace] = []
-        # TODO: 如果是相对路径，需要相对于当前 list 路径
-        for line in file_scheme_parser(args.url):
-            local_args = parser.parse_args(handle_default_subcommand(shlex.split(line)), args)
-            if local_args.no_inherit:
-                local_args = parser.parse_args(handle_default_subcommand(shlex.split(line)))
-            Logger.debug(f"列表参数: {local_args}")
-            args_list += flatten_args(local_args, parser)
-        return args_list
-    else:
-        return [args]
+    validate_basic_arguments(args)
+    settings = getattr(args, "_settings", YuttoSettings())
+    layers = expand_download_layers(download_layer_from_namespace(args), parser, settings)
+    result: list[argparse.Namespace] = []
+    for layer in layers:
+        namespace = argparse.Namespace(
+            source=layer.source,
+            _settings=settings,
+            _request_overrides=layer.request_overrides,
+            **layer.cli_overrides,
+        )
+        result.append(namespace)
+    return result
 
 
 if __name__ == "__main__":

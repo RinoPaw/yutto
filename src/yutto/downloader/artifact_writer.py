@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import shutil
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from biliass import BlockOptions
@@ -14,9 +15,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from yutto.downloader.downloaded import Downloaded
     from yutto.downloader.planner import DownloadPlan
-    from yutto.types import EpisodeData
     from yutto.utils.danmaku import DanmakuOptions
+    from yutto.utils.metadata import ItemMetaData
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,26 +33,32 @@ class WrittenResource:
 
 
 class ArtifactWriter:
-    """Own resource sidecars and temporary muxing resources."""
+    """Write already-downloaded resources according to a DownloadPlan."""
 
-    def write(self, episode_data: EpisodeData, plan: DownloadPlan) -> Iterator[WrittenResource]:
+    def write(
+        self,
+        metadata: ItemMetaData,
+        plan: DownloadPlan,
+        downloaded: Downloaded,
+    ) -> Iterator[WrittenResource]:
         resources = plan.resources
 
-        if resources.subtitle_languages:
+        if downloaded.subtitles:
             paths = tuple(
                 write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
-                for subtitle in episode_data["subtitles"]
+                for subtitle in downloaded.subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
                 paths=paths,
-                labels=resources.subtitle_languages,
+                labels=tuple(subtitle["lang"] for subtitle in downloaded.subtitles),
             )
 
-        if resources.has_danmaku:
+        danmaku = downloaded.danmaku
+        if danmaku is not None and danmaku["data"]:
             paths = tuple(
                 write_danmaku(
-                    episode_data["danmaku"],
+                    danmaku,
                     plan.paths.output,
                     resources.danmaku_height,
                     resources.danmaku_width,
@@ -60,14 +68,17 @@ class ArtifactWriter:
             yield WrittenResource(
                 kind=ArtifactKind.DANMAKU,
                 paths=paths,
-                labels=(str(resources.danmaku_save_type),),
+                labels=(str(danmaku["save_type"]),),
             )
 
         if resources.has_metadata:
-            metadata = episode_data["metadata"]
-            assert metadata is not None
+            metadata_for_write = (
+                replace(metadata, chapter_info_data=list(downloaded.chapter_info_data))
+                if downloaded.chapter_info_data
+                else metadata
+            )
             path = write_metadata(
-                metadata,
+                metadata_for_write,
                 plan.paths.output,
                 {
                     "premiered": resources.metadata.premiered,
@@ -76,26 +87,20 @@ class ArtifactWriter:
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
-        if resources.has_cover:
-            cover_data = episode_data["cover_data"]
-            assert cover_data is not None
-            plan.paths.cover.write_bytes(cover_data)
-            if resources.save_cover:
-                plan.paths.saved_cover.write_bytes(cover_data)
-                yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
+        if downloaded.cover_path is not None and resources.save_cover:
+            shutil.copyfile(downloaded.cover_path, plan.paths.saved_cover)
+            yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
-        if resources.has_chapter_info:
+        if downloaded.chapter_info_data:
             write_chapter_info(
                 plan.item,
-                episode_data["chapter_info_data"],
+                list(downloaded.chapter_info_data),
                 plan.paths.chapter_info,
             )
 
     def cleanup_temporary(self, plan: DownloadPlan) -> None:
-        if plan.resources.has_chapter_info:
-            plan.paths.chapter_info.unlink(missing_ok=True)
-        if plan.resources.has_cover:
-            plan.paths.cover.unlink(missing_ok=True)
+        plan.paths.chapter_info.unlink(missing_ok=True)
+        plan.paths.cover.unlink(missing_ok=True)
 
 
 def create_danmaku_options(plan: DownloadPlan) -> DanmakuOptions:
