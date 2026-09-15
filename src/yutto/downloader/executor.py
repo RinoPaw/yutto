@@ -14,13 +14,14 @@ from yutto.core.events import (
     SelectedAudioStream,
     SelectedVideoStream,
 )
-from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, emit_download_report
+from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.artifact_writer import ArtifactWriter
 from yutto.downloader.downloaded import Downloaded
 from yutto.downloader.media_muxer import MediaMuxer
+from yutto.downloader.selector import StreamSelection
 from yutto.downloader.transfer import download_files
-from yutto.media.quality import audio_quality_map, video_quality_map
+from yutto.stream_formats import format_manifest_lines
 from yutto.types import MultiLangSubtitle
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
@@ -236,40 +237,11 @@ def emit_streams_selected(manifest: ResourceManifest, plan: DownloadPlan) -> Non
             ),
         )
     )
-    videos = manifest.videos
-    selected_video_index = plan.video.index if plan.video is not None else -1
-    if not videos:
-        emit_download_report("不包含任何视频流")
-    else:
-        emit_download_report(f"共包含以下 {len(videos)} 个视频流：")
-        for index, candidate in enumerate(videos):
-            selected = index == selected_video_index
-            message = "{}{:2} [{:^4}] [{:>4}x{:<4}] <{:^8}> #{}".format(
-                "*" if selected else " ",
-                index,
-                candidate["codec"].upper(),
-                candidate["width"],
-                candidate["height"],
-                video_quality_map[candidate["quality"]]["description"],
-                len(candidate["mirrors"]) + 1,
-            )
-            emit_download_report(message, color=ReportColor.BLUE if selected else None)
-
-    audios = manifest.audios
-    selected_audio_index = plan.audio.index if plan.audio is not None else -1
-    if not audios:
-        emit_download_report("不包含任何音频流")
-    else:
-        emit_download_report(f"共包含以下 {len(audios)} 个音频流：")
-        for index, candidate in enumerate(audios):
-            selected = index == selected_audio_index
-            message = "{}{:2} [{:^4}] <{:^8}>".format(
-                "*" if selected else " ",
-                index,
-                candidate["codec"].upper(),
-                audio_quality_map[candidate["quality"]]["description"],
-            )
-            emit_download_report(
-                message,
-                color=ReportColor.MAGENTA if selected else None,
-            )
+    selection = StreamSelection(
+        video=manifest.videos[plan.video.index] if plan.video is not None else None,
+        audio=manifest.audios[plan.audio.index] if plan.audio is not None else None,
+        video_index=plan.video.index if plan.video is not None else None,
+        audio_index=plan.audio.index if plan.audio is not None else None,
+    )
+    for line in format_manifest_lines(manifest, selection):
+        emit_download_report(line)
