@@ -47,7 +47,7 @@ def build_format_probe_request(request: DownloadRequest) -> DownloadRequest:
 
 def format_manifest_lines(manifest: ResourceManifest) -> tuple[str, ...]:
     """Render the available video/audio streams without exposing signed media URLs."""
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[tuple[str, ...]] = []
     for video in manifest.videos:
         quality = video["quality"]
         quality_info = video_quality_map.get(quality)
@@ -106,7 +106,7 @@ async def run_list_formats(
                     if result.media is None:
                         continue
 
-                    items = tuple(iter_media_items(result.media))
+                    items = tuple(item for _, item in iter_media_items(result.media))
                     for index, item in enumerate(items, start=1):
                         prefix = f"[{index}/{len(items)}] " if len(items) > 1 else ""
                         Logger.print(f"{prefix}{item.metadata.title}")
