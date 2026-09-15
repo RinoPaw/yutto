@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import re
 import tomllib
 from datetime import UTC, datetime
@@ -10,8 +9,21 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
+from yutto.utils.paths import user_config_home
+
 if TYPE_CHECKING:
-    from argparse import Namespace
+    from typing import Protocol
+
+    class AuthOptions(Protocol):
+        @property
+        def auth(self) -> str: ...
+
+        @property
+        def auth_file(self) -> Path | None: ...
+
+        @property
+        def auth_profile(self) -> str: ...
+
 
 PROFILE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -33,15 +45,6 @@ class AuthFileModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     profiles: dict[str, AuthProfileModel] = Field(default_factory=dict)
-
-
-def xdg_config_home() -> Path:
-    if (env := os.environ.get("XDG_CONFIG_HOME")) and (path := Path(env)).is_absolute():
-        return path
-    home = Path.home()
-    if platform.system() == "Windows":
-        return home / "AppData" / "Roaming"
-    return home / ".config"
 
 
 def parse_auth_inline(auth: str) -> AuthInfo | None:
@@ -67,12 +70,12 @@ def format_auth_inline(sessdata: str, bili_jct: str | None = None) -> str:
 
 
 def default_auth_file() -> Path:
-    return xdg_config_home() / "yutto" / "auth.toml"
+    return user_config_home() / "yutto" / "auth.toml"
 
 
-def resolve_auth_file(args: Namespace) -> Path:
-    if args.auth_file is not None:
-        return args.auth_file
+def resolve_auth_file(options: AuthOptions) -> Path:
+    if options.auth_file is not None:
+        return options.auth_file
     return default_auth_file()
 
 
@@ -91,15 +94,15 @@ def load_auth_file(auth_file: Path) -> AuthFileModel | None:
         return None
 
 
-def resolve_auth(args: Namespace) -> AuthInfo | None:
-    if args.auth:
-        parsed_auth = parse_auth_inline(args.auth)
+def resolve_auth(options: AuthOptions) -> AuthInfo | None:
+    if options.auth:
+        parsed_auth = parse_auth_inline(options.auth)
         if parsed_auth is None:
             raise ValueError('auth 参数格式不正确哦，示例：--auth="SESSDATA=xxxxx; bili_jct=yyyyy"')
         return parsed_auth
 
-    auth_file = resolve_auth_file(args)
-    validate_profile(args.auth_profile)
+    auth_file = resolve_auth_file(options)
+    validate_profile(options.auth_profile)
     if not auth_file.exists():
         return None
 
@@ -107,7 +110,7 @@ def resolve_auth(args: Namespace) -> AuthInfo | None:
     if auth_file_model is None:
         raise ValueError(f"认证信息文件格式无效：{auth_file}")
 
-    entry = auth_file_model.profiles.get(args.auth_profile)
+    entry = auth_file_model.profiles.get(options.auth_profile)
     if entry is None or not entry.sessdata:
         return None
     return AuthInfo(SESSDATA=entry.sessdata, bili_jct=entry.bili_jct or None)
@@ -214,5 +217,4 @@ __all__ = [
     "save_sessdata",
     "validate_profile",
     "write_auth_file",
-    "xdg_config_home",
 ]

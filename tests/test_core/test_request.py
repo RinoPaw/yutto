@@ -1,32 +1,32 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-import yutto.__main__ as main_module
-from yutto.cli.cli import add_download_arguments, cli, handle_default_subcommand
-from yutto.cli.request_adapter import (
-    download_request_from_mapping,
-    download_request_from_namespace,
-    download_request_parser_from_settings,
-)
+from yutto.cli.command import download_layer_from_namespace, resolve_download_command
+from yutto.cli.compat import normalize_argv
+from yutto.cli.input import expand_download_layers
+from yutto.cli.parser import build_parser
+from yutto.cli.request_adapter import download_request_from_mapping, download_request_parser_from_settings
 from yutto.cli.settings import YuttoSettings
 from yutto.core.request import DownloadRequest
 
 pytestmark = pytest.mark.processor
 
 
-def parse_download_args(arguments: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    add_download_arguments(parser, YuttoSettings())
-    return parser.parse_args(arguments)
+def parse_download_args(arguments: list[str]):
+    return build_parser().parse_args(normalize_argv(arguments))
+
+
+def request_from_args(arguments: list[str]) -> DownloadRequest:
+    args = parse_download_args(arguments)
+    return resolve_download_command(download_layer_from_namespace(args), YuttoSettings()).request
 
 
 def test_default_namespace_maps_to_grouped_core_request():
-    request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD"]))
+    request = request_from_args(["BV1xx411c7mD"])
 
     assert request.source.url == "BV1xx411c7mD"
     assert request.access.auth_profile == "default"
@@ -46,12 +46,12 @@ def test_selection_is_explicit_without_batch():
     assert args.selection_expr == "1~-1"
     assert not hasattr(args, "episodes")
 
-    request = download_request_from_namespace(args)
+    request = resolve_download_command(download_layer_from_namespace(args), YuttoSettings()).request
     assert request.selection.expression == "1~-1"
 
 
 def test_legacy_batch_without_selection_normalizes_to_full_selection():
-    request = download_request_from_namespace(parse_download_args(["BV1xx411c7mD", "-b"]))
+    request = request_from_args(["BV1xx411c7mD", "-b"])
 
     assert request.selection.expression == "~"
     assert request.batch is False
@@ -59,91 +59,89 @@ def test_legacy_batch_without_selection_normalizes_to_full_selection():
 
 
 def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
-    request = download_request_from_namespace(
-        parse_download_args(
-            [
-                "BV1xx411c7mD",
-                "--auth",
-                "SESSDATA=token; bili_jct=csrf",
-                "--auth-file",
-                str(tmp_path / "auth.toml"),
-                "--auth-profile",
-                "secondary",
-                "--login-strict",
-                "--vip-strict",
-                "--batch",
-                "--episodes",
-                "2,4~6",
-                "--with-extra-episodes",
-                "--skip-preview",
-                "--batch-filter-start-time",
-                "2026-01-01",
-                "--batch-filter-end-time",
-                "2026-02-01",
-                "--video-only",
-                "--no-danmaku",
-                "--no-subtitle",
-                "--with-metadata",
-                "--no-cover",
-                "--no-chapter-info",
-                "--ai-translation-language",
-                "en",
-                "--video-quality",
-                "80",
-                "--audio-quality",
-                "30232",
-                "--vcodec",
-                "hevc:h264",
-                "--acodec",
-                "flac:aac",
-                "--download-vcodec-priority",
-                "hevc,avc,av1",
-                "--dir",
-                str(tmp_path / "output"),
-                "--tmp-dir",
-                str(tmp_path / "temporary"),
-                "--output-format",
-                "mkv",
-                "--output-format-audio-only",
-                "flac",
-                "--overwrite",
-                "--subpath-template",
-                "{title}/{name}",
-                "--metadata-format-premiered",
-                "%Y",
-                "--proxy",
-                "no",
-                "--fetch-workers",
-                "3",
-                "--num-workers",
-                "4",
-                "--block-size",
-                "1.25",
-                "--download-interval",
-                "5",
-                "--banned-mirrors-pattern",
-                "example\\.com",
-                "--danmaku-format",
-                "protobuf",
-                "--danmaku-font-size",
-                "36",
-                "--danmaku-font",
-                "Sans",
-                "--danmaku-opacity",
-                "0.5",
-                "--danmaku-display-region-ratio",
-                "0.75",
-                "--danmaku-speed",
-                "1.5",
-                "--danmaku-block-fixed",
-                "--danmaku-block-scroll",
-                "--danmaku-block-reverse",
-                "--danmaku-block-special",
-                "--danmaku-block-colorful",
-                "--danmaku-block-keyword-patterns",
-                "spoiler,广告",
-            ]
-        )
+    request = request_from_args(
+        [
+            "BV1xx411c7mD",
+            "--auth",
+            "SESSDATA=token; bili_jct=csrf",
+            "--auth-file",
+            str(tmp_path / "auth.toml"),
+            "--auth-profile",
+            "secondary",
+            "--login-strict",
+            "--vip-strict",
+            "--batch",
+            "--episodes",
+            "2,4~6",
+            "--with-extra-episodes",
+            "--skip-preview",
+            "--batch-filter-start-time",
+            "2026-01-01",
+            "--batch-filter-end-time",
+            "2026-02-01",
+            "--video-only",
+            "--no-danmaku",
+            "--no-subtitle",
+            "--with-metadata",
+            "--no-cover",
+            "--no-chapter-info",
+            "--ai-translation-language",
+            "en",
+            "--video-quality",
+            "80",
+            "--audio-quality",
+            "30232",
+            "--vcodec",
+            "hevc:h264",
+            "--acodec",
+            "flac:aac",
+            "--download-vcodec-priority",
+            "hevc,avc,av1",
+            "--dir",
+            str(tmp_path / "output"),
+            "--tmp-dir",
+            str(tmp_path / "temporary"),
+            "--output-format",
+            "mkv",
+            "--output-format-audio-only",
+            "flac",
+            "--overwrite",
+            "--subpath-template",
+            "{title}/{name}",
+            "--metadata-format-premiered",
+            "%Y",
+            "--proxy",
+            "no",
+            "--fetch-workers",
+            "3",
+            "--num-workers",
+            "4",
+            "--block-size",
+            "1.25",
+            "--download-interval",
+            "5",
+            "--banned-mirrors-pattern",
+            "example\\.com",
+            "--danmaku-format",
+            "protobuf",
+            "--danmaku-font-size",
+            "36",
+            "--danmaku-font",
+            "Sans",
+            "--danmaku-opacity",
+            "0.5",
+            "--danmaku-display-region-ratio",
+            "0.75",
+            "--danmaku-speed",
+            "1.5",
+            "--danmaku-block-fixed",
+            "--danmaku-block-scroll",
+            "--danmaku-block-reverse",
+            "--danmaku-block-special",
+            "--danmaku-block-colorful",
+            "--danmaku-block-keyword-patterns",
+            "spoiler,广告",
+        ]
     )
 
     assert request.source.model_dump() == {"url": "BV1xx411c7mD"}
@@ -215,22 +213,20 @@ def test_namespace_adapter_preserves_download_semantics(tmp_path: Path):
 
 
 def test_cli_and_secret_options_do_not_cross_core_boundary(tmp_path: Path):
-    request = download_request_from_namespace(
-        parse_download_args(
-            [
-                "BV1xx411c7mD",
-                "--auth",
-                "SESSDATA=secret; bili_jct=secret",
-                "--auth-file",
-                str(tmp_path / "auth.toml"),
-                "--sessdata",
-                "legacy-secret",
-                "--no-color",
-                "--no-progress",
-                "--debug",
-                "--no-inherit",
-            ]
-        )
+    request = request_from_args(
+        [
+            "BV1xx411c7mD",
+            "--auth",
+            "SESSDATA=secret; bili_jct=secret",
+            "--auth-file",
+            str(tmp_path / "auth.toml"),
+            "--sessdata",
+            "legacy-secret",
+            "--no-color",
+            "--no-progress",
+            "--debug",
+            "--no-inherit",
+        ]
     )
 
     payload: dict[str, Any] = request.model_dump()
@@ -254,18 +250,11 @@ def test_adapter_rejects_unvalidated_codec_pair():
     args.vcodec = "avc"
 
     with pytest.raises(ValueError, match="vcodec must contain exactly one"):
-        download_request_from_namespace(args)
+        resolve_download_command(download_layer_from_namespace(args), YuttoSettings())
 
 
 def test_cover_only_request_keeps_existing_save_cover_semantics():
-    request = download_request_from_namespace(
-        parse_download_args(
-            [
-                "BV1xx",
-                "--cover-only",
-            ]
-        )
-    )
+    request = request_from_args(["BV1xx", "--cover-only"])
 
     assert request.resources.cover is True
     assert request.resources.save_cover is True
@@ -344,10 +333,7 @@ def test_rpc_mapping_inherits_local_settings_without_credentials():
     assert "legacy-secret" not in request.model_dump_json()
 
 
-def test_task_list_preserves_per_item_network_and_auth_overrides(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_task_list_preserves_per_item_network_and_auth_overrides(tmp_path: Path):
     task_list = tmp_path / "downloads.txt"
     task_list.write_text(
         "\n".join(
@@ -358,9 +344,10 @@ def test_task_list_preserves_per_item_network_and_auth_overrides(
         ),
         encoding="utf-8",
     )
-    parser = cli()
+    settings = YuttoSettings()
+    parser = build_parser()
     args = parser.parse_args(
-        handle_default_subcommand(
+        normalize_argv(
             [
                 str(task_list),
                 "--proxy",
@@ -374,9 +361,9 @@ def test_task_list_preserves_per_item_network_and_auth_overrides(
             ]
         )
     )
-    monkeypatch.setattr(main_module, "validate_basic_arguments", lambda args: None)
 
-    requests = [download_request_from_namespace(item) for item in main_module.flatten_args(args, parser)]
+    layers = expand_download_layers(download_layer_from_namespace(args), parser, settings)
+    requests = [resolve_download_command(layer, settings).request for layer in layers]
 
     assert [
         (

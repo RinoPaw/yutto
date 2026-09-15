@@ -2,98 +2,108 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from yutto.auth import xdg_config_home
-from yutto.media.quality import (
-    AudioQuality,
-    VideoQuality,
-)
+from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.utils.console.logger import Logger
-from yutto.utils.time import TIME_DATE_FMT
+from yutto.utils.paths import user_config_home
 
 
 class YuttoBasicSettings(BaseModel):
-    num_workers: Annotated[int, Field(8, gt=0)]
-    jobs: Annotated[int, Field(1, gt=0)]
-    fetch_workers: Annotated[int, Field(8, gt=0)]
-    video_quality: Annotated[VideoQuality, Field(127)]
-    audio_quality: Annotated[AudioQuality, Field(30251)]
-    vcodec: Annotated[str, Field("avc:copy")]
-    acodec: Annotated[str, Field("mp4a:copy")]
-    download_vcodec_priority: Annotated[list[str] | None, Field(None)]
-    output_format: Annotated[Literal["infer", "mp4", "mkv", "mov"], Field("infer")]
-    output_format_audio_only: Annotated[
-        Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"], Field("infer")
-    ]
-    ai_translation_language: Annotated[str | None, Field(None)]
-    danmaku_format: Annotated[Literal["xml", "ass", "protobuf"], Field("ass")]
-    block_size: Annotated[float, Field(0.5)]
-    overwrite: Annotated[bool, Field(False)]
-    proxy: Annotated[str, Field("auto")]
-    dir: Annotated[str, Field("./")]
-    tmp_dir: Annotated[str | None, Field(None)]
-    sessdata: Annotated[str, Field("")]  # legacy 兼容字段，推荐使用 [auth].auth
-    subpath_template: Annotated[str, Field("{auto}")]
-    aliases: Annotated[dict[str, str], Field(dict[str, str]())]
-    metadata_format_premiered: Annotated[str, Field(TIME_DATE_FMT)]
-    download_interval: Annotated[int, Field(0)]
-    banned_mirrors_pattern: Annotated[str | None, Field(None)]
-    vip_strict: Annotated[bool, Field(False)]
-    login_strict: Annotated[bool, Field(False)]
-    no_color: Annotated[bool, Field(False)]
-    no_progress: Annotated[bool, Field(False)]
-    debug: Annotated[bool, Field(False)]
+    """Persistent configuration overrides for basic download and CLI behavior."""
+
+    num_workers: int | None = Field(default=None, gt=0)
+    jobs: int | None = Field(default=None, gt=0)
+    fetch_workers: int | None = Field(default=None, gt=0)
+    video_quality: VideoQuality | None = None
+    audio_quality: AudioQuality | None = None
+    vcodec: str | None = None
+    acodec: str | None = None
+    download_vcodec_priority: list[str] | None = None
+    output_format: Literal["infer", "mp4", "mkv", "mov"] | None = None
+    output_format_audio_only: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
+    ai_translation_language: str | None = None
+    danmaku_format: Literal["xml", "ass", "protobuf"] | None = None
+    block_size: float | None = None
+    overwrite: bool | None = None
+    proxy: str | None = None
+    dir: str | None = None
+    tmp_dir: str | None = None
+    sessdata: str | None = None  # legacy 兼容字段，推荐使用 [auth].auth
+    subpath_template: str | None = None
+    aliases: dict[str, str] | None = None
+    metadata_format_premiered: str | None = None
+    download_interval: int | None = None
+    banned_mirrors_pattern: str | None = None
+    vip_strict: bool | None = None
+    login_strict: bool | None = None
+    no_color: bool | None = None
+    no_progress: bool | None = None
+    debug: bool | None = None
 
 
 class YuttoResourceSettings(BaseModel):
-    require_video: Annotated[bool, Field(True)]
-    require_audio: Annotated[bool, Field(True)]
-    require_danmaku: Annotated[bool, Field(True)]
-    require_subtitle: Annotated[bool, Field(True)]
-    require_metadata: Annotated[bool, Field(False)]
-    require_cover: Annotated[bool, Field(True)]
-    require_chapter_info: Annotated[bool, Field(True)]
-    save_cover: Annotated[bool, Field(False)]
+    """Persistent resource-selection overrides."""
+
+    require_video: bool | None = None
+    require_audio: bool | None = None
+    require_danmaku: bool | None = None
+    require_subtitle: bool | None = None
+    require_metadata: bool | None = None
+    require_cover: bool | None = None
+    require_chapter_info: bool | None = None
+    save_cover: bool | None = None
 
 
 class YuttoDanmakuSettings(BaseModel):
-    font_size: Annotated[int | None, Field(None)]
-    font: Annotated[str, Field("SimHei")]
-    opacity: Annotated[float, Field(0.8)]
-    display_region_ratio: Annotated[float, Field(1.0)]
-    speed: Annotated[float, Field(1.0)]
-    block_top: Annotated[bool, Field(False)]
-    block_bottom: Annotated[bool, Field(False)]
-    block_scroll: Annotated[bool, Field(False)]
-    block_reverse: Annotated[bool, Field(False)]
-    block_fixed: Annotated[bool, Field(False)]
-    block_special: Annotated[bool, Field(False)]
-    block_colorful: Annotated[bool, Field(False)]
-    block_keyword_patterns: Annotated[list[str], Field(list[str]())]
+    """Persistent danmaku overrides."""
+
+    font_size: int | None = None
+    font: str | None = None
+    opacity: float | None = None
+    display_region_ratio: float | None = None
+    speed: float | None = None
+    block_top: bool | None = None
+    block_bottom: bool | None = None
+    block_scroll: bool | None = None
+    block_reverse: bool | None = None
+    block_fixed: bool | None = None
+    block_special: bool | None = None
+    block_colorful: bool | None = None
+    block_keyword_patterns: list[str] | None = None
 
 
 class YuttoBatchSettings(BaseModel):
-    with_extra_episodes: Annotated[bool, Field(False)]
-    skip_preview: Annotated[bool, Field(False)]
-    batch_filter_start_time: Annotated[str | None, Field(None)]
-    batch_filter_end_time: Annotated[str | None, Field(None)]
+    """Persistent batch-selection overrides."""
+
+    with_extra_episodes: bool | None = None
+    skip_preview: bool | None = None
+    batch_filter_start_time: str | None = None
+    batch_filter_end_time: str | None = None
 
 
 class YuttoAuthSettings(BaseModel):
-    auth: Annotated[str, Field("")]
-    auth_file: Annotated[str | None, Field(None)]
-    auth_profile: Annotated[str, Field("default")]
+    """Persistent credential-source overrides."""
+
+    auth: str | None = None
+    auth_file: str | None = None
+    auth_profile: str | None = None
 
 
 class YuttoSettings(BaseModel):
-    basic: Annotated[YuttoBasicSettings, Field(YuttoBasicSettings())]
-    resource: Annotated[YuttoResourceSettings, Field(YuttoResourceSettings())]
-    danmaku: Annotated[YuttoDanmakuSettings, Field(YuttoDanmakuSettings())]
-    batch: Annotated[YuttoBatchSettings, Field(YuttoBatchSettings())]
-    auth: Annotated[YuttoAuthSettings, Field(YuttoAuthSettings())]
+    """Values explicitly supplied by persistent configuration.
+
+    Application defaults live in their owning core or frontend models. An empty
+    settings object therefore contributes no overrides.
+    """
+
+    basic: YuttoBasicSettings = Field(default_factory=YuttoBasicSettings)
+    resource: YuttoResourceSettings = Field(default_factory=YuttoResourceSettings)
+    danmaku: YuttoDanmakuSettings = Field(default_factory=YuttoDanmakuSettings)
+    batch: YuttoBatchSettings = Field(default_factory=YuttoBatchSettings)
+    auth: YuttoAuthSettings = Field(default_factory=YuttoAuthSettings)
 
 
 def search_for_settings_file() -> Path | None:
@@ -101,9 +111,9 @@ def search_for_settings_file() -> Path | None:
     # 此时还没有设置 debug，所以 Logger.debug 永远不会输出
     if not settings_file.exists():
         Logger.debug("Settings file not found in current directory.")
-        settings_file = xdg_config_home() / "yutto" / "yutto.toml"
+        settings_file = user_config_home() / "yutto" / "yutto.toml"
     if not settings_file.exists():
-        Logger.debug(f"Settings file not found in XDG_CONFIG_HOME ({settings_file}).")
+        Logger.debug(f"Settings file not found in user config home ({settings_file}).")
         return None
     Logger.debug(f"Settings file found at {settings_file}.")
     return settings_file

@@ -20,7 +20,6 @@ from .credentials import (
     save_sessdata,
     validate_profile,
     write_auth_file,
-    xdg_config_home,
 )
 from .user import USER_INFO_API, get_user_info, parse_user_info, user_info_matches, validate_user_info
 
@@ -52,5 +51,4 @@ __all__ = [
     "validate_profile",
     "validate_user_info",
     "write_auth_file",
-    "xdg_config_home",
 ]
