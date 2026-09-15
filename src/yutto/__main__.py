@@ -16,7 +16,7 @@ from yutto.cli.command import (
 )
 from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
-from yutto.cli.formats import run_list_formats
+from yutto.cli.formats import run_list_formats as run_preview_formats
 from yutto.cli.input import expand_download_layers
 from yutto.cli.parser import build_parser
 from yutto.core.application import YuttoApplication
@@ -69,7 +69,7 @@ def main() -> None:
         case "download":
             try:
                 runtime = resolve_download_runtime_options(args, settings)
-                list_formats = bool(getattr(args, "list_formats", False))
+                preview_formats = bool(getattr(args, "preview_formats", False))
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
@@ -77,14 +77,14 @@ def main() -> None:
                     outer_layer = download_layer_from_namespace(args)
                     outer_command = resolve_download_command(outer_layer, settings)
 
-                    if not list_formats:
+                    if not preview_formats:
                         FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
                         ffmpeg = FFmpeg()
                         validate_download_request(outer_command.request, ffmpeg)
 
                     layers = expand_download_layers(outer_layer, parser, settings)
                     commands = [resolve_download_command(layer, settings) for layer in layers]
-                    if not list_formats:
+                    if not preview_formats:
                         for command in commands:
                             validate_download_request(command.request, ffmpeg)
 
@@ -101,8 +101,8 @@ def main() -> None:
                         resolve_request_credentials,
                         on_open=_CliAuthAnnouncer(),
                     )
-                    if list_formats:
-                        run_list_formats(scope_factory, requests, renderer)
+                    if preview_formats:
+                        run_preview_formats(scope_factory, requests, renderer)
                     else:
                         run_download(scope_factory, requests, renderer, jobs=runtime.jobs)
             except YuttoBaseException as error:
