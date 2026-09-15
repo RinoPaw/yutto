@@ -366,9 +366,7 @@ class BangumiSeasonSource(MediaSource):
         episode_items = indexed_bangumi_episode_items(result, with_extra_episodes=options.with_extra_episodes)
         if options.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-        if options.selection is None:
-            episode_items = episode_items[:1]
-        else:
+        if options.selection is not None:
             indexes = _resolve_selection_indexes(options.selection, len(episode_items))
             episode_items = [episode_items[index - 1] for index in indexes]
 
@@ -436,9 +434,7 @@ class CheeseSeasonSource(MediaSource):
     async def resolve(self, scope: ExecutionScope, options: SourceOptions) -> MediaResolveResult:
         result = await get_cheese_season(scope, self.id)
         episode_items = list(enumerate(result["episodes"], start=1))
-        if options.selection is None:
-            episode_items = episode_items[:1]
-        else:
+        if options.selection is not None:
             indexes = _resolve_selection_indexes(options.selection, len(episode_items))
             episode_items = [episode_items[index - 1] for index in indexes]
 
@@ -540,7 +536,7 @@ class UgcVideoSource(MediaSource):
 def _select_indexed(items: list[T], selection: Selection | None) -> list[tuple[int, T]]:
     indexed_items = list(enumerate(items, start=1))
     if selection is None:
-        return indexed_items[:1]
+        return indexed_items
     indexes = _resolve_selection_indexes(selection, len(indexed_items))
     return [indexed_items[index - 1] for index in indexes]
 

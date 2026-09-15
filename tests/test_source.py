@@ -488,7 +488,7 @@ def test_cheese_episode_selection_targets_season(monkeypatch: pytest.MonkeyPatch
     assert [item.index for item in result.media.items] == [3, 1]
 
 
-def test_bangumi_season_defaults_to_first_episode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bangumi_season_defaults_to_all_episodes(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fetcher_stub(
         monkeypatch,
         {"pgc/view/web/season": _bangumi_season_response("101", "102", "103")},
@@ -497,5 +497,26 @@ def test_bangumi_season_defaults_to_first_episode(monkeypatch: pytest.MonkeyPatc
     result = asyncio.run(BangumiSeasonSource(id=SeasonId("456")).resolve(_SCOPE, _DEFAULT_OPTIONS))
 
     assert isinstance(result.media, BangumiSeason)
-    assert [item.episode_id for item in result.media.items] == [EpisodeId("101")]
-    assert [item.index for item in result.media.items] == [1]
+    assert [item.episode_id for item in result.media.items] == [
+        EpisodeId("101"),
+        EpisodeId("102"),
+        EpisodeId("103"),
+    ]
+    assert [item.index for item in result.media.items] == [1, 2, 3]
+
+
+def test_cheese_season_defaults_to_all_episodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fetcher_stub(
+        monkeypatch,
+        {"pugv/view/web/season": _cheese_season_response("101", "102", "103")},
+    )
+
+    result = asyncio.run(CheeseSeasonSource(id=SeasonId("456")).resolve(_SCOPE, _DEFAULT_OPTIONS))
+
+    assert isinstance(result.media, CheeseSeason)
+    assert [item.episode_id for item in result.media.items] == [
+        EpisodeId("101"),
+        EpisodeId("102"),
+        EpisodeId("103"),
+    ]
+    assert [item.index for item in result.media.items] == [1, 2, 3]
