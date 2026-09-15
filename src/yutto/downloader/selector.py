@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from yutto.exceptions import CryptoError
@@ -14,8 +15,20 @@ from yutto.stream import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from yutto.core.request import DownloadRequest
+    from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
+
+
+@dataclass(frozen=True, slots=True)
+class StreamSelection:
+    """The exact media streams selected from one ResourceManifest."""
+
+    video: VideoUrlMeta | None
+    audio: AudioUrlMeta | None
+    video_index: int | None
+    audio_index: int | None
 
 
 def select_video(
@@ -64,3 +77,28 @@ def select_audio(
             if audio["quality"] == aqn and audio["codec"] == acodec:
                 return audio
     return None
+
+
+def select_streams(resources: ResourceManifest, request: DownloadRequest) -> StreamSelection:
+    """Apply the download request's stream policy to one resolved manifest."""
+    stream = request.stream
+    resource_options = request.resources
+    video_candidate = select_video(
+        resources.videos,
+        stream.video_quality,
+        stream.video_download_codec,
+        stream.video_download_codec_priority,
+    )
+    audio_candidate = select_audio(
+        resources.audios,
+        stream.audio_quality,
+        stream.audio_download_codec,
+    )
+    video = video_candidate if resource_options.video else None
+    audio = audio_candidate if resource_options.audio else None
+    return StreamSelection(
+        video=video,
+        audio=audio,
+        video_index=resources.videos.index(video) if video is not None else None,
+        audio_index=resources.audios.index(audio) if audio is not None else None,
+    )
