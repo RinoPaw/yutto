@@ -36,12 +36,11 @@ def test_download_parser_accepts_preview_formats():
     assert args.preview_formats is True
 
 
-def test_download_parser_keeps_list_formats_as_preview_alias():
-    args = build_parser().parse_args(normalize_argv(["BV1xx411c7mD", "--list-formats"]))
+def test_download_parser_rejects_removed_list_formats_alias():
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(normalize_argv(["BV1xx411c7mD", "--list-formats"]))
 
-    assert args.command == "download"
-    assert args.preview_formats is True
-    assert not hasattr(args, "list_formats")
+    assert exit_info.value.code == 2
 
 
 def test_format_probe_request_fetches_only_stream_resources():
