@@ -175,6 +175,8 @@ async def get_bangumi_playurl(
 ) -> tuple[list[VideoUrlMeta], list[AudioUrlMeta]]:
     resp_json = await get_bangumi_playurl_response(scope, aid, cid)
     video_info = resp_json["result"]["video_info"]
+    if video_info.get("is_drm"):
+        raise UnSupportedTypeError(f"该视频（{aid}, cid: {cid}）使用 DRM 保护，当前暂不支持处理 DRM 媒体")
     if video_info.get("is_preview") == 1:
         emit_download_report(
             f"视频（{aid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
