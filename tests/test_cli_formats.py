@@ -29,11 +29,19 @@ if TYPE_CHECKING:
     from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
-def test_download_parser_accepts_list_formats():
+def test_download_parser_accepts_preview_formats():
+    args = build_parser().parse_args(normalize_argv(["BV1xx411c7mD", "--preview-formats"]))
+
+    assert args.command == "download"
+    assert args.preview_formats is True
+
+
+def test_download_parser_keeps_list_formats_as_preview_alias():
     args = build_parser().parse_args(normalize_argv(["BV1xx411c7mD", "--list-formats"]))
 
     assert args.command == "download"
-    assert args.list_formats is True
+    assert args.preview_formats is True
+    assert not hasattr(args, "list_formats")
 
 
 def test_format_probe_request_fetches_only_stream_resources():
@@ -277,26 +285,26 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
     assert max_active == 2
 
 
-def test_list_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.MonkeyPatch):
+def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.MonkeyPatch):
     captured: list[list[DownloadRequest]] = []
 
-    monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1xx411c7mD", "--list-formats"])
+    monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1xx411c7mD", "--preview-formats"])
     monkeypatch.setattr(main_module, "load_cli_settings", lambda _options: YuttoSettings())
     monkeypatch.setattr(main_module, "resolve_credentials", lambda _options: None)
     monkeypatch.setattr(
         main_module,
-        "run_list_formats",
+        "run_preview_formats",
         lambda _scope_factory, requests, _renderer: captured.append(requests),
     )
     monkeypatch.setattr(
         main_module.FFmpeg,
         "setup_ffmpeg_path",
-        lambda *_args: pytest.fail("--list-formats must not initialize FFmpeg"),
+        lambda *_args: pytest.fail("--preview-formats must not initialize FFmpeg"),
     )
     monkeypatch.setattr(
         main_module,
         "run_download",
-        lambda *_args, **_kwargs: pytest.fail("--list-formats must not enter the download workflow"),
+        lambda *_args, **_kwargs: pytest.fail("--preview-formats must not enter the download workflow"),
     )
 
     main_module.main()
