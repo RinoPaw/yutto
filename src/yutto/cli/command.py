@@ -214,9 +214,7 @@ def resolve_serve_command(args: argparse.Namespace, settings: YuttoSettings) -> 
     configured_auth_file = _optional_path(settings.auth.auth_file)
 
     jobs = int(values.get("jobs", configured_jobs))
-    max_fetch_workers = int(
-        values.get("max_fetch_workers", max(DEFAULT_SERVER_WORKER_LIMIT, configured_fetch_workers))
-    )
+    max_fetch_workers = int(values.get("max_fetch_workers", max(DEFAULT_SERVER_WORKER_LIMIT, configured_fetch_workers)))
     max_download_workers = int(
         values.get("max_download_workers", max(DEFAULT_SERVER_WORKER_LIMIT, configured_download_workers))
     )
