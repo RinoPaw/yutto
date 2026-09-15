@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING
 
 from yutto.core.operation import (
     ReportLevel,
@@ -11,12 +11,12 @@ from yutto.core.operation import (
     emit_download_report,
 )
 from yutto.download_manager import DownloadManager
+from yutto.downloader.selector import select_streams
 from yutto.exceptions import HttpStatusError, NoAccessPermissionError, NotFoundError, UnSupportedTypeError
 from yutto.listing import iter_media_items
 from yutto.media import UgcPage, UgcVideo
-from yutto.media.quality import audio_quality_map, video_quality_map
 from yutto.resource import ResourceManifest, resolve_resource_manifest
-from yutto.utils.console.formatter import get_string_width
+from yutto.stream_formats import FormatSignature, format_manifest_lines, manifest_format_signature
 from yutto.utils.console.logger import Logger
 from yutto.utils.functional import as_sync
 
@@ -26,15 +26,12 @@ if TYPE_CHECKING:
     from yutto.cli.event_renderer import CliApplicationEventRenderer
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.core.request import DownloadRequest
+    from yutto.downloader.selector import StreamSelection
     from yutto.listing import MediaAncestry
     from yutto.media import MediaItem
 
 
 _FORMAT_RESOLUTION_ERRORS = (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError)
-FormatSignature: TypeAlias = tuple[
-    tuple[tuple[int, str, int, int], ...],
-    tuple[tuple[int, str], ...],
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +39,7 @@ class FormatListingEntry:
     index: int
     title: str
     manifest: ResourceManifest
+    selection: StreamSelection | None = None
     parent_key: int | None = None
     parent_title: str | None = None
     page: int | None = None
@@ -68,42 +66,6 @@ def build_format_probe_request(request: DownloadRequest) -> DownloadRequest:
         }
     )
     return request.model_copy(update={"resources": resources})
-
-
-def format_manifest_lines(manifest: ResourceManifest) -> tuple[str, ...]:
-    """Render the available video/audio streams without exposing signed media URLs."""
-    rows: list[tuple[str, ...]] = []
-    for video in manifest.videos:
-        quality = video["quality"]
-        quality_info = video_quality_map.get(quality)
-        description = str(quality_info["description"]) if quality_info is not None else "Unknown"
-        rows.append(
-            (
-                "video",
-                str(quality),
-                video["codec"],
-                f"{video['width']}x{video['height']}",
-                description,
-            )
-        )
-    for audio in manifest.audios:
-        quality = audio["quality"]
-        quality_info = audio_quality_map.get(quality)
-        description = str(quality_info["description"]) if quality_info is not None else "Unknown"
-        rows.append(("audio", str(quality), audio["codec"], "-", description))
-
-    if not rows:
-        return ("没有可用的视频或音频流。",)
-    return _render_table(("TYPE", "QUALITY", "CODEC", "RESOLUTION", "DESCRIPTION"), rows)
-
-
-def manifest_format_signature(manifest: ResourceManifest) -> FormatSignature:
-    """Return a stable stream signature that intentionally ignores signed URLs and mirrors."""
-    videos = tuple(
-        sorted((video["quality"], video["codec"], video["width"], video["height"]) for video in manifest.videos)
-    )
-    audios = tuple(sorted((audio["quality"], audio["codec"]) for audio in manifest.audios))
-    return videos, audios
 
 
 def format_index_ranges(indexes: Sequence[int], *, prefix: str = "") -> str:
@@ -136,13 +98,14 @@ def format_grouped_manifest_lines(
     groups = _group_format_entries(entries)
     if len(entries) == 1 and total_items == 1:
         entry = entries[0]
-        return (entry.title, *format_manifest_lines(entry.manifest))
+        return (entry.title, *format_manifest_lines(entry.manifest, entry.selection))
 
     lines: list[str] = []
     for group_index, group in enumerate(groups, start=1):
         lines.append(f"格式组 {group_index}/{len(groups)}（{len(group.entries)} 个条目）")
         lines.append(_format_group_members(group, total_items))
-        lines.extend(format_manifest_lines(group.manifest))
+        first = group.entries[0]
+        lines.extend(format_manifest_lines(group.manifest, first.selection))
         if group_index != len(groups):
             lines.append("")
     return tuple(lines)
@@ -209,6 +172,7 @@ def _make_listing_entry(
     ancestry: MediaAncestry,
     item: MediaItem,
     manifest: ResourceManifest,
+    selection: StreamSelection,
 ) -> FormatListingEntry:
     parent = ancestry[-1] if ancestry else None
     if isinstance(item, UgcPage) and isinstance(parent, UgcVideo):
@@ -216,26 +180,12 @@ def _make_listing_entry(
             index=index,
             title=item.metadata.title,
             manifest=manifest,
+            selection=selection,
             parent_key=id(parent),
             parent_title=parent.metadata.title,
             page=item.page,
         )
-    return FormatListingEntry(index=index, title=item.metadata.title, manifest=manifest)
-
-
-def _render_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> tuple[str, ...]:
-    all_rows = (headers, *rows)
-    widths = tuple(max(get_string_width(row[index]) for row in all_rows) for index in range(len(headers)))
-    rendered: list[str] = []
-    for row in all_rows:
-        cells: list[str] = []
-        for index, cell in enumerate(row):
-            if index == len(row) - 1:
-                cells.append(cell)
-                continue
-            cells.append(cell + " " * (widths[index] - get_string_width(cell)))
-        rendered.append("  ".join(cells))
-    return tuple(rendered)
+    return FormatListingEntry(index=index, title=item.metadata.title, manifest=manifest, selection=selection)
 
 
 @as_sync
@@ -280,7 +230,8 @@ async def run_list_formats(
                         if isinstance(outcome, BaseException):
                             raise outcome
 
-                        entries.append(_make_listing_entry(index, ancestry, item, outcome))
+                        selection = select_streams(outcome, request)
+                        entries.append(_make_listing_entry(index, ancestry, item, outcome, selection))
                         listed_streams = listed_streams or bool(outcome.videos or outcome.audios)
 
                     for line in format_grouped_manifest_lines(entries, total_items=len(items)):
@@ -289,4 +240,4 @@ async def run_list_formats(
                         Logger.print("")
 
     if listed_streams:
-        Logger.print("选择格式：视频使用 -q/--video-quality 和 --vcodec；音频使用 -aq/--audio-quality 和 --acodec。")
+        Logger.print("* 表示按当前参数实际会选择的流。视频使用 -q/--video-quality 和 --vcodec；音频使用 -aq/--audio-quality 和 --acodec。")
