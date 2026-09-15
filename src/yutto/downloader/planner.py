@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from yutto.downloader.selector import select_audio, select_video
+from yutto.downloader.selector import select_streams
 from yutto.utils.time import TIME_FULL_FMT
 
 if TYPE_CHECKING:
@@ -113,20 +113,9 @@ class DownloadPlanner:
         output = request.output
         network = request.network
         danmaku = request.danmaku
-
-        video_candidate = select_video(
-            resources.videos,
-            stream.video_quality,
-            stream.video_download_codec,
-            stream.video_download_codec_priority,
-        )
-        audio_candidate = select_audio(
-            resources.audios,
-            stream.audio_quality,
-            stream.audio_download_codec,
-        )
-        video_meta = video_candidate if resource_options.video else None
-        audio_meta = audio_candidate if resource_options.audio else None
+        selection = select_streams(resources, request)
+        video_meta = selection.video
+        audio_meta = selection.audio
         suffix = resolve_output_suffix(video_meta, audio_meta, request)
         paths = resolve_paths(
             output.directory,
@@ -147,12 +136,6 @@ class DownloadPlanner:
             else requested_audio_save_codec
         )
 
-        selected_video_index = (
-            resources.videos.index(video_candidate) if video_candidate is not None and resource_options.video else -1
-        )
-        selected_audio_index = (
-            resources.audios.index(audio_candidate) if audio_candidate is not None and resource_options.audio else -1
-        )
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
@@ -161,8 +144,8 @@ class DownloadPlanner:
             has_cover=resources.cover_url is not None,
             has_chapter_info=resources.chapter_info_url is not None,
             save_cover=resource_options.save_cover,
-            danmaku_width=video_candidate["width"] if video_candidate is not None else 1920,
-            danmaku_height=video_candidate["height"] if video_candidate is not None else 1080,
+            danmaku_width=video_meta["width"] if video_meta is not None else 1920,
+            danmaku_height=video_meta["height"] if video_meta is not None else 1080,
             metadata=MetadataPlan(
                 premiered=output.metadata_format_premiered,
                 dateadded=TIME_FULL_FMT,
@@ -185,8 +168,8 @@ class DownloadPlanner:
         return DownloadPlan(
             item=path.name,
             paths=paths,
-            video=freeze_video_stream(video_meta, selected_video_index),
-            audio=freeze_audio_stream(audio_meta, selected_audio_index),
+            video=freeze_video_stream(video_meta, selection.video_index),
+            audio=freeze_audio_stream(audio_meta, selection.audio_index),
             media_requested=resource_options.video or resource_options.audio,
             video_save_codec=video_save_codec,
             audio_save_codec=audio_save_codec,
@@ -247,9 +230,10 @@ def resolve_output_suffix(
     return ".mp4"
 
 
-def freeze_video_stream(video: VideoUrlMeta | None, index: int) -> VideoStream | None:
+def freeze_video_stream(video: VideoUrlMeta | None, index: int | None) -> VideoStream | None:
     if video is None:
         return None
+    assert index is not None
     return VideoStream(
         index=index,
         codec=video["codec"],
@@ -259,9 +243,10 @@ def freeze_video_stream(video: VideoUrlMeta | None, index: int) -> VideoStream |
     )
 
 
-def freeze_audio_stream(audio: AudioUrlMeta | None, index: int) -> AudioStream | None:
+def freeze_audio_stream(audio: AudioUrlMeta | None, index: int | None) -> AudioStream | None:
     if audio is None:
         return None
+    assert index is not None
     return AudioStream(
         index=index,
         codec=audio["codec"],
