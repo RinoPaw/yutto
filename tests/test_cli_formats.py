@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 import yutto.__main__ as main_module
@@ -9,7 +11,9 @@ from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoSettings
 from yutto.core.request import DownloadRequest
 from yutto.resource import ResourceManifest
-from yutto.types import AudioUrlMeta, VideoUrlMeta
+
+if TYPE_CHECKING:
+    from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
 def test_download_parser_accepts_list_formats():
