@@ -21,6 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
         argument_default=argparse.SUPPRESS,
     )
     add_download_arguments(download_parser)
+    download_parser.add_argument(
+        "--list-formats",
+        action="store_true",
+        help="列出可用的视频和音频流后退出，不下载媒体",
+    )
 
     auth_parser = subparsers.add_parser(
         "auth",
