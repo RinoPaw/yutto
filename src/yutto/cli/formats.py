@@ -57,7 +57,7 @@ def format_manifest_lines(manifest: ResourceManifest) -> tuple[str, ...]:
                 "video",
                 str(quality),
                 video["codec"],
-                f'{video["width"]}x{video["height"]}',
+                f"{video['width']}x{video['height']}",
                 description,
             )
         )
@@ -123,7 +123,4 @@ async def run_list_formats(
                         Logger.print("")
 
     if listed_streams:
-        Logger.print(
-            "选择格式：视频使用 -q/--video-quality 和 --vcodec；"
-            "音频使用 -aq/--audio-quality 和 --acodec。"
-        )
+        Logger.print("选择格式：视频使用 -q/--video-quality 和 --vcodec；音频使用 -aq/--audio-quality 和 --acodec。")
