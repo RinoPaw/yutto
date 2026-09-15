@@ -18,6 +18,7 @@ from yutto.cli.formats import (
 from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoSettings
 from yutto.core.request import DownloadRequest
+from yutto.downloader.selector import select_streams
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest
 from yutto.types import AId, CId
@@ -81,6 +82,7 @@ def test_format_manifest_lines_show_quality_codec_and_resolution_without_urls():
 
     rendered = "\n".join(format_manifest_lines(ResourceManifest(videos=(video,), audios=(audio,))))
 
+    assert "SELECT" in rendered
     assert "TYPE" in rendered
     assert "120" in rendered
     assert "hevc" in rendered
@@ -90,6 +92,49 @@ def test_format_manifest_lines_show_quality_codec_and_resolution_without_urls():
     assert "mp4a" in rendered
     assert "320kbps" in rendered
     assert "signed.example" not in rendered
+
+
+def test_format_manifest_lines_mark_exact_download_selection():
+    video_4k: VideoUrlMeta = {
+        "url": "https://signed.example/4k",
+        "mirrors": [],
+        "codec": "hevc",
+        "width": 3840,
+        "height": 2160,
+        "quality": 120,
+    }
+    video_1080p: VideoUrlMeta = {
+        "url": "https://signed.example/1080p",
+        "mirrors": [],
+        "codec": "avc",
+        "width": 1920,
+        "height": 1080,
+        "quality": 80,
+    }
+    audio: AudioUrlMeta = {
+        "url": "https://signed.example/audio",
+        "mirrors": [],
+        "codec": "mp4a",
+        "width": 0,
+        "height": 0,
+        "quality": 30280,
+    }
+    manifest = ResourceManifest(videos=(video_4k, video_1080p), audios=(audio,))
+    request = DownloadRequest.model_validate(
+        {
+            "source": {"url": "BV1xx411c7mD"},
+            "stream": {"video_quality": 80, "video_download_codec": "avc"},
+        }
+    )
+
+    selection = select_streams(manifest, request)
+    rendered = format_manifest_lines(manifest, selection)
+
+    selected_lines = [line for line in rendered if line.startswith("*")]
+    assert len(selected_lines) == 2
+    assert any("video" in line and "80" in line and "avc" in line for line in selected_lines)
+    assert any("audio" in line and "30280" in line and "mp4a" in line for line in selected_lines)
+    assert not any(line.startswith("*") and "120" in line for line in rendered)
 
 
 def test_format_manifest_lines_report_empty_manifest():
