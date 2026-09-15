@@ -22,9 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_download_arguments(download_parser)
     download_parser.add_argument(
+        "--preview-formats",
         "--list-formats",
+        dest="preview_formats",
         action="store_true",
-        help="列出可用的视频和音频流后退出，不下载媒体",
+        help="预览可用的视频和音频流以及当前选择后退出，不下载媒体（--list-formats 为兼容别名）",
     )
 
     auth_parser = subparsers.add_parser(
