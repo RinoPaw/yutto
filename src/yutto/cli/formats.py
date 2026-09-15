@@ -100,10 +100,7 @@ def format_manifest_lines(manifest: ResourceManifest) -> tuple[str, ...]:
 def manifest_format_signature(manifest: ResourceManifest) -> FormatSignature:
     """Return a stable stream signature that intentionally ignores signed URLs and mirrors."""
     videos = tuple(
-        sorted(
-            (video["quality"], video["codec"], video["width"], video["height"])
-            for video in manifest.videos
-        )
+        sorted((video["quality"], video["codec"], video["width"], video["height"]) for video in manifest.videos)
     )
     audios = tuple(sorted((audio["quality"], audio["codec"]) for audio in manifest.audios))
     return videos, audios
