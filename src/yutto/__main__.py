@@ -16,7 +16,7 @@ from yutto.cli.command import (
 )
 from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
-from yutto.cli.formats import run_list_formats as run_preview_formats
+from yutto.cli.formats import run_preview_formats
 from yutto.cli.input import expand_download_layers
 from yutto.cli.parser import build_parser
 from yutto.core.application import YuttoApplication
