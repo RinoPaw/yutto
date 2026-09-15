@@ -52,7 +52,7 @@ class _FormatGroup:
 
 
 def build_format_probe_request(request: DownloadRequest) -> DownloadRequest:
-    """Return a request that resolves only the stream resources needed for format listing."""
+    """Return a request that resolves only the stream resources needed for format preview."""
     resources = request.resources.model_copy(
         update={
             "video": True,
@@ -189,12 +189,12 @@ def _make_listing_entry(
 
 
 @as_sync
-async def run_list_formats(
+async def run_preview_formats(
     scope_factory: ExecutionScopeFactory,
     requests: Sequence[DownloadRequest],
     renderer: CliApplicationEventRenderer,
 ) -> None:
-    """Resolve and display stream formats for CLI requests without downloading media."""
+    """Preview stream formats for CLI requests without downloading media."""
     manager = DownloadManager()
     listed_streams = False
 
