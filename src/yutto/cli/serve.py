@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import argparse
+from typing import TYPE_CHECKING
 
 from yutto.cli.input import path_from_cli
+
+if TYPE_CHECKING:
+    import argparse
 
 
 def add_serve_arguments(parser: argparse.ArgumentParser) -> None:

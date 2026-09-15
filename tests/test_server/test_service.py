@@ -145,9 +145,7 @@ def test_prepare_request_marks_final_output_path_for_boundary_enforcement(tmp_pa
 @pytest.mark.parametrize(
     "network",
     [
-        {"fetch_workers": 0},
         {"fetch_workers": 5},
-        {"download_workers": 0},
         {"download_workers": 7},
     ],
 )

@@ -280,7 +280,7 @@ async def test_server_info_and_exact_origin_allowlist():
             "download.start",
             {
                 "source": {"url": "BV1invalid"},
-                "network": {"fetch_workers": 0},
+                "network": {"fetch_workers": 9},
             },
             "network.fetch_workers must be between 1 and 8",
         ),

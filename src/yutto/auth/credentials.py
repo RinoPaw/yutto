@@ -4,7 +4,6 @@ import os
 import re
 import tomllib
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
@@ -12,6 +11,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 from yutto.utils.paths import user_config_home
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from typing import Protocol
 
     class AuthOptions(Protocol):

@@ -12,12 +12,12 @@ from yutto.stream import audio_codec_priority_default, video_codec_priority_defa
 from yutto.utils.console.colorful import set_no_color
 from yutto.utils.console.logger import Logger, set_logger_debug
 from yutto.utils.fetcher import resolve_proxy
-from yutto.utils.ffmpeg import FFmpeg
 
 if TYPE_CHECKING:
     from yutto.auth import AuthInfo
     from yutto.cli.command import CredentialOptions, DownloadRuntimeOptions
     from yutto.core.request import DownloadRequest
+    from yutto.utils.ffmpeg import FFmpeg
 
 
 def configure_cli(command: DownloadRuntimeOptions) -> None:
