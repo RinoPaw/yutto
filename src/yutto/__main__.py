@@ -16,6 +16,7 @@ from yutto.cli.command import (
 )
 from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
+from yutto.cli.formats import run_list_formats
 from yutto.cli.input import expand_download_layers
 from yutto.cli.parser import build_parser
 from yutto.core.application import YuttoApplication
@@ -68,20 +69,24 @@ def main() -> None:
         case "download":
             try:
                 runtime = resolve_download_runtime_options(args, settings)
+                list_formats = bool(getattr(args, "list_formats", False))
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
                     configure_cli(runtime)
-                    FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
-                    ffmpeg = FFmpeg()
                     outer_layer = download_layer_from_namespace(args)
                     outer_command = resolve_download_command(outer_layer, settings)
-                    validate_download_request(outer_command.request, ffmpeg)
+
+                    if not list_formats:
+                        FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
+                        ffmpeg = FFmpeg()
+                        validate_download_request(outer_command.request, ffmpeg)
 
                     layers = expand_download_layers(outer_layer, parser, settings)
                     commands = [resolve_download_command(layer, settings) for layer in layers]
-                    for command in commands:
-                        validate_download_request(command.request, ffmpeg)
+                    if not list_formats:
+                        for command in commands:
+                            validate_download_request(command.request, ffmpeg)
 
                     auth_list = [resolve_credentials(command.credentials) for command in commands]
                     requests = [command.request for command in commands]
@@ -96,7 +101,10 @@ def main() -> None:
                         resolve_request_credentials,
                         on_open=_CliAuthAnnouncer(),
                     )
-                    run_download(scope_factory, requests, renderer, jobs=runtime.jobs)
+                    if list_formats:
+                        run_list_formats(scope_factory, requests, renderer)
+                    else:
+                        run_download(scope_factory, requests, renderer, jobs=runtime.jobs)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
