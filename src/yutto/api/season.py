@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from yutto.api.common import fetch_payload
+from yutto.exceptions import NotFoundError
 from yutto.types import SeasonId
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -13,32 +13,47 @@ if TYPE_CHECKING:
 
 
 async def get_bangumi_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[str, Any]:
-    return await fetch_payload(
+    payload = await fetch_payload(
         scope,
         f"https://api.bilibili.com/pgc/view/web/season?{urlencode(id.to_dict())}",
         "该番剧",
         str(id),
         "result",
     )
+    if not isinstance(payload.get("episodes"), list):
+        raise NotFoundError(f"无法解析该番剧（{id}），原因：API 响应缺少剧集列表")
+    return payload
 
 
 get_bangumi_season_by_episode = get_bangumi_season
 
 
 async def get_season_id_by_media(scope: ExecutionScope, media_id: MediaId) -> SeasonId:
-    api = f"https://api.bilibili.com/pgc/review/user?{urlencode(media_id.to_dict())}"
-    response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
-    return SeasonId(str(response["result"]["media"]["season_id"]))
+    payload = await fetch_payload(
+        scope,
+        f"https://api.bilibili.com/pgc/review/user?{urlencode(media_id.to_dict())}",
+        "该番剧",
+        str(media_id),
+        "result",
+    )
+    media = payload.get("media")
+    season_id = media.get("season_id") if isinstance(media, dict) else None
+    if season_id is None:
+        raise NotFoundError(f"无法解析该番剧（{media_id}），原因：API 响应缺少 season_id")
+    return SeasonId(str(season_id))
 
 
 async def get_cheese_season(scope: ExecutionScope, id: SeasonId | EpisodeId) -> dict[str, Any]:
-    return await fetch_payload(
+    payload = await fetch_payload(
         scope,
         f"https://api.bilibili.com/pugv/view/web/season?{urlencode(id.to_dict())}",
         "该课程",
         str(id),
         "data",
     )
+    if not isinstance(payload.get("episodes"), list):
+        raise NotFoundError(f"无法解析该课程（{id}），原因：API 响应缺少剧集列表")
+    return payload
 
 
 get_cheese_season_by_episode = get_cheese_season
