@@ -16,8 +16,12 @@ from yutto.exceptions import HttpStatusError, NoAccessPermissionError, NotFoundE
 from yutto.listing import iter_media_items
 from yutto.media import UgcPage, UgcVideo
 from yutto.resource import ResourceManifest, resolve_resource_manifest
-from yutto.stream_formats import FormatSignature, format_manifest_lines, manifest_format_signature
-from yutto.utils.console.logger import Logger
+from yutto.stream_formats import (
+    FormatSignature,
+    emit_manifest_formats,
+    format_manifest_lines,
+    manifest_format_signature,
+)
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
@@ -109,6 +113,29 @@ def format_grouped_manifest_lines(
         if group_index != len(groups):
             lines.append("")
     return tuple(lines)
+
+
+def emit_grouped_manifest_report(
+    entries: Sequence[FormatListingEntry],
+    *,
+    total_items: int,
+) -> None:
+    """Emit grouped preview context and formats through the download report channel."""
+    if not entries:
+        return
+
+    groups = _group_format_entries(entries)
+    if len(entries) == 1 and total_items == 1:
+        entry = entries[0]
+        emit_download_report(entry.title)
+        emit_manifest_formats(entry.manifest, entry.selection)
+        return
+
+    for group_index, group in enumerate(groups, start=1):
+        emit_download_report(f"格式组 {group_index}/{len(groups)}（{len(group.entries)} 个条目）")
+        emit_download_report(_format_group_members(group, total_items))
+        first = group.entries[0]
+        emit_manifest_formats(group.manifest, first.selection)
 
 
 async def resolve_format_manifests(
@@ -213,7 +240,7 @@ async def run_preview_formats(
                     items = tuple(item for _, item in resolved_items)
                     if len(items) > 1:
                         concurrency = min(probe_request.network.fetch_workers, len(items))
-                        Logger.print(f"正在探测 {len(items)} 个条目的可用格式（并发 {concurrency}）…")
+                        emit_download_report(f"正在探测 {len(items)} 个条目的可用格式（并发 {concurrency}）…")
 
                     outcomes = await resolve_format_manifests(scope, items, probe_request)
                     entries: list[FormatListingEntry] = []
@@ -223,9 +250,8 @@ async def run_preview_formats(
                     ):
                         if isinstance(outcome, _FORMAT_RESOLUTION_ERRORS):
                             prefix = f"[{index}/{len(items)}] " if len(items) > 1 else ""
-                            Logger.print(f"{prefix}{item.metadata.title}")
+                            emit_download_report(f"{prefix}{item.metadata.title}")
                             emit_download_report(str(outcome), ReportLevel.ERROR)
-                            Logger.print("")
                             continue
                         if isinstance(outcome, BaseException):
                             raise outcome
@@ -234,10 +260,10 @@ async def run_preview_formats(
                         entries.append(_make_listing_entry(index, ancestry, item, outcome, selection))
                         listed_streams = listed_streams or bool(outcome.videos or outcome.audios)
 
-                    for line in format_grouped_manifest_lines(entries, total_items=len(items)):
-                        Logger.print(line)
-                    if entries:
-                        Logger.print("")
+                    emit_grouped_manifest_report(entries, total_items=len(items))
 
-    if listed_streams:
-        Logger.print("* 表示按当前参数实际会选择的流。视频使用 -q/--video-quality 和 --vcodec；音频使用 -aq/--audio-quality 和 --acodec。")
+            if listed_streams:
+                emit_download_report(
+                    "* 表示按当前参数实际会选择的流。视频使用 -q/--video-quality 和 --vcodec；"
+                    "音频使用 -aq/--audio-quality 和 --acodec。"
+                )
