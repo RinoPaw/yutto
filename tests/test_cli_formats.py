@@ -69,10 +69,10 @@ def test_format_probe_request_fetches_only_stream_resources():
     assert request.resources.cover is True
 
 
-def test_format_manifest_lines_show_quality_codec_and_resolution_without_urls():
+def test_format_manifest_lines_use_legacy_style_without_urls():
     video: VideoUrlMeta = {
         "url": "https://signed.example/video",
-        "mirrors": [],
+        "mirrors": ["https://mirror.example/video"],
         "codec": "hevc",
         "width": 3840,
         "height": 2160,
@@ -89,16 +89,18 @@ def test_format_manifest_lines_show_quality_codec_and_resolution_without_urls():
 
     rendered = "\n".join(format_manifest_lines(ResourceManifest(videos=(video,), audios=(audio,))))
 
-    assert "SELECT" in rendered
-    assert "TYPE" in rendered
-    assert "120" in rendered
-    assert "hevc" in rendered
-    assert "3840x2160" in rendered
+    assert "共包含以下 1 个视频流：" in rendered
+    assert "[HEVC]" in rendered
+    assert "[3840x2160]" in rendered
     assert "4K 超高清" in rendered
-    assert "30280" in rendered
-    assert "mp4a" in rendered
+    assert "#2" in rendered
+    assert "共包含以下 1 个音频流：" in rendered
+    assert "[MP4A]" in rendered
     assert "320kbps" in rendered
+    assert "SELECT" not in rendered
+    assert "TYPE" not in rendered
     assert "signed.example" not in rendered
+    assert "mirror.example" not in rendered
 
 
 def test_format_manifest_lines_mark_exact_download_selection():
@@ -139,13 +141,13 @@ def test_format_manifest_lines_mark_exact_download_selection():
 
     selected_lines = [line for line in rendered if line.startswith("*")]
     assert len(selected_lines) == 2
-    assert any("video" in line and "80" in line and "avc" in line for line in selected_lines)
-    assert any("audio" in line and "30280" in line and "mp4a" in line for line in selected_lines)
-    assert not any(line.startswith("*") and "120" in line for line in rendered)
+    assert any("[AVC " in line and "1920x1080" in line and "1080P" in line for line in selected_lines)
+    assert any("[MP4A]" in line and "320kbps" in line for line in selected_lines)
+    assert not any(line.startswith("*") and "3840x2160" in line for line in rendered)
 
 
-def test_format_manifest_lines_report_empty_manifest():
-    assert format_manifest_lines(ResourceManifest()) == ("没有可用的视频或音频流。",)
+def test_format_manifest_lines_report_empty_manifest_like_legacy_output():
+    assert format_manifest_lines(ResourceManifest()) == ("不包含任何视频流", "不包含任何音频流")
 
 
 def test_format_index_ranges_compacts_contiguous_and_sparse_pages():
@@ -189,7 +191,8 @@ def test_grouped_format_listing_merges_same_formats_even_when_urls_differ():
 
     assert "格式组 1/1（100 个条目）" in rendered
     assert "百P视频: P1-P100" in rendered
-    assert rendered.count("TYPE") == 1
+    assert rendered.count("共包含以下 1 个视频流：") == 1
+    assert rendered.count("共包含以下 1 个音频流：") == 1
     assert "cdn1.example" not in rendered
     assert "cdn100.example" not in rendered
 
@@ -236,7 +239,37 @@ def test_grouped_format_listing_keeps_different_format_sets_separate():
     assert "格式组 2/2（1 个条目）" in rendered
     assert "多P视频: P1" in rendered
     assert "多P视频: P2" in rendered
-    assert rendered.count("TYPE") == 2
+    assert rendered.count("共包含以下 1 个视频流：") == 2
+
+
+def test_grouped_format_listing_separates_different_displayed_mirror_counts():
+    video_one_url: VideoUrlMeta = {
+        "url": "https://signed.example/one",
+        "mirrors": [],
+        "codec": "avc",
+        "width": 1920,
+        "height": 1080,
+        "quality": 80,
+    }
+    video_two_urls: VideoUrlMeta = {
+        "url": "https://signed.example/two",
+        "mirrors": ["https://mirror.example/two"],
+        "codec": "avc",
+        "width": 1920,
+        "height": 1080,
+        "quality": 80,
+    }
+    entries = (
+        FormatListingEntry(index=1, title="P1", manifest=ResourceManifest(videos=(video_one_url,))),
+        FormatListingEntry(index=2, title="P2", manifest=ResourceManifest(videos=(video_two_urls,))),
+    )
+
+    rendered = "\n".join(format_grouped_manifest_lines(entries, total_items=2))
+
+    assert "格式组 1/2（1 个条目）" in rendered
+    assert "格式组 2/2（1 个条目）" in rendered
+    assert "#1" in rendered
+    assert "#2" in rendered
 
 
 def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pytest.MonkeyPatch):
