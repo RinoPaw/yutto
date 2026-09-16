@@ -21,7 +21,7 @@ from yutto.downloader.downloaded import Downloaded
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.selector import StreamSelection
 from yutto.downloader.transfer import download_files
-from yutto.stream_formats import format_manifest_lines
+from yutto.stream_formats import emit_manifest_formats
 from yutto.types import MultiLangSubtitle
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
@@ -243,5 +243,4 @@ def emit_streams_selected(manifest: ResourceManifest, plan: DownloadPlan) -> Non
         video_index=plan.video.index if plan.video is not None else None,
         audio_index=plan.audio.index if plan.audio is not None else None,
     )
-    for line in format_manifest_lines(manifest, selection):
-        emit_download_report(line)
+    emit_manifest_formats(manifest, selection)
