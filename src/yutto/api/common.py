@@ -28,6 +28,8 @@ async def fetch_payload(
     payload = response.get(data_key)
     if payload is None:
         raise NoAccessPermissionError(f"无法解析{description}（{identifier}），原因：{response.get('message')}")
+    if not isinstance(payload, dict):
+        raise NoAccessPermissionError(f"无法解析{description}（{identifier}），原因：API 响应格式异常")
     return payload
 
 
