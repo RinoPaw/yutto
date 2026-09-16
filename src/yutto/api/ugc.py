@@ -136,7 +136,7 @@ async def get_favourite_medias(scope: ExecutionScope, fid: FId) -> list[dict[str
 
 
 async def get_all_favourite_folders(scope: ExecutionScope, mid: MId) -> list[dict[str, Any]]:
-    api = f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={mid.value}"
+    api = f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={mid}"
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
     data = response.get("data") or {}
     return list(data.get("list") or [])
@@ -160,17 +160,14 @@ async def get_series_archives(scope: ExecutionScope, series_id: SeriesId, mid: M
     while True:
         payload = await fetch_payload(
             scope,
-            "https://api.bilibili.com/x/series/archives",
+            (
+                "https://api.bilibili.com/x/series/archives"
+                f"?mid={mid}&series_id={series_id}&only_normal=true"
+                f"&pn={page_num}&ps={page_size}"
+            ),
             "视频系列",
             f"series_id: {series_id}",
             "data",
-            params={
-                "mid": mid.value,
-                "series_id": series_id.value,
-                "only_normal": "true",
-                "pn": page_num,
-                "ps": page_size,
-            },
         )
         page_archives: list[dict[str, Any]] = payload.get("archives") or []
         archives.extend(item for item in page_archives if item.get("bvid"))
@@ -199,7 +196,7 @@ async def get_space_profile_and_archives(
         "UP 主",
         f"mid: {mid}",
         "data",
-        params=encode_wbi({"mid": mid.value}, wbi_img),
+        params=encode_wbi({"mid": mid}, wbi_img),
     )
 
     page_size = 30
@@ -214,7 +211,7 @@ async def get_space_profile_and_archives(
             "data",
             params=encode_wbi(
                 {
-                    "mid": mid.value,
+                    "mid": mid,
                     "ps": page_size,
                     "tid": 0,
                     "pn": page_num,
