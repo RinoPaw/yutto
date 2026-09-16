@@ -5,8 +5,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from yutto.media.codec import AudioCodec, VideoCodec
-from yutto.media.quality import AudioQuality, VideoQuality
+from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
 from yutto.utils.time import TIME_DATE_FMT
 
 
@@ -14,13 +13,13 @@ class _RequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SourceRequestOptions(_RequestModel):
+class SourceSpec(_RequestModel):
     """The source to resolve."""
 
     url: str
 
 
-class AccessRequestOptions(_RequestModel):
+class AccessSpec(_RequestModel):
     """Authentication profile and access checks, without credential material."""
 
     auth_profile: str = "default"
@@ -28,24 +27,17 @@ class AccessRequestOptions(_RequestModel):
     vip_strict: bool = False
 
 
-class ScopeRequestOptions(_RequestModel):
-    """Whether resolution targets one episode or an expanded collection."""
+class SelectionSpec(_RequestModel):
+    """Selection expression and publication-time filters for the current source."""
 
-    batch: bool = False
-    with_extra_episodes: bool = False
-
-
-class SelectionRequestOptions(_RequestModel):
-    """Filters applied while selecting episodes from an expanded scope."""
-
-    episodes: str = "1~-1"
+    expression: str | None = None
     skip_preview: bool = False
     start_time: str | None = None
     end_time: str | None = None
 
 
-class ResourceRequestOptions(_RequestModel):
-    """Resources that should be present in the resulting download."""
+class ResourceSpec(_RequestModel):
+    """Resources to fetch, process, or preserve in the resulting artifact."""
 
     video: bool = True
     audio: bool = True
@@ -75,7 +67,7 @@ class ResourceRequestOptions(_RequestModel):
         return self
 
 
-class StreamRequestOptions(_RequestModel):
+class StreamSpec(_RequestModel):
     """Media stream quality and codec preferences."""
 
     video_quality: VideoQuality = 127
@@ -96,7 +88,7 @@ class StreamRequestOptions(_RequestModel):
         return self
 
 
-class OutputRequestOptions(_RequestModel):
+class OutputSpec(_RequestModel):
     """Output paths, containers, and naming preferences."""
 
     directory: Path = Field(default_factory=Path)
@@ -109,18 +101,18 @@ class OutputRequestOptions(_RequestModel):
     enforce_directory_boundary: bool = Field(default=False, exclude=True)
 
 
-class NetworkRequestOptions(_RequestModel):
+class NetworkSpec(_RequestModel):
     """Network access and transfer concurrency preferences."""
 
     proxy: str = "auto"
-    fetch_workers: int = 8
-    download_workers: int = 8
+    fetch_workers: int = Field(default=8, gt=0)
+    download_workers: int = Field(default=8, gt=0)
     block_size_bytes: int = 512 * 1024
     download_interval: int = 0
     banned_mirrors_pattern: str | None = None
 
 
-class DanmakuRequestOptions(_RequestModel):
+class DanmakuSpec(_RequestModel):
     """Danmaku serialization, rendering, and filtering preferences."""
 
     format: Literal["xml", "ass", "protobuf"] = "ass"
@@ -141,12 +133,13 @@ class DanmakuRequestOptions(_RequestModel):
 class DownloadRequest(_RequestModel):
     """A fully resolved, frontend-independent request to yutto's core."""
 
-    source: SourceRequestOptions
-    access: AccessRequestOptions = Field(default_factory=AccessRequestOptions)
-    scope: ScopeRequestOptions = Field(default_factory=ScopeRequestOptions)
-    selection: SelectionRequestOptions = Field(default_factory=SelectionRequestOptions)
-    resources: ResourceRequestOptions = Field(default_factory=ResourceRequestOptions)
-    stream: StreamRequestOptions = Field(default_factory=StreamRequestOptions)
-    output: OutputRequestOptions = Field(default_factory=OutputRequestOptions)
-    network: NetworkRequestOptions = Field(default_factory=NetworkRequestOptions)
-    danmaku: DanmakuRequestOptions = Field(default_factory=DanmakuRequestOptions)
+    source: SourceSpec
+    access: AccessSpec = Field(default_factory=AccessSpec)
+    batch: bool = Field(default=False, deprecated=True)
+    with_extra_episodes: bool = False
+    selection: SelectionSpec = Field(default_factory=SelectionSpec)
+    resources: ResourceSpec = Field(default_factory=ResourceSpec)
+    stream: StreamSpec = Field(default_factory=StreamSpec)
+    output: OutputSpec = Field(default_factory=OutputSpec)
+    network: NetworkSpec = Field(default_factory=NetworkSpec)
+    danmaku: DanmakuSpec = Field(default_factory=DanmakuSpec)

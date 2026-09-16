@@ -20,12 +20,53 @@ from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Mapping
     from pathlib import Path
+    from typing import Protocol
 
+    from yutto.cli.settings import YuttoSettings
     from yutto.core.events import DownloadEventSink
     from yutto.core.execution import ExecutionScopeFactory
+
+    class ServerCommandOptions(Protocol):
+        @property
+        def request_settings(self) -> YuttoSettings: ...
+
+        @property
+        def ffmpeg_path(self) -> str: ...
+
+        @property
+        def host(self) -> str: ...
+
+        @property
+        def port(self) -> int: ...
+
+        @property
+        def allow_origin(self) -> tuple[str, ...]: ...
+
+        @property
+        def token_file(self) -> Path | None: ...
+
+        @property
+        def download_root(self) -> Path: ...
+
+        @property
+        def tmp_root(self) -> Path | None: ...
+
+        @property
+        def auth_file(self) -> Path | None: ...
+
+        @property
+        def max_fetch_workers(self) -> int: ...
+
+        @property
+        def max_download_workers(self) -> int: ...
+
+        @property
+        def task_limit(self) -> int: ...
+
+        @property
+        def jobs(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,28 +133,32 @@ def _read_server_token(token_file: Path) -> str:
     return token
 
 
-def build_server(args: argparse.Namespace, token: str, *, ffmpeg: FFmpeg | None = None) -> YuttoWebSocketServer:
+def build_server(
+    options: ServerCommandOptions,
+    token: str,
+    *,
+    ffmpeg: FFmpeg | None = None,
+) -> YuttoWebSocketServer:
     ffmpeg = ffmpeg or FFmpeg()
     policy = ServerPolicy(
         ServerPolicyOptions(
-            download_root=args.download_root,
-            tmp_root=args.tmp_root or args.download_root,
-            auth_file=args.auth_file or default_auth_file(),
-            max_fetch_workers=args.max_fetch_workers,
-            max_download_workers=args.max_download_workers,
+            download_root=options.download_root,
+            tmp_root=options.tmp_root or options.download_root,
+            auth_file=options.auth_file or default_auth_file(),
+            max_fetch_workers=options.max_fetch_workers,
+            max_download_workers=options.max_download_workers,
             allowed_video_save_codecs=frozenset([*ffmpeg.video_encodecs, "copy"]),
             allowed_audio_save_codecs=frozenset([*ffmpeg.audio_encodecs, "copy"]),
         )
     )
-    parse_request = download_request_parser_from_settings(args.server_settings)
+    parse_request = download_request_parser_from_settings(options.request_settings)
     default_request = parse_request({"source": {"url": "yutto-server-default-validation"}})
     policy.prepare_request(default_request)
     policy.resolve_credentials(default_request)
     scope_factory = policy.build_scope_factory()
-    # download 与 resolve 两个 runtime 共享同一事件序号空间与全局任务容量，
-    # 维持 v1 契约：`seq` 全局递增可去重、`--task-limit` 是两类任务的总量
+
     event_seq_allocator = monotonic_seq_allocator()
-    task_capacity = TaskCapacityPool(args.task_limit)
+    task_capacity = TaskCapacityPool(options.task_limit)
     path_leases = DownloadPathLeasePool()
 
     def build_download_application(
@@ -125,15 +170,15 @@ def build_server(args: argparse.Namespace, token: str, *, ffmpeg: FFmpeg | None 
     task_service = DownloadTaskService(
         scope_factory,
         build_download_application,
-        task_limit=args.task_limit,
-        worker_count=args.jobs,
+        task_limit=options.task_limit,
+        worker_count=options.jobs,
         seq_allocator=event_seq_allocator,
         capacity_pool=task_capacity,
     )
     resolve_service = ResolveTaskService(
         scope_factory,
         build_download_application,
-        task_limit=args.task_limit,
+        task_limit=options.task_limit,
         seq_allocator=event_seq_allocator,
         capacity_pool=task_capacity,
     )
@@ -141,9 +186,9 @@ def build_server(args: argparse.Namespace, token: str, *, ffmpeg: FFmpeg | None 
         task_service,
         WebSocketServerOptions(
             token=token,
-            host=args.host,
-            port=args.port,
-            allowed_origins=tuple(args.allow_origin),
+            host=options.host,
+            port=options.port,
+            allowed_origins=options.allow_origin,
         ),
         prepare_request=policy.prepare_request,
         parse_request=parse_request,
@@ -167,11 +212,11 @@ def _build_download_application(
 
 
 @as_sync
-async def run_server_command(args: argparse.Namespace) -> None:
-    FFmpeg.setup_ffmpeg_path(args.ffmpeg_path)
+async def run_server_command(options: ServerCommandOptions) -> None:
+    FFmpeg.setup_ffmpeg_path(options.ffmpeg_path)
     ffmpeg = FFmpeg()
-    token = resolve_server_token(args.token_file)
-    server = build_server(args, token.value, ffmpeg=ffmpeg)
+    token = resolve_server_token(options.token_file)
+    server = build_server(options, token.value, ffmpeg=ffmpeg)
     await server.start()
     for socket in server.sockets:
         address = socket.getsockname()

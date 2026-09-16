@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 import yutto.__main__ as main_module
 import yutto.cli.event_renderer as renderer_module
-import yutto.validator as validator_module
-from yutto.cli.cli import (
-    add_auth_logout_arguments,
-    add_auth_status_arguments,
-    add_download_arguments,
-    add_login_arguments,
-    cli,
-    handle_default_subcommand,
+from yutto.cli.command import (
+    download_layer_from_namespace,
+    resolve_download_command,
+    resolve_download_runtime_options,
 )
+from yutto.cli.compat import normalize_argv
+from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoSettings
 from yutto.core.events import DownloadProgress, DownloadStage, DownloadStageChanged
 from yutto.core.execution import RequestExecutionScopeFactory
@@ -26,44 +25,19 @@ from yutto.core.operation import (
     bind_download_report_sink,
     emit_download_report,
 )
-from yutto.exceptions import ErrorCode
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def make_settings() -> YuttoSettings:
-    return YuttoSettings.model_validate({})
-
-
-def make_download_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    add_download_arguments(parser, make_settings())
-    return parser
-
-
-def make_login_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    add_login_arguments(parser, make_settings())
-    return parser
-
-
-def make_auth_status_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    add_auth_status_arguments(parser, make_settings())
-    return parser
-
-
-def make_auth_logout_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    add_auth_logout_arguments(parser, make_settings())
-    return parser
+def _parse(arguments: list[str]):
+    return build_parser().parse_args(normalize_argv(arguments))
 
 
 def test_download_parser_accepts_auth_file(tmp_path: Path):
     auth_file = tmp_path / "auth.toml"
 
-    args = make_download_parser().parse_args(["https://example.com", "--auth-file", str(auth_file)])
+    args = _parse(["https://example.com", "--auth-file", str(auth_file)])
 
     assert args.auth_file == auth_file
 
@@ -72,30 +46,38 @@ def test_download_parser_rejects_auth_config(tmp_path: Path):
     auth_file = tmp_path / "auth.toml"
 
     with pytest.raises(SystemExit) as exc_info:
-        make_download_parser().parse_args(["https://example.com", "--auth-config", str(auth_file)])
+        _parse(["https://example.com", "--auth-config", str(auth_file)])
 
     assert exc_info.value.code == 2
 
 
-def test_download_parser_accepts_ffmpeg_path():
-    parser = make_download_parser()
+def test_download_parser_emits_no_runtime_defaults():
+    args = _parse(["https://example.com"])
 
-    assert parser.parse_args(["https://example.com"]).ffmpeg_path == "ffmpeg"
-    assert (
-        parser.parse_args(["https://example.com", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"]).ffmpeg_path
-        == "/opt/ffmpeg/ffmpeg"
-    )
+    assert not hasattr(args, "ffmpeg_path")
+    assert not hasattr(args, "jobs")
+
+    runtime = resolve_download_runtime_options(args, YuttoSettings())
+    assert runtime.ffmpeg_path == "ffmpeg"
+    assert runtime.jobs == 1
+
+
+def test_download_runtime_accepts_ffmpeg_path_override():
+    args = _parse(["https://example.com", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
+
+    runtime = resolve_download_runtime_options(args, YuttoSettings())
+
+    assert runtime.ffmpeg_path == "/opt/ffmpeg/ffmpeg"
 
 
 def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.MonkeyPatch):
     recorded: list[str] = []
-    args = argparse.Namespace(
+    args = SimpleNamespace(
         command="download",
-        no_progress=True,
-        no_color=False,
-        debug=False,
+        source="BV1xx411c7mD",
         ffmpeg_path="/opt/ffmpeg/ffmpeg",
     )
+    parser = SimpleNamespace(parse_args=lambda _args: args)
 
     class RecordingFFmpeg:
         @classmethod
@@ -103,9 +85,9 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
             recorded.append(ffmpeg_path)
             raise RuntimeError("stop after recording")
 
-    monkeypatch.setattr(main_module, "cli", lambda: argparse.ArgumentParser())
+    monkeypatch.setattr(main_module, "build_parser", lambda: parser)
+    monkeypatch.setattr(main_module, "load_cli_settings", lambda _options: YuttoSettings())
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "download"])
-    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", lambda *_args: args)
     monkeypatch.setattr(main_module, "FFmpeg", RecordingFFmpeg)
 
     with pytest.raises(RuntimeError, match="stop after recording"):
@@ -114,102 +96,44 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
     assert recorded == ["/opt/ffmpeg/ffmpeg"]
 
 
-def test_download_validation_rejects_non_positive_num_workers(monkeypatch: pytest.MonkeyPatch):
-    args = make_download_parser().parse_args(["https://example.com", "--num-workers", "0"])
-    errors: list[str] = []
-    monkeypatch.setattr(validator_module, "FFmpeg", lambda: object())
-    monkeypatch.setattr(validator_module.Logger, "error", errors.append)
+def test_download_request_rejects_non_positive_num_workers():
+    args = _parse(["https://example.com", "--num-workers", "0"])
 
-    with pytest.raises(SystemExit) as exc_info:
-        validator_module.validate_basic_arguments(args)
-
-    assert exc_info.value.code == ErrorCode.WRONG_ARGUMENT_ERROR.value
-    assert errors == ["num_workers 参数值（0）不满足要求哦（应为不小于 1 的整数）"]
+    with pytest.raises(ValidationError):
+        resolve_download_command(download_layer_from_namespace(args), YuttoSettings())
 
 
-def test_download_jobs_default_to_one_and_reject_non_positive_values(monkeypatch: pytest.MonkeyPatch):
-    parser = make_download_parser()
-    assert parser.parse_args(["https://example.com"]).jobs == 1
-    args = parser.parse_args(["https://example.com", "--jobs", "0"])
-    errors: list[str] = []
-    monkeypatch.setattr(validator_module, "FFmpeg", lambda: object())
-    monkeypatch.setattr(validator_module.Logger, "error", errors.append)
+def test_download_runtime_rejects_non_positive_jobs():
+    args = _parse(["https://example.com", "--jobs", "0"])
 
-    with pytest.raises(SystemExit) as exc_info:
-        validator_module.validate_basic_arguments(args)
-
-    assert exc_info.value.code == ErrorCode.WRONG_ARGUMENT_ERROR.value
-    assert errors == ["jobs 参数值（0）不满足要求哦（应为不小于 1 的整数）"]
+    with pytest.raises(ValueError, match="jobs"):
+        resolve_download_runtime_options(args, YuttoSettings())
 
 
-def test_login_parser_accepts_auth_file(tmp_path: Path):
+def test_auth_commands_accept_auth_file(tmp_path: Path):
     auth_file = tmp_path / "auth.toml"
 
-    args = make_login_parser().parse_args(["--auth-file", str(auth_file)])
+    for command in ("login", "status", "logout"):
+        args = build_parser().parse_args(["auth", command, "--auth-file", str(auth_file)])
+        assert args.command == "auth"
+        assert args.auth_command == command
+        assert args.auth_file == auth_file
 
-    assert args.auth_file == auth_file
 
-
-def test_login_parser_rejects_auth_config(tmp_path: Path):
+def test_auth_login_rejects_auth_config(tmp_path: Path):
     auth_file = tmp_path / "auth.toml"
 
     with pytest.raises(SystemExit) as exc_info:
-        make_login_parser().parse_args(["--auth-config", str(auth_file)])
+        build_parser().parse_args(["auth", "login", "--auth-config", str(auth_file)])
 
     assert exc_info.value.code == 2
 
 
-def test_auth_status_parser_accepts_auth_file(tmp_path: Path):
-    auth_file = tmp_path / "auth.toml"
-
-    args = make_auth_status_parser().parse_args(["--auth-file", str(auth_file)])
-
-    assert args.auth_file == auth_file
-
-
-def test_auth_logout_parser_accepts_auth_file(tmp_path: Path):
-    auth_file = tmp_path / "auth.toml"
-
-    args = make_auth_logout_parser().parse_args(["--auth-file", str(auth_file)])
-
-    assert args.auth_file == auth_file
-
-
-def test_root_parser_accepts_auth_login(tmp_path: Path):
-    auth_file = tmp_path / "auth.toml"
-
-    args = cli().parse_args(["auth", "login", "--auth-file", str(auth_file)])
+def test_legacy_top_level_login_is_rewritten_to_auth():
+    args = build_parser().parse_args(normalize_argv(["login"]))
 
     assert args.command == "auth"
     assert args.auth_command == "login"
-    assert args.auth_file == auth_file
-
-
-def test_root_parser_accepts_auth_status(tmp_path: Path):
-    auth_file = tmp_path / "auth.toml"
-
-    args = cli().parse_args(["auth", "status", "--auth-file", str(auth_file)])
-
-    assert args.command == "auth"
-    assert args.auth_command == "status"
-    assert args.auth_file == auth_file
-
-
-def test_root_parser_accepts_auth_logout(tmp_path: Path):
-    auth_file = tmp_path / "auth.toml"
-
-    args = cli().parse_args(["auth", "logout", "--auth-file", str(auth_file)])
-
-    assert args.command == "auth"
-    assert args.auth_command == "logout"
-    assert args.auth_file == auth_file
-
-
-def test_root_parser_rejects_removed_top_level_login():
-    with pytest.raises(SystemExit) as exc_info:
-        cli().parse_args(handle_default_subcommand(["login"]))
-
-    assert exc_info.value.code == 2
 
 
 def test_progress_renderer_respects_no_progress(monkeypatch: pytest.MonkeyPatch):

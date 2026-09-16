@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from yutto.utils.fetcher import (
     DEFAULT_FETCH_WORKERS,
@@ -12,13 +12,12 @@ from yutto.utils.fetcher import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from contextlib import AbstractAsyncContextManager
 
     from yutto._native import YuttoSession
     from yutto.auth import AuthInfo
     from yutto.core.request import DownloadRequest
-    from yutto.types import UserInfo
 
 
 class ExecutionScope:
@@ -27,10 +26,8 @@ class ExecutionScope:
     session: YuttoSession
     fetch_limiter: asyncio.Semaphore
     download_workers: int
-    user_info_cache: UserInfo | None
-    user_info_lock: asyncio.Lock
-    wbi_img_cache: Mapping[str, str] | None
-    wbi_img_lock: asyncio.Lock
+    nav_cache: dict[str, Any] | None
+    nav_lock: asyncio.Lock
     touched_urls: set[str]
 
     def __init__(
@@ -47,10 +44,8 @@ class ExecutionScope:
         self.session = session
         self.fetch_limiter = asyncio.Semaphore(fetch_workers)
         self.download_workers = download_workers
-        self.user_info_cache = None
-        self.user_info_lock = asyncio.Lock()
-        self.wbi_img_cache = None
-        self.wbi_img_lock = asyncio.Lock()
+        self.nav_cache = None
+        self.nav_lock = asyncio.Lock()
         self.touched_urls = set()
 
     @asynccontextmanager

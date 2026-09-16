@@ -10,17 +10,16 @@ import pytest
 
 import yutto.utils.ffmpeg as ffmpeg_module
 from yutto.core.request import DownloadRequest
-from yutto.core.result import ResolvedItem
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner, should_attach_hvc1_tag
 from yutto.exceptions import PostprocessingError, WrongArgumentError
-from yutto.types import AId, CId
+from yutto.resource import ResourceManifest
 from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 from yutto.utils.functional import Singleton, as_sync
 
 if TYPE_CHECKING:
     from yutto.media.codec import VideoCodec
-    from yutto.types import AudioUrlMeta, EpisodeData, VideoUrlMeta
+    from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
 def make_ffmpeg(path: str) -> FFmpeg:
@@ -92,30 +91,7 @@ def make_audio_plan(
     audio_save_codec: str = "copy",
 ) -> DownloadPlan:
     path = Path("output")
-    episode = cast(
-        "EpisodeData",
-        {
-            "info": {
-                "listing": ResolvedItem(
-                    avid=AId("1"),
-                    cid=CId("1"),
-                    url="https://www.bilibili.com/video/av1?p=1",
-                    name=path.name,
-                    title=path.name,
-                    cover_url="",
-                    planned_path=path,
-                ),
-                "path": path,
-            },
-            "videos": [],
-            "audios": [make_audio()],
-            "subtitles": [],
-            "metadata": None,
-            "danmaku": {"source_type": None, "save_type": None, "data": []},
-            "cover_data": None,
-            "chapter_info_data": [],
-        },
-    )
+    resources = ResourceManifest(audios=(make_audio(),))
     request = DownloadRequest.model_validate(
         {
             "source": {"url": "BV1muxer"},
@@ -138,7 +114,13 @@ def make_audio_plan(
             },
         }
     )
-    return DownloadPlanner().plan(episode, request)
+    return DownloadPlanner().plan(resources, path, request)
+
+
+def make_audio_input(tmp_path: Path) -> Path:
+    audio_path = tmp_path / "input.m4a"
+    audio_path.write_bytes(b"audio")
+    return audio_path
 
 
 @pytest.mark.parametrize(
@@ -438,7 +420,8 @@ async def test_media_muxer_uses_async_ffmpeg(tmp_path: Path):
             return subprocess.CompletedProcess(args, 0, b"", b"ffmpeg detail")
 
     plan = make_audio_plan(tmp_path, audio_save_codec="mp4a")
-    await MediaMuxer(FakeFFmpeg()).mux(plan)
+    audio_path = make_audio_input(tmp_path)
+    await MediaMuxer(FakeFFmpeg()).mux(plan, audio_path=audio_path)
 
     assert len(commands) == 1
     assert commands[0][-1] == str(plan.paths.output)
@@ -455,9 +438,10 @@ async def test_merge_success_code_without_output_is_structured_error(
             return subprocess.CompletedProcess(args, 0, b"", b"")
 
     plan = make_audio_plan(tmp_path)
+    audio_path = make_audio_input(tmp_path)
 
     with pytest.raises(PostprocessingError, match="未生成目标文件") as error:
-        await MediaMuxer(MissingOutputFFmpeg()).mux(plan)
+        await MediaMuxer(MissingOutputFFmpeg()).mux(plan, audio_path=audio_path)
 
     assert error.value.code.value == 20
 
@@ -471,9 +455,10 @@ async def test_merge_failure_removes_partial_output_and_is_structured(tmp_path: 
             return subprocess.CompletedProcess(args, 1, b"", b"ffmpeg detail")
 
     plan = make_audio_plan(tmp_path)
+    audio_path = make_audio_input(tmp_path)
 
     with pytest.raises(PostprocessingError, match="ffmpeg detail") as error:
-        await MediaMuxer(FailingFFmpeg()).mux(plan)
+        await MediaMuxer(FailingFFmpeg()).mux(plan, audio_path=audio_path)
 
     assert error.value.code.value == 20
     assert plan.paths.output.exists() is False
@@ -492,7 +477,8 @@ async def test_merge_cancellation_removes_partial_output(tmp_path: Path):
             raise AssertionError("unreachable")
 
     plan = make_audio_plan(tmp_path)
-    merging = asyncio.create_task(MediaMuxer(BlockingFFmpeg()).mux(plan))
+    audio_path = make_audio_input(tmp_path)
+    merging = asyncio.create_task(MediaMuxer(BlockingFFmpeg()).mux(plan, audio_path=audio_path))
     await started.wait()
 
     merging.cancel()
