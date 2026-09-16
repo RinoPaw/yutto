@@ -39,7 +39,9 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AId, di
         )
     if response["code"] == -404:
         raise NotFoundError(f"哔咔！视频 {avid} 不见了诶")
-    assert data is not None, "响应数据无 data 域"
+    if data is None:
+        reason = response.get("message") or f"API 返回 code={response.get('code')}"
+        raise NotFoundError(f"无法获取该视频 {avid} 信息，原因：{reason}")
 
     if data.get("forward"):
         forward_aid = AId(data["forward"])
@@ -134,7 +136,7 @@ async def get_favourite_medias(scope: ExecutionScope, fid: FId) -> list[dict[str
 
 
 async def get_all_favourite_folders(scope: ExecutionScope, mid: MId) -> list[dict[str, Any]]:
-    api = f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={mid}"
+    api = f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={mid.value}"
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
     data = response.get("data") or {}
     return list(data.get("list") or [])
@@ -158,14 +160,17 @@ async def get_series_archives(scope: ExecutionScope, series_id: SeriesId, mid: M
     while True:
         payload = await fetch_payload(
             scope,
-            (
-                "https://api.bilibili.com/x/series/archives"
-                f"?mid={mid}&series_id={series_id}&only_normal=true"
-                f"&pn={page_num}&ps={page_size}"
-            ),
+            "https://api.bilibili.com/x/series/archives",
             "视频系列",
             f"series_id: {series_id}",
             "data",
+            params={
+                "mid": mid.value,
+                "series_id": series_id.value,
+                "only_normal": "true",
+                "pn": page_num,
+                "ps": page_size,
+            },
         )
         page_archives: list[dict[str, Any]] = payload.get("archives") or []
         archives.extend(item for item in page_archives if item.get("bvid"))
@@ -194,7 +199,7 @@ async def get_space_profile_and_archives(
         "UP 主",
         f"mid: {mid}",
         "data",
-        params=encode_wbi({"mid": mid}, wbi_img),
+        params=encode_wbi({"mid": mid.value}, wbi_img),
     )
 
     page_size = 30
@@ -209,7 +214,7 @@ async def get_space_profile_and_archives(
             "data",
             params=encode_wbi(
                 {
-                    "mid": mid,
+                    "mid": mid.value,
                     "ps": page_size,
                     "tid": 0,
                     "pn": page_num,
