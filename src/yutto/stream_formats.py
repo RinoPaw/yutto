@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeAlias
 
+from yutto.core.operation import emit_download_report
 from yutto.media.quality import audio_quality_map, video_quality_map
 
 if TYPE_CHECKING:
@@ -59,6 +60,15 @@ def format_manifest_lines(
             )
 
     return tuple(lines)
+
+
+def emit_manifest_formats(
+    manifest: ResourceManifest,
+    selection: StreamSelection | None = None,
+) -> None:
+    """Emit one manifest through the shared download report channel."""
+    for line in format_manifest_lines(manifest, selection):
+        emit_download_report(line)
 
 
 def manifest_format_signature(manifest: ResourceManifest) -> FormatSignature:
