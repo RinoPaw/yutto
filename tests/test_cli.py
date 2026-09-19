@@ -86,7 +86,7 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
             raise RuntimeError("stop after recording")
 
     monkeypatch.setattr(main_module, "build_parser", lambda: parser)
-    monkeypatch.setattr(main_module, "load_config", lambda _config: YuttoSettings())
+    monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "download"])
     monkeypatch.setattr(main_module, "FFmpeg", RecordingFFmpeg)
 
