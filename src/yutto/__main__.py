@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
 from typing import TYPE_CHECKING
 
 from yutto.auth import resolve_auth_file, validate_user_info
 from yutto.cli.auth import run_auth
-from yutto.cli.bootstrap import load_config
 from yutto.cli.command import (
     download_layer_from_namespace,
     resolve_auth_command,
@@ -17,8 +17,9 @@ from yutto.cli.command import (
 from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import expand_download_layers
+from yutto.cli.input import expand_download_layers, path_from_cli
 from yutto.cli.parser import build_parser
+from yutto.cli.settings import YuttoSettings, load_settings_file, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -30,11 +31,25 @@ from yutto.utils.functional import as_sync
 from yutto.validator import configure_cli, resolve_credentials, validate_download_request
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from yutto.auth import AuthInfo
     from yutto.core.execution import ExecutionScope
     from yutto.core.request import DownloadRequest
+
+
+def load_config(argv: Sequence[str]) -> tuple[YuttoSettings, list[str]]:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--config", type=path_from_cli, default=argparse.SUPPRESS)
+    args, remaining_argv = parser.parse_known_args(argv)
+
+    config = getattr(args, "config", None) or search_for_settings_file()
+    if config is None:
+        return YuttoSettings(), remaining_argv
+
+    Logger.info(f"发现配置文件 {config}，加载中……")
+    return load_settings_file(config), remaining_argv
 
 
 def main() -> None:
