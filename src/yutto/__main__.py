@@ -36,15 +36,6 @@ if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
 
 
-def load_config(config: Path | str | None) -> YuttoSettings:
-    config = Path(config).expanduser() if config is not None else search_for_settings_file()
-    if config is None:
-        return YuttoSettings()
-
-    Logger.info(f"发现配置文件 {config}，加载中……")
-    return load_settings_file(config)
-
-
 def main() -> None:
     parser = build_parser()
     renderer = CliApplicationEventRenderer()
@@ -52,7 +43,13 @@ def main() -> None:
         args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
     try:
-        settings = load_config(getattr(args, "config", None))
+        config = getattr(args, "config", None)
+        config = Path(config).expanduser() if config is not None else search_for_settings_file()
+        if config is None:
+            settings = YuttoSettings()
+        else:
+            Logger.info(f"发现配置文件 {config}，加载中……")
+            settings = load_settings_file(config)
     except (OSError, ValueError) as error:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
