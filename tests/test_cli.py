@@ -86,7 +86,7 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
             raise RuntimeError("stop after recording")
 
     monkeypatch.setattr(main_module, "build_parser", lambda: parser)
-    monkeypatch.setattr(main_module, "load_config", lambda _args: (YuttoSettings(), ["download"]))
+    monkeypatch.setattr(main_module, "load_config", lambda _config: YuttoSettings())
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "download"])
     monkeypatch.setattr(main_module, "FFmpeg", RecordingFFmpeg)
 
@@ -96,14 +96,30 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
     assert recorded == ["/opt/ffmpeg/ffmpeg"]
 
 
-def test_load_config_consumes_bootstrap_option(tmp_path: Path):
+def test_global_config_precedes_explicit_subcommand(tmp_path: Path):
     config = tmp_path / "yutto.toml"
-    config.write_text("", encoding="utf-8")
 
-    settings, argv = main_module.load_config(["--config", str(config), "auth", "status"])
+    args = _parse(["--config", str(config), "auth", "status"])
 
-    assert settings == YuttoSettings()
-    assert argv == ["auth", "status"]
+    assert args.config == config
+    assert args.command == "auth"
+    assert args.auth_command == "status"
+
+
+def test_global_config_precedes_implicit_download(tmp_path: Path):
+    config = tmp_path / "yutto.toml"
+
+    args = _parse(["--config", str(config), "BV1xx411c7mD"])
+
+    assert args.config == config
+    assert args.command == "download"
+    assert args.source == "BV1xx411c7mD"
+
+
+def test_unknown_leading_option_is_not_scanned_as_global_config():
+    argv = ["--another-like-config", "something", "download", "BVxxx"]
+
+    assert normalize_argv(argv) == ["download", *argv]
 
 
 def test_download_request_rejects_non_positive_num_workers():
