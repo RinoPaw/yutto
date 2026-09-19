@@ -86,7 +86,7 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
             raise RuntimeError("stop after recording")
 
     monkeypatch.setattr(main_module, "build_parser", lambda: parser)
-    monkeypatch.setattr(main_module, "load_cli_settings", lambda _options: YuttoSettings())
+    monkeypatch.setattr(main_module, "load_config", lambda _args: (YuttoSettings(), ["download"]))
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "download"])
     monkeypatch.setattr(main_module, "FFmpeg", RecordingFFmpeg)
 
@@ -94,6 +94,16 @@ def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest
         main_module.main()
 
     assert recorded == ["/opt/ffmpeg/ffmpeg"]
+
+
+def test_load_config_consumes_bootstrap_option(tmp_path: Path):
+    config = tmp_path / "yutto.toml"
+    config.write_text("", encoding="utf-8")
+
+    settings, argv = main_module.load_config(["--config", str(config), "auth", "status"])
+
+    assert settings == YuttoSettings()
+    assert argv == ["auth", "status"]
 
 
 def test_download_request_rejects_non_positive_num_workers():
