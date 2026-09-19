@@ -19,10 +19,30 @@ def normalize_argv(argv: Sequence[str]) -> list[str]:
     normalized = list(argv)
     if not normalized:
         return ["download"]
-    if normalized[0] in LEGACY_AUTH_SUBCOMMANDS:
-        return ["auth", *normalized]
-    if normalized[0] not in SUBCOMMANDS and normalized[0] not in {"-v", "--version"}:
-        return ["download", *normalized]
+
+    command_index = 0
+    while command_index < len(normalized):
+        token = normalized[command_index]
+        if token == "--config":
+            if command_index + 1 >= len(normalized):
+                return normalized
+            command_index += 2
+            continue
+        if token.startswith("--config="):
+            command_index += 1
+            continue
+        break
+
+    if command_index >= len(normalized):
+        return normalized
+
+    command = normalized[command_index]
+    if command in {"-v", "--version"}:
+        return normalized
+    if command in LEGACY_AUTH_SUBCOMMANDS:
+        return [*normalized[:command_index], "auth", *normalized[command_index:]]
+    if command not in SUBCOMMANDS:
+        return [*normalized[:command_index], "download", *normalized[command_index:]]
     return normalized
 
 
