@@ -4,7 +4,7 @@ import asyncio
 import sys
 from typing import TYPE_CHECKING
 
-from yutto.auth import validate_user_info
+from yutto.auth import resolve_auth_file, validate_user_info
 from yutto.cli.auth import run_auth
 from yutto.cli.bootstrap import load_cli_settings, parse_bootstrap_args
 from yutto.cli.command import (
@@ -30,26 +30,11 @@ from yutto.utils.functional import as_sync
 from yutto.validator import configure_cli, resolve_credentials, validate_download_request
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from yutto.auth import AuthInfo
     from yutto.core.execution import ExecutionScope
     from yutto.core.request import DownloadRequest
-
-
-class _CliAuthAnnouncer:
-    """Announce each effective credential once without sharing request caches."""
-
-    def __init__(self):
-        self._announced_credentials: set[tuple[str | None, str | None]] = set()
-
-    async def __call__(self, scope: ExecutionScope, request: DownloadRequest) -> None:
-        credentials = (
-            scope.session.cookie("SESSDATA"),
-            scope.session.cookie("bili_jct"),
-        )
-        if credentials in self._announced_credentials:
-            return
-        self._announced_credentials.add(credentials)
-        await announce_cli_auth(scope, request)
 
 
 def main() -> None:
@@ -90,16 +75,34 @@ def main() -> None:
 
                     auth_list = [resolve_credentials(command.credentials) for command in commands]
                     requests = [command.request for command in commands]
-                    credentials_by_request = {
-                        id(request): auth for request, auth in zip(requests, auth_list, strict=True)
-                    }
+                    auth_by_request = {id(request): auth for request, auth in zip(requests, auth_list, strict=True)}
+                    credential_options_by_request = {id(command.request): command.credentials for command in commands}
 
                     def resolve_request_credentials(request: DownloadRequest) -> AuthInfo | None:
-                        return credentials_by_request[id(request)]
+                        return auth_by_request[id(request)]
+
+                    announced_profiles: set[tuple[Path, str]] = set()
+                    inline_auth_announced = False
+
+                    async def announce_request_auth(scope: ExecutionScope, request: DownloadRequest) -> None:
+                        nonlocal inline_auth_announced
+
+                        options = credential_options_by_request[id(request)]
+                        if options.auth or options.sessdata:
+                            if inline_auth_announced:
+                                return
+                            inline_auth_announced = True
+                        else:
+                            profile = (resolve_auth_file(options), options.auth_profile)
+                            if profile in announced_profiles:
+                                return
+                            announced_profiles.add(profile)
+
+                        await announce_cli_auth(scope, request)
 
                     scope_factory = RequestExecutionScopeFactory(
                         resolve_request_credentials,
-                        on_open=_CliAuthAnnouncer(),
+                        on_open=announce_request_auth,
                     )
                     if preview_formats:
                         run_preview_formats(scope_factory, requests, renderer)
