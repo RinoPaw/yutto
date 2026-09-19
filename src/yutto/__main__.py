@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.auth import resolve_auth_file, validate_user_info
@@ -30,15 +31,13 @@ from yutto.utils.functional import as_sync
 from yutto.validator import configure_cli, resolve_credentials, validate_download_request
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from yutto.auth import AuthInfo
     from yutto.core.execution import ExecutionScope
     from yutto.core.request import DownloadRequest
 
 
-def load_config(config: Path | None) -> YuttoSettings:
-    config = config or search_for_settings_file()
+def load_config(config: Path | str | None) -> YuttoSettings:
+    config = Path(config).expanduser() if config is not None else search_for_settings_file()
     if config is None:
         return YuttoSettings()
 
