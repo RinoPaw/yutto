@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import sys
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from yutto.auth import resolve_auth_file, validate_user_info
 from yutto.cli.auth import run_auth
-from yutto.cli.bootstrap import load_cli_settings, parse_bootstrap_args
+from yutto.cli.bootstrap import load_config
 from yutto.cli.command import (
     download_layer_from_namespace,
     resolve_auth_command,
@@ -19,9 +17,8 @@ from yutto.cli.command import (
 from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import expand_download_layers, path_from_cli
+from yutto.cli.input import expand_download_layers
 from yutto.cli.parser import build_parser
-from yutto.cli.settings import YuttoSettings, load_settings_file, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -41,9 +38,8 @@ if TYPE_CHECKING:
 
 
 def main() -> None:
-    raw_argv = sys.argv[1:]
     try:
-        settings = load_cli_settings(parse_bootstrap_args(raw_argv))
+        settings, argv = load_config(sys.argv[1:])
     except (OSError, ValueError) as error:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
@@ -51,7 +47,7 @@ def main() -> None:
     parser = build_parser()
     renderer = CliApplicationEventRenderer()
     with bind_download_report_sink(renderer.report):
-        args = parser.parse_args(normalize_argv(raw_argv))
+        args = parser.parse_args(normalize_argv(argv))
 
     match args.command:
         case "download":
@@ -171,21 +167,6 @@ async def announce_cli_auth(scope: ExecutionScope, _request: DownloadRequest) ->
         Logger.custom("成功以大会员身份登录～", badge=Badge("大会员", fore="white", back="magenta", style=["bold"]))
     else:
         Logger.warning("以非大会员身份登录，注意无法下载会员专享剧集喔～")
-
-
-def load_config(raw_args: Sequence[str]) -> tuple[YuttoSettings, list[str]]:
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--config", type=path_from_cli, default=argparse.SUPPRESS)
-
-    args, remaining_args = parser.parse_known_args(raw_args)
-
-    config = args.config if hasattr(args, "config") else search_for_settings_file()
-
-    if config:
-        Logger.info(f"发现配置文件 {config}，加载中……")
-        return load_settings_file(config), remaining_args
-
-    return YuttoSettings(), remaining_args
 
 
 if __name__ == "__main__":
