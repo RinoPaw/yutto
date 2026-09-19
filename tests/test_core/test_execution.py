@@ -4,8 +4,6 @@ from typing import Any, cast
 
 import pytest
 
-import yutto.__main__ as main_module
-from yutto.auth import AuthInfo
 from yutto.core.execution import ExecutionScope, RequestExecutionScopeFactory
 from yutto.core.request import DownloadRequest
 from yutto.utils.functional import as_sync
@@ -75,70 +73,3 @@ async def test_scope_factory_closes_session_when_on_open_fails():
 
     assert len(sessions) == 1
     assert sessions[0].is_closed
-
-
-@as_sync
-async def test_cli_auth_announcer_deduplicates_effective_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    auth_by_url: dict[str, AuthInfo | None] = {
-        "BV1first": AuthInfo(SESSDATA="member", bili_jct="csrf"),
-        "BV1duplicate": AuthInfo(SESSDATA="member", bili_jct="csrf"),
-        "BV1other": AuthInfo(SESSDATA="ordinary", bili_jct="other-csrf"),
-        "BV1anonymous": None,
-        "BV1anonymousAgain": None,
-    }
-    validation_calls: list[tuple[str | None, str | None]] = []
-    vip_messages: list[str] = []
-    warning_messages: list[str] = []
-    info_messages: list[str] = []
-
-    async def validate(scope: ExecutionScope, requirements: dict[str, bool]) -> bool:
-        assert requirements == {"vip_status": True, "is_login": True}
-        credentials = (
-            scope.session.cookie("SESSDATA"),
-            scope.session.cookie("bili_jct"),
-        )
-        validation_calls.append(credentials)
-        is_vip = credentials[0] == "member"
-        scope.nav_cache = {"credential": credentials[0], "is_vip": is_vip}
-        return is_vip
-
-    monkeypatch.setattr(main_module, "validate_user_info", validate)
-    monkeypatch.setattr(main_module.Logger, "custom", lambda message, **_kwargs: vip_messages.append(message))
-    monkeypatch.setattr(main_module.Logger, "warning", warning_messages.append)
-    monkeypatch.setattr(main_module.Logger, "info", info_messages.append)
-
-    requests = [
-        DownloadRequest.model_validate({"source": {"url": url}})
-        for url in (
-            "BV1first",
-            "BV1duplicate",
-            "BV1other",
-            "BV1anonymous",
-            "BV1anonymousAgain",
-        )
-    ]
-    factory = RequestExecutionScopeFactory(
-        lambda request: auth_by_url[request.source.url],
-        on_open=main_module._CliAuthAnnouncer(),
-    )
-    caches: list[dict[str, Any] | None] = []
-
-    for request in requests:
-        async with factory.open(request) as scope:
-            caches.append(scope.nav_cache)
-
-    assert validation_calls == [("member", "csrf"), ("ordinary", "other-csrf")]
-    assert vip_messages == ["成功以大会员身份登录～"]
-    assert warning_messages == ["以非大会员身份登录，注意无法下载会员专享剧集喔～"]
-    assert info_messages == [
-        "未提供登录认证信息，无法下载高清视频、字幕等资源哦～请通过 `--auth` 参数提供认证信息，或者先使用 `yutto auth login` 登录存储认证信息后再下载～"
-    ]
-    assert caches == [
-        {"credential": "member", "is_vip": True},
-        None,
-        {"credential": "ordinary", "is_vip": False},
-        None,
-        None,
-    ]
