@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 import yutto.cli.formats as formats_module
 from yutto.cli.formats import FormatListingEntry, emit_grouped_manifest_report
 from yutto.core.operation import ReportLevel, bind_download_report_sink
@@ -11,6 +9,8 @@ from yutto.resource import ResourceManifest
 from yutto.stream_formats import emit_manifest_formats, format_manifest_lines
 
 if TYPE_CHECKING:
+    import pytest
+
     from yutto.downloader.selector import StreamSelection
     from yutto.types import AudioUrlMeta, VideoUrlMeta
 
