@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import sys
 from typing import TYPE_CHECKING
@@ -17,7 +16,7 @@ from yutto.cli.command import (
 from yutto.cli.compat import normalize_argv
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import expand_download_layers, path_from_cli
+from yutto.cli.input import expand_download_layers
 from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoSettings, load_settings_file, search_for_settings_file
 from yutto.core.application import YuttoApplication
@@ -31,7 +30,6 @@ from yutto.utils.functional import as_sync
 from yutto.validator import configure_cli, resolve_credentials, validate_download_request
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
     from yutto.auth import AuthInfo
@@ -39,30 +37,26 @@ if TYPE_CHECKING:
     from yutto.core.request import DownloadRequest
 
 
-def load_config(argv: Sequence[str]) -> tuple[YuttoSettings, list[str]]:
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--config", type=path_from_cli, default=argparse.SUPPRESS)
-    args, remaining_argv = parser.parse_known_args(argv)
-
-    config = getattr(args, "config", None) or search_for_settings_file()
+def load_config(config: Path | None) -> YuttoSettings:
+    config = config or search_for_settings_file()
     if config is None:
-        return YuttoSettings(), remaining_argv
+        return YuttoSettings()
 
     Logger.info(f"发现配置文件 {config}，加载中……")
-    return load_settings_file(config), remaining_argv
+    return load_settings_file(config)
 
 
 def main() -> None:
-    try:
-        settings, argv = load_config(sys.argv[1:])
-    except (OSError, ValueError) as error:
-        Logger.error(str(error))
-        sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
-
     parser = build_parser()
     renderer = CliApplicationEventRenderer()
     with bind_download_report_sink(renderer.report):
-        args = parser.parse_args(normalize_argv(argv))
+        args = parser.parse_args(normalize_argv(sys.argv[1:]))
+
+    try:
+        settings = load_config(getattr(args, "config", None))
+    except (OSError, ValueError) as error:
+        Logger.error(str(error))
+        sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     match args.command:
         case "download":
