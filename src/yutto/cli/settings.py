@@ -4,14 +4,18 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 
 
-class YuttoBasicSettings(BaseModel):
+class _ConfigModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class YuttoBasicConfig(_ConfigModel):
     """Persistent configuration overrides for basic download and CLI behavior."""
 
     num_workers: int | None = Field(default=None, gt=0)
@@ -44,7 +48,7 @@ class YuttoBasicSettings(BaseModel):
     debug: bool | None = None
 
 
-class YuttoResourceSettings(BaseModel):
+class YuttoResourceConfig(_ConfigModel):
     """Persistent resource-selection overrides."""
 
     require_video: bool | None = None
@@ -57,7 +61,7 @@ class YuttoResourceSettings(BaseModel):
     save_cover: bool | None = None
 
 
-class YuttoDanmakuSettings(BaseModel):
+class YuttoDanmakuConfig(_ConfigModel):
     """Persistent danmaku overrides."""
 
     font_size: int | None = None
@@ -75,7 +79,7 @@ class YuttoDanmakuSettings(BaseModel):
     block_keyword_patterns: list[str] | None = None
 
 
-class YuttoBatchSettings(BaseModel):
+class YuttoBatchConfig(_ConfigModel):
     """Persistent batch-selection overrides."""
 
     with_extra_episodes: bool | None = None
@@ -84,7 +88,7 @@ class YuttoBatchSettings(BaseModel):
     batch_filter_end_time: str | None = None
 
 
-class YuttoAuthSettings(BaseModel):
+class YuttoAuthConfig(_ConfigModel):
     """Persistent credential-source overrides."""
 
     auth: str | None = None
@@ -92,18 +96,18 @@ class YuttoAuthSettings(BaseModel):
     auth_profile: str | None = None
 
 
-class YuttoSettings(BaseModel):
+class YuttoConfig(_ConfigModel):
     """Values explicitly supplied by persistent configuration.
 
     Application defaults live in their owning core or frontend models. An empty
-    settings object therefore contributes no overrides.
+    config object therefore contributes no overrides.
     """
 
-    basic: YuttoBasicSettings = Field(default_factory=YuttoBasicSettings)
-    resource: YuttoResourceSettings = Field(default_factory=YuttoResourceSettings)
-    danmaku: YuttoDanmakuSettings = Field(default_factory=YuttoDanmakuSettings)
-    batch: YuttoBatchSettings = Field(default_factory=YuttoBatchSettings)
-    auth: YuttoAuthSettings = Field(default_factory=YuttoAuthSettings)
+    basic: YuttoBasicConfig = Field(default_factory=YuttoBasicConfig)
+    resource: YuttoResourceConfig = Field(default_factory=YuttoResourceConfig)
+    danmaku: YuttoDanmakuConfig = Field(default_factory=YuttoDanmakuConfig)
+    batch: YuttoBatchConfig = Field(default_factory=YuttoBatchConfig)
+    auth: YuttoAuthConfig = Field(default_factory=YuttoAuthConfig)
 
 
 def search_for_settings_file() -> Path | None:
@@ -119,10 +123,10 @@ def search_for_settings_file() -> Path | None:
     return settings_file
 
 
-def load_settings_file(settings_file: Path) -> YuttoSettings:
+def load_settings_file(settings_file: Path) -> YuttoConfig:
     with settings_file.open("r", encoding="utf-8") as f:
         settings_raw: Any = tomllib.loads(f.read())
-    return YuttoSettings.model_validate(settings_raw)
+    return YuttoConfig.model_validate(settings_raw)
 
 
 if __name__ == "__main__":
