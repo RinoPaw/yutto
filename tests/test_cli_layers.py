@@ -8,7 +8,7 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.input import expand_download_values
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
-from yutto.cli.settings import YuttoSettings
+from yutto.cli.settings import YuttoConfig
 
 if TYPE_CHECKING:
     import argparse
@@ -32,7 +32,7 @@ def test_download_parser_emits_only_explicit_cli_values():
 
 
 def test_cli_overrides_config_while_unmentioned_config_values_survive():
-    settings = YuttoSettings.model_validate(
+    config = YuttoConfig.model_validate(
         {
             "basic": {"num_workers": 12},
             "resource": {"require_metadata": True, "require_cover": True},
@@ -40,7 +40,7 @@ def test_cli_overrides_config_while_unmentioned_config_values_survive():
     )
     args = _parse_download(["BV1xx411c7mD", "--num-workers", "16", "--no-cover"])
 
-    request = resolve_download_request(vars(args), settings)
+    request = resolve_download_request(vars(args), config)
 
     assert request.network.download_workers == 16
     assert request.resources.metadata is True
@@ -50,7 +50,7 @@ def test_cli_overrides_config_while_unmentioned_config_values_survive():
 def test_empty_config_uses_core_request_defaults():
     args = _parse_download(["BV1xx411c7mD"])
 
-    request = resolve_download_request(vars(args), YuttoSettings())
+    request = resolve_download_request(vars(args), YuttoConfig())
 
     assert request.network.download_workers == 8
     assert request.stream.video_quality == 127
@@ -59,7 +59,7 @@ def test_empty_config_uses_core_request_defaults():
 
 
 def test_explicit_auto_priority_clears_configured_codec_priority():
-    settings = YuttoSettings.model_validate(
+    config = YuttoConfig.model_validate(
         {
             "basic": {
                 "vcodec": "avc:copy",
@@ -69,7 +69,7 @@ def test_explicit_auto_priority_clears_configured_codec_priority():
     )
     args = _parse_download(["BV1xx411c7mD", "--download-vcodec-priority", "auto"])
 
-    request = resolve_download_request(vars(args), settings)
+    request = resolve_download_request(vars(args), config)
 
     assert request.stream.video_download_codec_priority is None
 
@@ -100,8 +100,8 @@ def test_task_list_inheritance_merges_explicit_values(tmp_path: Path):
         )
     )
 
-    tasks = expand_download_values(outer, parser, YuttoSettings())
-    requests = [resolve_download_request(task, YuttoSettings()) for task in tasks]
+    tasks = expand_download_values(outer, parser, YuttoConfig())
+    requests = [resolve_download_request(task, YuttoConfig()) for task in tasks]
 
     assert [(request.source.url, request.network.proxy, request.network.fetch_workers) for request in requests] == [
         ("BV1first", "no", 2),
