@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from yutto.cli.settings import YuttoSettings
+    from yutto.cli.settings import YuttoConfig
 
 
 def resolve_runtime_options(
     values: dict[str, Any],
-    settings: YuttoSettings,
+    config: YuttoConfig,
 ) -> dict[str, Any]:
-    jobs = values.get("jobs", settings.basic.jobs)
+    jobs = values.get("jobs", config.basic.jobs)
     if jobs is None:
         jobs = 1
 
@@ -27,19 +27,19 @@ def resolve_runtime_options(
         "no_color": bool(
             values.get(
                 "no_color",
-                settings.basic.no_color if settings.basic.no_color is not None else False,
+                config.basic.no_color if config.basic.no_color is not None else False,
             )
         ),
         "no_progress": bool(
             values.get(
                 "no_progress",
-                settings.basic.no_progress if settings.basic.no_progress is not None else False,
+                config.basic.no_progress if config.basic.no_progress is not None else False,
             )
         ),
         "debug": bool(
             values.get(
                 "debug",
-                settings.basic.debug if settings.basic.debug is not None else False,
+                config.basic.debug if config.basic.debug is not None else False,
             )
         ),
     }
