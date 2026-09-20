@@ -36,6 +36,7 @@ def main() -> None:
     renderer = CliApplicationEventRenderer()
     args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
+    settings: YuttoSettings
     try:
         config = getattr(args, "config", None)
         config = Path(config).expanduser() if config is not None else search_for_settings_file()
