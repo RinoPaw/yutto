@@ -16,7 +16,7 @@ from yutto.cli.formats import (
     format_manifest_lines,
 )
 from yutto.cli.parser import build_parser
-from yutto.cli.settings import YuttoSettings
+from yutto.cli.settings import YuttoConfig
 from yutto.core.request import DownloadRequest
 from yutto.downloader.selector import select_streams
 from yutto.media import UgcPage
@@ -321,7 +321,7 @@ def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.Monk
     captured: list[list[DownloadRequest]] = []
 
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1xx411c7mD", "--preview-formats"])
-    monkeypatch.setattr(main_module, "load_cli_settings", lambda _options: YuttoSettings())
+    monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
     monkeypatch.setattr(main_module, "resolve_credentials", lambda _options: None)
     monkeypatch.setattr(
         main_module,
