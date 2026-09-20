@@ -29,8 +29,6 @@ from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
-    import argparse
-
     from yutto._native import YuttoSession
     from yutto.cli.settings import YuttoSettings
     from yutto.types import UserInfo
@@ -50,16 +48,22 @@ COOKIE_PROBE_URLS = (
 
 
 @as_sync
-async def run_auth(args: argparse.Namespace, settings: YuttoSettings) -> None:
+async def run_auth(args: Any, settings: YuttoSettings | None = None) -> None:
     values = vars(args)
-    values.setdefault("auth", settings.auth.auth if settings.auth.auth is not None else "")
-    if "auth_file" not in values:
-        values["auth_file"] = None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser()
-    values.setdefault(
-        "auth_profile",
-        settings.auth.auth_profile if settings.auth.auth_profile is not None else "default",
-    )
-    values.setdefault("proxy", settings.basic.proxy if settings.basic.proxy is not None else "auto")
+    if settings is None:
+        values.setdefault("auth", "")
+        values.setdefault("auth_file", None)
+        values.setdefault("auth_profile", "default")
+        values.setdefault("proxy", "auto")
+    else:
+        values.setdefault("auth", settings.auth.auth if settings.auth.auth is not None else "")
+        if "auth_file" not in values:
+            values["auth_file"] = None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser()
+        values.setdefault(
+            "auth_profile",
+            settings.auth.auth_profile if settings.auth.auth_profile is not None else "default",
+        )
+        values.setdefault("proxy", settings.basic.proxy if settings.basic.proxy is not None else "auto")
     values.setdefault("mode", "terminal")
     values.setdefault("poll_interval", 2.0)
     values.setdefault("timeout", 180)
