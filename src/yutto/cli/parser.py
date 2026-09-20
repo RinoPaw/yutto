@@ -36,8 +36,13 @@ DOWNLOAD_RESOURCE_TYPES: tuple[DownloadResourceType, ...] = (
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line grammar without loading application settings."""
     parser = argparse.ArgumentParser(description="yutto 一个可爱且任性的 B 站视频下载器", prog="yutto")
+    parser.add_argument(
+        "--config",
+        type=path_from_cli,
+        default=argparse.SUPPRESS,
+        help="配置文件路径",
+    )
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {yutto_version}")
-    parser.add_argument("--config", type=path_from_cli, help="配置文件路径")
 
     subparsers = parser.add_subparsers(dest="command", help="支持的子命令", required=True)
 
