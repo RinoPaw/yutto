@@ -24,6 +24,7 @@ def resolve_runtime_options(
     return {
         "jobs": jobs,
         "ffmpeg_path": str(values.get("ffmpeg_path", "ffmpeg")),
+        "preview_formats": bool(values.get("preview_formats", False)),
         "no_color": bool(
             values.get(
                 "no_color",
