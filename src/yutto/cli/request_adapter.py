@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from typing import Any
 
-    from yutto.cli.settings import YuttoSettings
+    from yutto.cli.settings import YuttoConfig
 
 MEBIBYTE = 1024 * 1024
 
@@ -134,7 +134,7 @@ def request_overrides_from_cli(values: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def request_overrides_from_settings(
-    settings: YuttoSettings,
+    settings: YuttoConfig,
     *,
     include_output_paths: bool = True,
 ) -> dict[str, Any]:
@@ -264,7 +264,7 @@ def request_overrides_from_settings(
 
 def resolve_download_request(
     values: Mapping[str, Any],
-    settings: YuttoSettings,
+    settings: YuttoConfig,
     *,
     include_output_paths: bool = True,
 ) -> DownloadRequest:
@@ -281,12 +281,12 @@ def resolve_download_request(
     return DownloadRequest.model_validate(payload)
 
 
-def download_request_from_mapping(payload: object, settings: YuttoSettings) -> DownloadRequest:
+def download_request_from_mapping(payload: object, settings: YuttoConfig) -> DownloadRequest:
     """Apply explicit local settings as defaults for an RPC request payload."""
     return download_request_parser_from_settings(settings)(payload)
 
 
-def download_request_parser_from_settings(settings: YuttoSettings) -> Callable[[object], DownloadRequest]:
+def download_request_parser_from_settings(settings: YuttoConfig) -> Callable[[object], DownloadRequest]:
     """Build and eagerly validate a parser for repeated server requests."""
     defaults = request_overrides_from_settings(settings, include_output_paths=False)
 
