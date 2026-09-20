@@ -42,12 +42,13 @@ def main() -> None:
     with bind_download_report_sink(renderer.report):
         args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
+    config = getattr(args, "config", None) or search_for_settings_file()
+    settings = None
     try:
-        config = getattr(args, "config", None)
-        config = Path(config).expanduser() if config is not None else search_for_settings_file()
         if config is None:
             settings = YuttoSettings()
         else:
+            config = Path(config).expanduser()
             Logger.info(f"发现配置文件 {config}，加载中……")
             settings = load_settings_file(config)
     except (OSError, ValueError) as error:
