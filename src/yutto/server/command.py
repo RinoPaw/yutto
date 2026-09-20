@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Mapping
 
-    from yutto.cli.settings import YuttoSettings
+    from yutto.cli.settings import YuttoConfig
     from yutto.core.events import DownloadEventSink
     from yutto.core.execution import ExecutionScopeFactory
 
@@ -172,7 +172,7 @@ def _build_download_application(
 
 
 @as_sync
-async def run_server_command(args: argparse.Namespace, settings: YuttoSettings) -> None:
+async def run_server_command(args: argparse.Namespace, settings: YuttoConfig) -> None:
     values = vars(args)
     configured_jobs = settings.basic.jobs if settings.basic.jobs is not None else 1
     configured_fetch_workers = settings.basic.fetch_workers if settings.basic.fetch_workers is not None else 8
