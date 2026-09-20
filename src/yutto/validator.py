@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import biliass
@@ -14,26 +13,27 @@ from yutto.utils.console.logger import Logger, set_logger_debug
 from yutto.utils.fetcher import resolve_proxy
 
 if TYPE_CHECKING:
+    import argparse
+
     from yutto.auth import AuthInfo
-    from yutto.cli.command import CredentialOptions, DownloadRuntimeOptions
     from yutto.core.request import DownloadRequest
     from yutto.utils.ffmpeg import FFmpeg
 
 
-def configure_cli(command: DownloadRuntimeOptions) -> None:
-    if not command.no_progress and sys.stdout.isatty():
+def configure_cli(*, no_progress: bool, no_color: bool, debug: bool) -> None:
+    if not no_progress and sys.stdout.isatty():
         Logger.enable_statusbar()
-    if command.no_color or os.environ.get("NO_COLOR"):
+    if no_color or os.environ.get("NO_COLOR"):
         set_no_color()
-    if command.debug:
+    if debug:
         set_logger_debug()
         biliass.enable_tracing()
 
 
-def resolve_credentials(options: CredentialOptions) -> AuthInfo | None:
+def resolve_credentials(options: argparse.Namespace) -> AuthInfo | None:
     if not options.auth and options.sessdata:
         Logger.deprecated_warning('参数 --sessdata 已弃用，推荐改用 --auth="SESSDATA=...; bili_jct=..."')
-        options = replace(options, auth=format_auth_inline(options.sessdata))
+        options.auth = format_auth_inline(options.sessdata)
     return resolve_auth(options)
 
 
