@@ -9,13 +9,9 @@ from pydantic import ValidationError
 
 import yutto.__main__ as main_module
 import yutto.cli.event_renderer as renderer_module
-from yutto.cli.command import (
-    download_layer_from_namespace,
-    resolve_download_command,
-    resolve_download_runtime_options,
-)
 from yutto.cli.compat import normalize_argv
 from yutto.cli.parser import build_parser
+from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.settings import YuttoSettings
 from yutto.core.events import DownloadProgress, DownloadStage, DownloadStageChanged
 from yutto.core.execution import RequestExecutionScopeFactory
@@ -56,18 +52,6 @@ def test_download_parser_emits_no_runtime_defaults():
 
     assert not hasattr(args, "ffmpeg_path")
     assert not hasattr(args, "jobs")
-
-    runtime = resolve_download_runtime_options(args, YuttoSettings())
-    assert runtime.ffmpeg_path == "ffmpeg"
-    assert runtime.jobs == 1
-
-
-def test_download_runtime_accepts_ffmpeg_path_override():
-    args = _parse(["https://example.com", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
-
-    runtime = resolve_download_runtime_options(args, YuttoSettings())
-
-    assert runtime.ffmpeg_path == "/opt/ffmpeg/ffmpeg"
 
 
 def test_download_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.MonkeyPatch):
@@ -126,14 +110,7 @@ def test_download_request_rejects_non_positive_num_workers():
     args = _parse(["https://example.com", "--num-workers", "0"])
 
     with pytest.raises(ValidationError):
-        resolve_download_command(download_layer_from_namespace(args), YuttoSettings())
-
-
-def test_download_runtime_rejects_non_positive_jobs():
-    args = _parse(["https://example.com", "--jobs", "0"])
-
-    with pytest.raises(ValueError, match="jobs"):
-        resolve_download_runtime_options(args, YuttoSettings())
+        resolve_download_request(vars(args), YuttoSettings())
 
 
 def test_auth_commands_accept_auth_file(tmp_path: Path):
