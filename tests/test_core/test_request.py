@@ -13,7 +13,7 @@ from yutto.cli.request_adapter import (
     download_request_parser_from_settings,
     resolve_download_request,
 )
-from yutto.cli.settings import YuttoSettings
+from yutto.cli.settings import YuttoConfig
 from yutto.core.request import DownloadRequest
 
 pytestmark = pytest.mark.processor
@@ -25,7 +25,7 @@ def parse_download_args(arguments: list[str]):
 
 def request_from_args(arguments: list[str]) -> DownloadRequest:
     args = parse_download_args(arguments)
-    return resolve_download_request(vars(args), YuttoSettings())
+    return resolve_download_request(vars(args), YuttoConfig())
 
 
 def test_default_namespace_maps_to_grouped_core_request():
@@ -49,7 +49,7 @@ def test_selection_is_explicit_without_batch():
     assert args.selection_expr == "1~-1"
     assert not hasattr(args, "episodes")
 
-    request = resolve_download_request(vars(args), YuttoSettings())
+    request = resolve_download_request(vars(args), YuttoConfig())
     assert request.selection.expression == "1~-1"
 
 
@@ -254,7 +254,7 @@ def test_adapter_rejects_unvalidated_codec_pair():
     values["vcodec"] = "avc"
 
     with pytest.raises(ValueError, match="vcodec must contain exactly one"):
-        resolve_download_request(values, YuttoSettings())
+        resolve_download_request(values, YuttoConfig())
 
 
 def test_cover_only_request_keeps_existing_save_cover_semantics():
@@ -299,7 +299,7 @@ def test_core_rejects_video_codec_priority_without_selected_codec(priority: list
 
 
 def test_rpc_mapping_inherits_local_settings_without_credentials():
-    settings = YuttoSettings.model_validate(
+    config = YuttoConfig.model_validate(
         {
             "basic": {
                 "video_quality": 80,
@@ -321,7 +321,7 @@ def test_rpc_mapping_inherits_local_settings_without_credentials():
             "source": {"url": "BV1xx"},
             "stream": {"video_quality": 116},
         },
-        settings,
+        config,
     )
 
     assert request.access.auth_profile == "work"
@@ -348,7 +348,7 @@ def test_task_list_preserves_per_item_network_and_auth_overrides(tmp_path: Path)
         ),
         encoding="utf-8",
     )
-    settings = YuttoSettings()
+    config = YuttoConfig()
     parser = build_parser()
     args = parser.parse_args(
         normalize_argv(
@@ -366,8 +366,8 @@ def test_task_list_preserves_per_item_network_and_auth_overrides(tmp_path: Path)
         )
     )
 
-    tasks = expand_download_values(vars(args), parser, settings)
-    requests = [resolve_download_request(task, settings) for task in tasks]
+    tasks = expand_download_values(vars(args), parser, config)
+    requests = [resolve_download_request(task, config) for task in tasks]
 
     assert [
         (
@@ -385,10 +385,10 @@ def test_task_list_preserves_per_item_network_and_auth_overrides(tmp_path: Path)
 
 
 def test_server_request_parser_validates_configured_defaults_eagerly():
-    settings = YuttoSettings.model_validate({"basic": {"vcodec": "invalid-pair"}})
+    config = YuttoConfig.model_validate({"basic": {"vcodec": "invalid-pair"}})
 
     with pytest.raises(ValueError, match="vcodec must contain exactly one"):
-        download_request_parser_from_settings(settings)
+        download_request_parser_from_settings(config)
 
 
 def _all_keys(value: Any) -> set[str]:
