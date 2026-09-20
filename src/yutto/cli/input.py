@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import Any
 
-    from yutto.cli.settings import YuttoSettings
+    from yutto.cli.settings import YuttoConfig
 
 
 def path_from_cli(path: str) -> Path:
@@ -59,7 +59,7 @@ def file_scheme_parser(url: str) -> list[str]:
 def expand_download_values(
     values: Mapping[str, Any],
     parser: argparse.ArgumentParser,
-    settings: YuttoSettings,
+    config: YuttoConfig,
 ) -> list[dict[str, Any]]:
     """Resolve aliases and task lists using ordinary inner-scope overrides."""
     current = dict(values)
@@ -68,7 +68,7 @@ def expand_download_values(
         raise ValueError("download source is missing")
     source = str(source)
 
-    aliases = current.get("aliases", settings.basic.aliases)
+    aliases = current.get("aliases", config.basic.aliases)
     if aliases is not None:
         source = aliases.get(source, source)
     current["source"] = source
@@ -83,5 +83,5 @@ def expand_download_values(
             raise ValueError("下载列表中只能包含 download 命令")
         effective = child if current.get("no_inherit") or child.get("no_inherit") else {**current, **child}
         Logger.debug(f"列表参数: {effective}")
-        result.extend(expand_download_values(effective, parser, settings))
+        result.extend(expand_download_values(effective, parser, config))
     return result
