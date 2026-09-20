@@ -12,7 +12,7 @@ import yutto.cli.event_renderer as renderer_module
 from yutto.cli.compat import normalize_argv
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
-from yutto.cli.settings import YuttoSettings
+from yutto.cli.settings import YuttoConfig
 from yutto.core.events import DownloadProgress, DownloadStage, DownloadStageChanged
 from yutto.core.execution import RequestExecutionScopeFactory
 from yutto.core.operation import (
@@ -110,7 +110,7 @@ def test_download_request_rejects_non_positive_num_workers():
     args = _parse(["https://example.com", "--num-workers", "0"])
 
     with pytest.raises(ValidationError):
-        resolve_download_request(vars(args), YuttoSettings())
+        resolve_download_request(vars(args), YuttoConfig())
 
 
 def test_auth_commands_accept_auth_file(tmp_path: Path):
