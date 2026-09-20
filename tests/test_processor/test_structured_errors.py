@@ -94,11 +94,8 @@ def configure_download_cli(
     *,
     replace_logger: bool = True,
 ) -> tuple[list[str], list[str]]:
-    parser = SimpleNamespace(parse_args=lambda args: SimpleNamespace(command="download"))
-    settings = object()
-    runtime = SimpleNamespace(no_progress=True, jobs=1, ffmpeg_path="ffmpeg")
-    outer_layer = object()
-    command = SimpleNamespace(request=make_request(), credentials=object())
+    args = SimpleNamespace(command="download", source="BV1structured")
+    parser = SimpleNamespace(parse_args=lambda _args: args)
     rendered_errors: list[str] = []
     rendered_info: list[str] = []
 
@@ -117,22 +114,15 @@ def configure_download_cli(
         raise failure
 
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1structured"])
-    monkeypatch.setattr(main_module, "parse_bootstrap_args", lambda args: object())
-    monkeypatch.setattr(main_module, "load_cli_settings", lambda bootstrap: settings)
     monkeypatch.setattr(main_module, "build_parser", lambda: parser)
-    monkeypatch.setattr(main_module, "normalize_argv", lambda args: args)
-    monkeypatch.setattr(main_module, "resolve_download_runtime_options", lambda args, active_settings: runtime)
-    monkeypatch.setattr(main_module, "configure_cli", lambda active_runtime: None)
+    monkeypatch.setattr(main_module, "normalize_argv", lambda argv: argv)
+    monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
+    monkeypatch.setattr(main_module, "configure_cli", lambda **_: None)
     monkeypatch.setattr(main_module, "FFmpeg", FakeFFmpeg)
-    monkeypatch.setattr(main_module, "download_layer_from_namespace", lambda args: outer_layer)
-    monkeypatch.setattr(main_module, "resolve_download_command", lambda layer, active_settings: command)
+    monkeypatch.setattr(main_module, "expand_download_values", lambda values, active_parser, settings: [values])
+    monkeypatch.setattr(main_module, "resolve_download_request", lambda values, settings: make_request())
     monkeypatch.setattr(main_module, "validate_download_request", lambda request, ffmpeg: None)
-    monkeypatch.setattr(
-        main_module,
-        "expand_download_layers",
-        lambda layer, active_parser, active_settings: [layer],
-    )
-    monkeypatch.setattr(main_module, "resolve_credentials", lambda credentials: None)
+    monkeypatch.setattr(main_module, "resolve_credentials", lambda options: None)
     monkeypatch.setattr(main_module, "run_download", fail_download)
     if replace_logger:
         monkeypatch.setattr(
