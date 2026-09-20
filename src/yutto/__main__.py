@@ -14,6 +14,7 @@ from yutto.cli.formats import run_preview_formats
 from yutto.cli.input import expand_download_values
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
+from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import YuttoSettings, load_settings_file, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
@@ -53,31 +54,21 @@ def main() -> None:
         case "download":
             try:
                 values = vars(args)
-                jobs = int(values.get("jobs", settings.basic.jobs if settings.basic.jobs is not None else 1))
-                if jobs < 1:
-                    raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）")
-
-                no_color = bool(
-                    values.get("no_color", settings.basic.no_color if settings.basic.no_color is not None else False)
-                )
-                no_progress = bool(
-                    values.get(
-                        "no_progress",
-                        settings.basic.no_progress if settings.basic.no_progress is not None else False,
-                    )
-                )
-                debug = bool(values.get("debug", settings.basic.debug if settings.basic.debug is not None else False))
-                ffmpeg_path = str(values.get("ffmpeg_path", "ffmpeg"))
+                runtime_options = resolve_runtime_options(values, settings)
                 preview_formats = bool(values.get("preview_formats", False))
-                renderer.progress_enabled = not no_progress and sys.stdout.isatty()
+                renderer.progress_enabled = not runtime_options["no_progress"] and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
-                    configure_cli(no_progress=no_progress, no_color=no_color, debug=debug)
+                    configure_cli(
+                        no_progress=runtime_options["no_progress"],
+                        no_color=runtime_options["no_color"],
+                        debug=runtime_options["debug"],
+                    )
                     tasks = expand_download_values(values, parser, settings)
                     requests = [resolve_download_request(task, settings) for task in tasks]
 
                     if not preview_formats:
-                        FFmpeg.setup_ffmpeg_path(ffmpeg_path)
+                        FFmpeg.setup_ffmpeg_path(runtime_options["ffmpeg_path"])
                         ffmpeg = FFmpeg()
                         for request in requests:
                             validate_download_request(request, ffmpeg)
@@ -102,8 +93,7 @@ def main() -> None:
                     auth_list = [resolve_credentials(options) for options in credential_options]
                     auth_by_request = {id(request): auth for request, auth in zip(requests, auth_list, strict=True)}
                     credentials_by_request = {
-                        id(request): options
-                        for request, options in zip(requests, credential_options, strict=True)
+                        id(request): options for request, options in zip(requests, credential_options, strict=True)
                     }
 
                     def resolve_request_credentials(request: DownloadRequest) -> AuthInfo | None:
