@@ -4,7 +4,8 @@ import os
 import secrets
 import stat
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from yutto.auth import default_auth_file
 from yutto.cli.request_adapter import download_request_parser_from_settings
@@ -20,53 +21,12 @@ from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
+    import argparse
     from collections.abc import Mapping
-    from pathlib import Path
-    from typing import Protocol
 
     from yutto.cli.settings import YuttoSettings
     from yutto.core.events import DownloadEventSink
     from yutto.core.execution import ExecutionScopeFactory
-
-    class ServerCommandOptions(Protocol):
-        @property
-        def request_settings(self) -> YuttoSettings: ...
-
-        @property
-        def ffmpeg_path(self) -> str: ...
-
-        @property
-        def host(self) -> str: ...
-
-        @property
-        def port(self) -> int: ...
-
-        @property
-        def allow_origin(self) -> tuple[str, ...]: ...
-
-        @property
-        def token_file(self) -> Path | None: ...
-
-        @property
-        def download_root(self) -> Path: ...
-
-        @property
-        def tmp_root(self) -> Path | None: ...
-
-        @property
-        def auth_file(self) -> Path | None: ...
-
-        @property
-        def max_fetch_workers(self) -> int: ...
-
-        @property
-        def max_download_workers(self) -> int: ...
-
-        @property
-        def task_limit(self) -> int: ...
-
-        @property
-        def jobs(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,7 +94,7 @@ def _read_server_token(token_file: Path) -> str:
 
 
 def build_server(
-    options: ServerCommandOptions,
+    options: Any,
     token: str,
     *,
     ffmpeg: FFmpeg | None = None,
@@ -212,11 +172,53 @@ def _build_download_application(
 
 
 @as_sync
-async def run_server_command(options: ServerCommandOptions) -> None:
-    FFmpeg.setup_ffmpeg_path(options.ffmpeg_path)
+async def run_server_command(args: argparse.Namespace, settings: YuttoSettings) -> None:
+    values = vars(args)
+    configured_jobs = settings.basic.jobs if settings.basic.jobs is not None else 1
+    configured_fetch_workers = settings.basic.fetch_workers if settings.basic.fetch_workers is not None else 8
+    configured_download_workers = settings.basic.num_workers if settings.basic.num_workers is not None else 8
+
+    values.setdefault("request_settings", settings)
+    values.setdefault("ffmpeg_path", "ffmpeg")
+    values.setdefault("host", "127.0.0.1")
+    values.setdefault("port", 11223)
+    values.setdefault("allow_origin", ())
+    values.setdefault("token_file", None)
+    values.setdefault(
+        "download_root",
+        Path(settings.basic.dir).expanduser() if settings.basic.dir is not None else Path(),
+    )
+    values.setdefault(
+        "tmp_root",
+        None if settings.basic.tmp_dir is None else Path(settings.basic.tmp_dir).expanduser(),
+    )
+    values.setdefault(
+        "auth_file",
+        None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser(),
+    )
+    values.setdefault("max_fetch_workers", max(16, configured_fetch_workers))
+    values.setdefault("max_download_workers", max(16, configured_download_workers))
+    values.setdefault("task_limit", 256)
+    values.setdefault("jobs", configured_jobs)
+
+    args.port = int(args.port)
+    args.max_fetch_workers = int(args.max_fetch_workers)
+    args.max_download_workers = int(args.max_download_workers)
+    args.task_limit = int(args.task_limit)
+    args.jobs = int(args.jobs)
+    args.allow_origin = tuple(args.allow_origin)
+
+    if args.jobs < 1:
+        raise ValueError("jobs 应为不小于 1 的整数")
+    if args.max_fetch_workers < 1 or args.max_download_workers < 1:
+        raise ValueError("server worker 上限应为不小于 1 的整数")
+    if args.task_limit < 1:
+        raise ValueError("task_limit 应为不小于 1 的整数")
+
+    FFmpeg.setup_ffmpeg_path(str(args.ffmpeg_path))
     ffmpeg = FFmpeg()
-    token = resolve_server_token(options.token_file)
-    server = build_server(options, token.value, ffmpeg=ffmpeg)
+    token = resolve_server_token(args.token_file)
+    server = build_server(args, token.value, ffmpeg=ffmpeg)
     await server.start()
     for socket in server.sockets:
         address = socket.getsockname()
