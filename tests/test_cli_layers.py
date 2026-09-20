@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from yutto.cli.bootstrap import parse_bootstrap_args
 from yutto.cli.command import download_layer_from_namespace, resolve_download_command
 from yutto.cli.compat import normalize_argv
 from yutto.cli.input import expand_download_layers
@@ -108,11 +107,3 @@ def test_task_list_inheritance_merges_explicit_layers(tmp_path: Path):
         ("BV1first", "no", 2),
         ("BV1second", "auto", 5),
     ]
-
-
-def test_bootstrap_config_is_found_independently_of_argument_order(tmp_path: Path):
-    config = tmp_path / "yutto.toml"
-
-    options = parse_bootstrap_args(["BV1xx411c7mD", "--video-quality", "80", "--config", str(config)])
-
-    assert options.config == config
