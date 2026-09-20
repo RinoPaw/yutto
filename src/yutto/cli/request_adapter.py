@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, cast
 from yutto.core.request import DownloadRequest
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Callable, Mapping
     from typing import Any
 
@@ -15,9 +14,8 @@ if TYPE_CHECKING:
 MEBIBYTE = 1024 * 1024
 
 
-def request_overrides_from_namespace(args: argparse.Namespace) -> dict[str, Any]:
-    """Translate only explicitly supplied download CLI options into a request patch."""
-    values = vars(args)
+def request_overrides_from_cli(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate only explicitly supplied download CLI values into a request patch."""
     request: dict[str, Any] = {}
 
     access: dict[str, Any] = {}
@@ -265,19 +263,21 @@ def request_overrides_from_settings(
 
 
 def resolve_download_request(
-    source: str,
+    values: Mapping[str, Any],
     settings: YuttoSettings,
-    cli_overrides: Mapping[str, Any] | None = None,
     *,
     include_output_paths: bool = True,
 ) -> DownloadRequest:
-    payload: dict[str, Any] = {"source": {"url": source}}
+    source = values.get("source")
+    if source is None:
+        raise ValueError("download source is missing")
+
+    payload: dict[str, Any] = {"source": {"url": str(source)}}
     payload = _deep_merge(
         payload,
         request_overrides_from_settings(settings, include_output_paths=include_output_paths),
     )
-    if cli_overrides:
-        payload = _deep_merge(payload, dict(cli_overrides))
+    payload = _deep_merge(payload, request_overrides_from_cli(values))
     return DownloadRequest.model_validate(payload)
 
 
@@ -298,10 +298,6 @@ def download_request_parser_from_settings(settings: YuttoSettings) -> Callable[[
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
-
-
-def merge_request_patches(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
-    return _deep_merge(dict(base), dict(overrides))
 
 
 def _deep_merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
