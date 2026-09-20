@@ -39,11 +39,10 @@ if TYPE_CHECKING:
 def main() -> None:
     parser = build_parser()
     renderer = CliApplicationEventRenderer()
-    with bind_download_report_sink(renderer.report):
-        args = parser.parse_args(normalize_argv(sys.argv[1:]))
+    args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
     config = getattr(args, "config", None) or search_for_settings_file()
-    settings = None
+    settings: YuttoSettings
     try:
         if config is None:
             settings = YuttoSettings()
@@ -65,16 +64,12 @@ def main() -> None:
                 with bind_download_report_sink(renderer.report):
                     configure_cli(runtime)
                     outer_layer = download_layer_from_namespace(args)
-                    outer_command = resolve_download_command(outer_layer, settings)
+                    layers = expand_download_layers(outer_layer, parser, settings)
+                    commands = [resolve_download_command(layer, settings) for layer in layers]
 
                     if not preview_formats:
                         FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
                         ffmpeg = FFmpeg()
-                        validate_download_request(outer_command.request, ffmpeg)
-
-                    layers = expand_download_layers(outer_layer, parser, settings)
-                    commands = [resolve_download_command(layer, settings) for layer in layers]
-                    if not preview_formats:
                         for command in commands:
                             validate_download_request(command.request, ffmpeg)
 
@@ -124,7 +119,17 @@ def main() -> None:
                 sys.exit(ErrorCode.PAUSED_DOWNLOAD.value)
 
         case "auth":
-            run_auth(resolve_auth_command(args, settings))
+            try:
+                run_auth(resolve_auth_command(args, settings))
+            except YuttoBaseException as error:
+                Logger.error(error.message)
+                sys.exit(error.code.value)
+            except TimeoutError as error:
+                Logger.error(str(error))
+                sys.exit(ErrorCode.HTTP_STATUS_ERROR.value)
+            except (OSError, ValueError) as error:
+                Logger.error(str(error))
+                sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
         case "serve":
             from yutto.server.command import run_server_command
