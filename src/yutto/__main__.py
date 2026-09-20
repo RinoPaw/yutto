@@ -15,7 +15,7 @@ from yutto.cli.input import expand_download_values
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import resolve_config
+from yutto.cli.settings import resolve_config, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -38,7 +38,7 @@ def main() -> None:
     args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
     try:
-        config = resolve_config(getattr(args, "config", None))
+        config = resolve_config(getattr(args, "config", None), search=search_for_settings_file)
     except (OSError, ValueError) as error:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
