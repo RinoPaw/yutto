@@ -4,6 +4,7 @@ import asyncio
 import math
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -28,7 +29,10 @@ from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
+    import argparse
+
     from yutto._native import YuttoSession
+    from yutto.cli.settings import YuttoSettings
     from yutto.types import UserInfo
 
 # 这些状态码来自 B 站二维码登录返回 data.code
@@ -46,7 +50,20 @@ COOKIE_PROBE_URLS = (
 
 
 @as_sync
-async def run_auth(args: Any) -> None:
+async def run_auth(args: argparse.Namespace, settings: YuttoSettings) -> None:
+    values = vars(args)
+    values.setdefault("auth", settings.auth.auth if settings.auth.auth is not None else "")
+    if "auth_file" not in values:
+        values["auth_file"] = None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser()
+    values.setdefault(
+        "auth_profile",
+        settings.auth.auth_profile if settings.auth.auth_profile is not None else "default",
+    )
+    values.setdefault("proxy", settings.basic.proxy if settings.basic.proxy is not None else "auto")
+    values.setdefault("mode", "terminal")
+    values.setdefault("poll_interval", 2.0)
+    values.setdefault("timeout", 180)
+
     match args.auth_command:
         case "login":
             await run_login(args)
