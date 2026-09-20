@@ -5,11 +5,14 @@ from typing import Any
 
 import pytest
 
-from yutto.cli.command import download_layer_from_namespace, resolve_download_command
 from yutto.cli.compat import normalize_argv
-from yutto.cli.input import expand_download_layers
+from yutto.cli.input import expand_download_values
 from yutto.cli.parser import build_parser
-from yutto.cli.request_adapter import download_request_from_mapping, download_request_parser_from_settings
+from yutto.cli.request_adapter import (
+    download_request_from_mapping,
+    download_request_parser_from_settings,
+    resolve_download_request,
+)
 from yutto.cli.settings import YuttoSettings
 from yutto.core.request import DownloadRequest
 
@@ -22,7 +25,7 @@ def parse_download_args(arguments: list[str]):
 
 def request_from_args(arguments: list[str]) -> DownloadRequest:
     args = parse_download_args(arguments)
-    return resolve_download_command(download_layer_from_namespace(args), YuttoSettings()).request
+    return resolve_download_request(vars(args), YuttoSettings())
 
 
 def test_default_namespace_maps_to_grouped_core_request():
@@ -46,7 +49,7 @@ def test_selection_is_explicit_without_batch():
     assert args.selection_expr == "1~-1"
     assert not hasattr(args, "episodes")
 
-    request = resolve_download_command(download_layer_from_namespace(args), YuttoSettings()).request
+    request = resolve_download_request(vars(args), YuttoSettings())
     assert request.selection.expression == "1~-1"
 
 
@@ -247,10 +250,11 @@ def test_cli_and_secret_options_do_not_cross_core_boundary(tmp_path: Path):
 
 def test_adapter_rejects_unvalidated_codec_pair():
     args = parse_download_args(["BV1xx411c7mD"])
-    args.vcodec = "avc"
+    values = vars(args)
+    values["vcodec"] = "avc"
 
     with pytest.raises(ValueError, match="vcodec must contain exactly one"):
-        resolve_download_command(download_layer_from_namespace(args), YuttoSettings())
+        resolve_download_request(values, YuttoSettings())
 
 
 def test_cover_only_request_keeps_existing_save_cover_semantics():
@@ -362,8 +366,8 @@ def test_task_list_preserves_per_item_network_and_auth_overrides(tmp_path: Path)
         )
     )
 
-    layers = expand_download_layers(download_layer_from_namespace(args), parser, settings)
-    requests = [resolve_download_command(layer, settings).request for layer in layers]
+    tasks = expand_download_values(vars(args), parser, settings)
+    requests = [resolve_download_request(task, settings) for task in tasks]
 
     assert [
         (
