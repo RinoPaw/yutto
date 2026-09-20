@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -8,7 +9,6 @@ import pytest
 
 import yutto.__main__ as main_module
 import yutto.server.command as server_command_module
-from yutto.cli.command import resolve_serve_command
 from yutto.cli.compat import normalize_argv
 from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoSettings
@@ -22,9 +22,22 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.processor
 
 
-def _serve_command(arguments: list[str]):
-    args = build_parser().parse_args(arguments)
-    return resolve_serve_command(args, YuttoSettings())
+def _server_options(**overrides: object) -> SimpleNamespace:
+    values = {
+        "request_settings": YuttoSettings(),
+        "host": "127.0.0.1",
+        "port": 11223,
+        "allow_origin": (),
+        "download_root": Path(),
+        "tmp_root": None,
+        "auth_file": None,
+        "max_fetch_workers": 16,
+        "max_download_workers": 16,
+        "task_limit": 256,
+        "jobs": 1,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 def test_serve_is_an_explicit_subcommand():
@@ -36,27 +49,15 @@ def test_serve_is_an_explicit_subcommand():
         "allow_origin": ["https://ui.example"],
     }
 
-    command = resolve_serve_command(args, YuttoSettings())
-    assert command.port == 12345
-    assert command.allow_origin == ("https://ui.example",)
-    assert command.jobs == 1
-
 
 def test_serve_jobs_configures_download_runtime_workers():
-    command = _serve_command(["serve", "--jobs", "3"])
-
     server = build_server(
-        command,
+        _server_options(jobs=3),
         "token",
         ffmpeg=cast("Any", SimpleNamespace(video_encodecs=(), audio_encodecs=())),
     )
 
     assert cast("DownloadTaskService", server._task_service).runtime.worker_count == 3
-
-
-def test_serve_accepts_ffmpeg_path():
-    assert _serve_command(["serve"]).ffmpeg_path == "ffmpeg"
-    assert _serve_command(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"]).ffmpeg_path == "/opt/ffmpeg/ffmpeg"
 
 
 def test_serve_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.MonkeyPatch):
@@ -69,9 +70,9 @@ def test_serve_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.Mo
             raise RuntimeError("stop after recording")
 
     monkeypatch.setattr(server_command_module, "FFmpeg", RecordingFFmpeg)
-    command = _serve_command(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
+    args = build_parser().parse_args(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
     with pytest.raises(RuntimeError, match="stop after recording"):
-        server_command_module.run_server_command(command)
+        server_command_module.run_server_command(args, YuttoSettings())
 
     assert recorded == ["/opt/ffmpeg/ffmpeg"]
 
@@ -81,11 +82,11 @@ def test_serve_argument_error_is_rendered_without_traceback(
 ):
     parser = SimpleNamespace(parse_args=lambda _args: SimpleNamespace(command="serve"))
 
-    def fail_server(args: object) -> None:
+    def fail_server(args: object, settings: YuttoSettings) -> None:
         raise WrongArgumentError("请配置正确的 FFmpeg 路径")
 
     monkeypatch.setattr(main_module, "build_parser", lambda: parser)
-    monkeypatch.setattr(main_module, "load_cli_settings", lambda _options: YuttoSettings())
+    monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "serve"])
     monkeypatch.setattr(server_command_module, "run_server_command", fail_server)
 
@@ -100,7 +101,7 @@ def test_serve_argument_error_is_rendered_without_traceback(
     parser = SimpleNamespace(parse_args=lambda _args: SimpleNamespace(command="serve"))
     rendered_errors: list[str] = []
 
-    def fail_server_with_report(args: object) -> None:
+    def fail_server_with_report(args: object, settings: YuttoSettings) -> None:
         emit_download_report("server report", ReportLevel.ERROR)
         raise OSError("address already in use")
 
