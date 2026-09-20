@@ -10,7 +10,9 @@ def resolve_runtime_options(
     values: dict[str, Any],
     settings: YuttoSettings,
 ) -> dict[str, Any]:
-    jobs = values.get("jobs", settings.basic.jobs or 1)
+    jobs = values.get("jobs", settings.basic.jobs)
+    if jobs is None:
+        jobs = 1
 
     try:
         jobs = int(jobs)
