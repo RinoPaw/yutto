@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import sys
 from pathlib import Path
@@ -9,13 +8,14 @@ from typing import TYPE_CHECKING
 from yutto.auth import resolve_auth_file, validate_user_info
 from yutto.cli.auth import run_auth
 from yutto.cli.compat import normalize_argv
+from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
 from yutto.cli.input import expand_download_values
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import YuttoConfig, load_settings_file, search_for_settings_file
+from yutto.cli.settings import resolve_config
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -37,15 +37,8 @@ def main() -> None:
     renderer = CliApplicationEventRenderer()
     args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
-    config: YuttoConfig
     try:
-        config_path = getattr(args, "config", None)
-        config_path = Path(config_path).expanduser() if config_path is not None else search_for_settings_file()
-        if config_path is None:
-            config = YuttoConfig()
-        else:
-            Logger.info(f"发现配置文件 {config_path}，加载中……")
-            config = load_settings_file(config_path)
+        config = resolve_config(getattr(args, "config", None))
     except (OSError, ValueError) as error:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
@@ -55,7 +48,7 @@ def main() -> None:
             try:
                 values = vars(args)
                 runtime = resolve_runtime_options(values, config)
-                preview_formats = bool(values.get("preview_formats", False))
+                preview_formats = runtime["preview_formats"]
                 renderer.progress_enabled = not runtime["no_progress"] and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
@@ -73,19 +66,7 @@ def main() -> None:
                         for request in requests:
                             validate_download_request(request, ffmpeg)
 
-                    configured_auth = config.auth.auth if config.auth.auth is not None else ""
-                    configured_auth_file = None if config.auth.auth_file is None else Path(config.auth.auth_file).expanduser()
-                    configured_auth_profile = config.auth.auth_profile if config.auth.auth_profile is not None else "default"
-                    configured_sessdata = config.basic.sessdata if config.basic.sessdata is not None else ""
-                    credential_options = [
-                        argparse.Namespace(
-                            auth=str(task.get("auth", configured_auth)),
-                            auth_file=task.get("auth_file", configured_auth_file),
-                            auth_profile=str(task.get("auth_profile", configured_auth_profile)),
-                            sessdata=str(task.get("sessdata", configured_sessdata)),
-                        )
-                        for task in tasks
-                    ]
+                    credential_options = resolve_credential_options(tasks, config)
                     auth_list = [resolve_credentials(options) for options in credential_options]
                     auth_by_request = {id(request): auth for request, auth in zip(requests, auth_list, strict=True)}
                     credentials_by_request = {
