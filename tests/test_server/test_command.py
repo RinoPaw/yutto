@@ -11,7 +11,7 @@ import yutto.__main__ as main_module
 import yutto.server.command as server_command_module
 from yutto.cli.compat import normalize_argv
 from yutto.cli.parser import build_parser
-from yutto.cli.settings import YuttoSettings
+from yutto.cli.settings import YuttoConfig
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.exceptions import ErrorCode, WrongArgumentError
 from yutto.server.command import build_server, resolve_server_token
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.processor
 
 def _server_options(**overrides: object) -> SimpleNamespace:
     values = {
-        "request_settings": YuttoSettings(),
+        "request_settings": YuttoConfig(),
         "host": "127.0.0.1",
         "port": 11223,
         "allow_origin": (),
@@ -72,7 +72,7 @@ def test_serve_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.Mo
     monkeypatch.setattr(server_command_module, "FFmpeg", RecordingFFmpeg)
     args = build_parser().parse_args(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
     with pytest.raises(RuntimeError, match="stop after recording"):
-        server_command_module.run_server_command(args, YuttoSettings())
+        server_command_module.run_server_command(args, YuttoConfig())
 
     assert recorded == ["/opt/ffmpeg/ffmpeg"]
 
@@ -82,7 +82,7 @@ def test_serve_argument_error_is_rendered_without_traceback(
 ):
     parser = SimpleNamespace(parse_args=lambda _args: SimpleNamespace(command="serve"))
 
-    def fail_server(args: object, settings: YuttoSettings) -> None:
+    def fail_server(args: object, config: YuttoConfig) -> None:
         raise WrongArgumentError("请配置正确的 FFmpeg 路径")
 
     monkeypatch.setattr(main_module, "build_parser", lambda: parser)
@@ -101,7 +101,7 @@ def test_serve_argument_error_is_rendered_without_traceback(
     parser = SimpleNamespace(parse_args=lambda _args: SimpleNamespace(command="serve"))
     rendered_errors: list[str] = []
 
-    def fail_server_with_report(args: object, settings: YuttoSettings) -> None:
+    def fail_server_with_report(args: object, config: YuttoConfig) -> None:
         emit_download_report("server report", ReportLevel.ERROR)
         raise OSError("address already in use")
 
