@@ -30,7 +30,7 @@ from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
     from yutto._native import YuttoSession
-    from yutto.cli.settings import YuttoSettings
+    from yutto.cli.settings import YuttoConfig
     from yutto.types import UserInfo
 
 # 这些状态码来自 B 站二维码登录返回 data.code
@@ -48,7 +48,7 @@ COOKIE_PROBE_URLS = (
 
 
 @as_sync
-async def run_auth(args: Any, settings: YuttoSettings | None = None) -> None:
+async def run_auth(args: Any, settings: YuttoConfig | None = None) -> None:
     values = vars(args)
     if settings is None:
         values.setdefault("auth", "")
