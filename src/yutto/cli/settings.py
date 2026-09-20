@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -129,9 +130,13 @@ def load_settings_file(settings_file: Path) -> YuttoConfig:
     return YuttoConfig.model_validate(settings_raw)
 
 
-def resolve_config(config_path: str | Path | None = None) -> YuttoConfig:
+def resolve_config(
+    config_path: str | Path | None = None,
+    *,
+    search: Callable[[], Path | None] = search_for_settings_file,
+) -> YuttoConfig:
     """Resolve an explicit or discovered config file into immutable CLI settings."""
-    settings_file = Path(config_path).expanduser() if config_path is not None else search_for_settings_file()
+    settings_file = Path(config_path).expanduser() if config_path is not None else search()
     if settings_file is None:
         return YuttoConfig()
     Logger.info(f"发现配置文件 {settings_file}，加载中……")
