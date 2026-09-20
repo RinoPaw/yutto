@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from yutto.cli.compat import normalize_argv
 from yutto.cli.input import expand_download_values
@@ -29,6 +30,13 @@ def test_download_parser_emits_only_explicit_cli_values():
         "command": "download",
         "source": "BV1xx411c7mD",
     }
+
+
+def test_yutto_config_is_immutable():
+    config = YuttoConfig.model_validate({"basic": {"jobs": 2}})
+
+    with pytest.raises(ValidationError, match="frozen"):
+        config.basic.jobs = 4
 
 
 def test_cli_overrides_config_while_unmentioned_config_values_survive():
