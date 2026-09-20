@@ -5,7 +5,6 @@ import re
 import shlex
 import urllib.parse
 import urllib.request
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,8 +14,9 @@ from yutto.utils.console.logger import Logger
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Mapping
+    from typing import Any
 
-    from yutto.cli.command import DownloadLayer
     from yutto.cli.settings import YuttoSettings
 
 
@@ -56,28 +56,32 @@ def file_scheme_parser(url: str) -> list[str]:
     return result
 
 
-def expand_download_layers(
-    layer: DownloadLayer,
+def expand_download_values(
+    values: Mapping[str, Any],
     parser: argparse.ArgumentParser,
     settings: YuttoSettings,
-) -> list[DownloadLayer]:
-    """Resolve aliases and file lists while preserving explicit override layers."""
-    from yutto.cli.command import download_layer_from_namespace, merge_download_layers
+) -> list[dict[str, Any]]:
+    """Resolve aliases and task lists using ordinary inner-scope overrides."""
+    current = dict(values)
+    source = current.get("source")
+    if source is None:
+        raise ValueError("download source is missing")
+    source = str(source)
 
-    aliases = layer.cli_overrides.get("aliases", settings.basic.aliases)
-    source = aliases.get(layer.source, layer.source) if aliases is not None else layer.source
-    layer = replace(layer, source=source)
+    aliases = current.get("aliases", settings.basic.aliases)
+    if aliases is not None:
+        source = aliases.get(source, source)
+    current["source"] = source
 
     if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
-        return [layer]
+        return [current]
 
-    result: list[DownloadLayer] = []
+    result: list[dict[str, Any]] = []
     for line in file_scheme_parser(source):
-        namespace = parser.parse_args(normalize_argv(shlex.split(line)))
-        if namespace.command != "download":
+        child = vars(parser.parse_args(normalize_argv(shlex.split(line))))
+        if child.get("command") != "download":
             raise ValueError("下载列表中只能包含 download 命令")
-        child = download_layer_from_namespace(namespace)
-        effective = child if layer.no_inherit or child.no_inherit else merge_download_layers(layer, child)
+        effective = child if current.get("no_inherit") or child.get("no_inherit") else {**current, **child}
         Logger.debug(f"列表参数: {effective}")
-        result.extend(expand_download_layers(effective, parser, settings))
+        result.extend(expand_download_values(effective, parser, settings))
     return result
