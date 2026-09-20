@@ -15,7 +15,7 @@ from yutto.cli.input import expand_download_values
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import YuttoSettings, load_settings_file, search_for_settings_file
+from yutto.cli.settings import YuttoConfig, load_settings_file, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -37,15 +37,15 @@ def main() -> None:
     renderer = CliApplicationEventRenderer()
     args = parser.parse_args(normalize_argv(sys.argv[1:]))
 
-    settings: YuttoSettings
+    config: YuttoConfig
     try:
-        config = getattr(args, "config", None)
-        config = Path(config).expanduser() if config is not None else search_for_settings_file()
-        if config is None:
-            settings = YuttoSettings()
+        config_path = getattr(args, "config", None)
+        config_path = Path(config_path).expanduser() if config_path is not None else search_for_settings_file()
+        if config_path is None:
+            config = YuttoConfig()
         else:
-            Logger.info(f"发现配置文件 {config}，加载中……")
-            settings = load_settings_file(config)
+            Logger.info(f"发现配置文件 {config_path}，加载中……")
+            config = load_settings_file(config_path)
     except (OSError, ValueError) as error:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
@@ -54,7 +54,7 @@ def main() -> None:
         case "download":
             try:
                 values = vars(args)
-                runtime = resolve_runtime_options(values, settings)
+                runtime = resolve_runtime_options(values, config)
                 preview_formats = bool(values.get("preview_formats", False))
                 renderer.progress_enabled = not runtime["no_progress"] and sys.stdout.isatty()
 
@@ -64,8 +64,8 @@ def main() -> None:
                         no_color=runtime["no_color"],
                         debug=runtime["debug"],
                     )
-                    tasks = expand_download_values(values, parser, settings)
-                    requests = [resolve_download_request(task, settings) for task in tasks]
+                    tasks = expand_download_values(values, parser, config)
+                    requests = [resolve_download_request(task, config) for task in tasks]
 
                     if not preview_formats:
                         FFmpeg.setup_ffmpeg_path(runtime["ffmpeg_path"])
@@ -73,14 +73,10 @@ def main() -> None:
                         for request in requests:
                             validate_download_request(request, ffmpeg)
 
-                    configured_auth = settings.auth.auth if settings.auth.auth is not None else ""
-                    configured_auth_file = (
-                        None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser()
-                    )
-                    configured_auth_profile = (
-                        settings.auth.auth_profile if settings.auth.auth_profile is not None else "default"
-                    )
-                    configured_sessdata = settings.basic.sessdata if settings.basic.sessdata is not None else ""
+                    configured_auth = config.auth.auth if config.auth.auth is not None else ""
+                    configured_auth_file = None if config.auth.auth_file is None else Path(config.auth.auth_file).expanduser()
+                    configured_auth_profile = config.auth.auth_profile if config.auth.auth_profile is not None else "default"
+                    configured_sessdata = config.basic.sessdata if config.basic.sessdata is not None else ""
                     credential_options = [
                         argparse.Namespace(
                             auth=str(task.get("auth", configured_auth)),
@@ -138,7 +134,7 @@ def main() -> None:
 
         case "auth":
             try:
-                run_auth(args, settings)
+                run_auth(args, config)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
@@ -154,7 +150,7 @@ def main() -> None:
 
             try:
                 with bind_download_report_sink(renderer.report):
-                    run_server_command(args, settings)
+                    run_server_command(args, config)
             except KeyboardInterrupt:
                 Logger.info("yutto server 已停止")
             except YuttoBaseException as error:
