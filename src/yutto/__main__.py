@@ -54,21 +54,21 @@ def main() -> None:
         case "download":
             try:
                 values = vars(args)
-                runtime_options = resolve_runtime_options(values, settings)
+                runtime = resolve_runtime_options(values, settings)
                 preview_formats = bool(values.get("preview_formats", False))
-                renderer.progress_enabled = not runtime_options["no_progress"] and sys.stdout.isatty()
+                renderer.progress_enabled = not runtime["no_progress"] and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
                     configure_cli(
-                        no_progress=runtime_options["no_progress"],
-                        no_color=runtime_options["no_color"],
-                        debug=runtime_options["debug"],
+                        no_progress=runtime["no_progress"],
+                        no_color=runtime["no_color"],
+                        debug=runtime["debug"],
                     )
                     tasks = expand_download_values(values, parser, settings)
                     requests = [resolve_download_request(task, settings) for task in tasks]
 
                     if not preview_formats:
-                        FFmpeg.setup_ffmpeg_path(runtime_options["ffmpeg_path"])
+                        FFmpeg.setup_ffmpeg_path(runtime["ffmpeg_path"])
                         ffmpeg = FFmpeg()
                         for request in requests:
                             validate_download_request(request, ffmpeg)
@@ -125,7 +125,7 @@ def main() -> None:
                     if preview_formats:
                         run_preview_formats(scope_factory, requests, renderer)
                     else:
-                        run_download(scope_factory, requests, renderer, jobs=jobs)
+                        run_download(scope_factory, requests, renderer, jobs=runtime["jobs"])
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
