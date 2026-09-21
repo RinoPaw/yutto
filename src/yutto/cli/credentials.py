@@ -19,13 +19,17 @@ def resolve_credential_options(
 ) -> list[argparse.Namespace]:
     """Resolve credential options through the same scope chain as download options."""
 
-    if scopes and not isinstance(scopes[0], Scope):
+    if not scopes:
+        return []
+
+    if isinstance(scopes[0], Scope):
+        resolved_scopes = list(cast("Sequence[Scope]", scopes))
+    else:
         if config is None:
             raise TypeError("config is required when resolving raw task mappings")
         configured = config_scope(config)
-        resolved_scopes = [Scope(scope, parent=configured) for scope in scopes]
-    else:
-        resolved_scopes = list(cast("Sequence[Scope]", scopes))
+        raw_scopes = cast("Sequence[Mapping[str, Any]]", scopes)
+        resolved_scopes = [Scope(scope, parent=configured) for scope in raw_scopes]
 
     return [
         argparse.Namespace(

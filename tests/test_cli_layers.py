@@ -36,7 +36,7 @@ def test_yutto_config_is_immutable():
     config = YuttoConfig.model_validate({"basic": {"jobs": 2}})
 
     with pytest.raises(ValidationError, match="frozen"):
-        config.basic.jobs = 4
+        setattr(config.basic, "jobs", 4)
 
 
 def test_cli_overrides_config_while_unmentioned_config_values_survive():

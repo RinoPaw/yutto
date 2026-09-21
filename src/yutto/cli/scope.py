@@ -33,7 +33,8 @@ class Scope:
     def __post_init__(self) -> None:
         object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
 
-    def lookup(self, key: str) -> Any | _Missing:
+    def lookup(self, key: str) -> Any:
+        """Resolve a heterogeneous option value, returning ``MISSING`` when absent."""
         if key in self.values:
             return self.values[key]
         if self.parent is not None:

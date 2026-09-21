@@ -109,7 +109,7 @@ def configure_download_cli(
         requests: list[DownloadRequest],
         renderer: object,
         *,
-        jobs: int,
+        jobs: int | None,
     ):
         raise failure
 
@@ -119,8 +119,12 @@ def configure_download_cli(
     monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
     monkeypatch.setattr(main_module, "configure_cli", lambda **_: None)
     monkeypatch.setattr(main_module, "FFmpeg", FakeFFmpeg)
-    monkeypatch.setattr(main_module, "expand_download_values", lambda values, active_parser, settings: [values])
-    monkeypatch.setattr(main_module, "resolve_download_request", lambda values, settings: make_request())
+    monkeypatch.setattr(
+        main_module,
+        "expand_download_scopes",
+        lambda scope, active_parser, configured: [scope],
+    )
+    monkeypatch.setattr(main_module, "resolve_download_request", lambda scope: make_request())
     monkeypatch.setattr(main_module, "validate_download_request", lambda request, ffmpeg: None)
     monkeypatch.setattr(main_module, "resolve_credentials", lambda options: None)
     monkeypatch.setattr(main_module, "run_download", fail_download)
