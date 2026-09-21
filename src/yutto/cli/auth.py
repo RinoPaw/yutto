@@ -112,7 +112,7 @@ async def run_auth(args: Scope | Any, settings: YuttoConfig | None = None) -> No
             raise ValueError("Invalid auth command")
 
 
-async def run_login(args: AuthCommandOptions) -> None:
+async def run_login(args: Any) -> None:
     try:
         proxy, trust_env = resolve_proxy(args.proxy)
         validate_profile(args.auth_profile)
@@ -148,7 +148,7 @@ async def run_login(args: AuthCommandOptions) -> None:
         )
 
 
-async def run_auth_status(args: AuthCommandOptions) -> None:
+async def run_auth_status(args: Any) -> None:
     try:
         proxy, trust_env = resolve_proxy(args.proxy)
         auth = resolve_auth(args)
@@ -178,8 +178,8 @@ async def run_auth_status(args: AuthCommandOptions) -> None:
     sys.exit(ErrorCode.NOT_LOGIN_ERROR.value)
 
 
-def run_auth_logout(args: AuthCommandOptions) -> None:
-    if args.auth:
+def run_auth_logout(args: Any) -> None:
+    if getattr(args, "auth", ""):
         Logger.error("当前认证来源于 inline auth，请删除 `--auth` 参数或配置项 `auth.auth` 后再试。")
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
@@ -197,8 +197,8 @@ def run_auth_logout(args: AuthCommandOptions) -> None:
     Logger.info(f"未找到可移除的认证信息，无需退出：{auth_file}（profile: {args.auth_profile}）")
 
 
-def describe_auth_source(args: AuthCommandOptions) -> str:
-    if args.auth:
+def describe_auth_source(args: Any) -> str:
+    if getattr(args, "auth", ""):
         return "来源：inline auth"
     return f"来源：{resolve_auth_file(args)}（profile: {args.auth_profile}）"
 
