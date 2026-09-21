@@ -118,7 +118,7 @@ def main() -> None:
 
         case "auth":
             try:
-                run_auth(args, config)
+                run_auth(command_scope)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)

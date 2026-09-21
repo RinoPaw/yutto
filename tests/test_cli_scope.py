@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from yutto.cli.auth import resolve_auth_command_options
 from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.input import expand_download_scopes
@@ -116,6 +117,37 @@ def test_scope_feeds_request_runtime_and_credentials_from_one_chain():
     assert runtime.jobs == 5
     assert runtime.ffmpeg_path == "/config/ffmpeg"
     assert credentials.auth_profile == "cli-profile"
+
+
+def test_auth_command_uses_the_same_scope_chain():
+    config = YuttoConfig.model_validate(
+        {
+            "basic": {"proxy": "config-proxy"},
+            "auth": {
+                "auth": "SESSDATA=config",
+                "auth_profile": "config-profile",
+            },
+        }
+    )
+    configured = config_scope(config)
+    cli = Scope(
+        {
+            "auth_command": "login",
+            "auth_profile": "cli-profile",
+            "mode": "web",
+        },
+        parent=configured,
+    )
+
+    options = resolve_auth_command_options(cli)
+
+    assert options.auth_command == "login"
+    assert options.auth == "SESSDATA=config"
+    assert options.auth_profile == "cli-profile"
+    assert options.proxy == "config-proxy"
+    assert options.mode == "web"
+    assert options.poll_interval == 2.0
+    assert options.timeout == 180
 
 
 def test_empty_scope_leaves_owned_defaults_to_lower_layers():

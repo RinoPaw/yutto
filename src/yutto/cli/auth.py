@@ -4,6 +4,7 @@ import asyncio
 import math
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, unquote, urlparse
@@ -23,6 +24,7 @@ from yutto.auth import (
     user_info_matches,
     validate_profile,
 )
+from yutto.cli.scope import MISSING, Scope, config_scope
 from yutto.exceptions import ErrorCode
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
@@ -47,39 +49,70 @@ COOKIE_PROBE_URLS = (
 )
 
 
-@as_sync
-async def run_auth(args: Any, settings: YuttoConfig | None = None) -> None:
-    values = vars(args)
-    if settings is None:
-        values.setdefault("auth", "")
-        values.setdefault("auth_file", None)
-        values.setdefault("auth_profile", "default")
-        values.setdefault("proxy", "auto")
-    else:
-        values.setdefault("auth", settings.auth.auth if settings.auth.auth is not None else "")
-        if "auth_file" not in values:
-            values["auth_file"] = None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser()
-        values.setdefault(
-            "auth_profile",
-            settings.auth.auth_profile if settings.auth.auth_profile is not None else "default",
-        )
-        values.setdefault("proxy", settings.basic.proxy if settings.basic.proxy is not None else "auto")
-    values.setdefault("mode", "terminal")
-    values.setdefault("poll_interval", 2.0)
-    values.setdefault("timeout", 180)
+@dataclass(frozen=True, slots=True)
+class AuthCommandOptions:
+    auth_command: str
+    auth: str
+    auth_file: Path | None
+    auth_profile: str
+    proxy: str
+    mode: str
+    poll_interval: float
+    timeout: int
 
-    match args.auth_command:
+
+def resolve_auth_command_options(scope: Scope) -> AuthCommandOptions:
+    """Resolve auth command inputs from the common CLI/config scope chain."""
+
+    auth_command = scope.lookup("auth_command")
+    if auth_command is MISSING:
+        raise ValueError("auth command is missing")
+
+    auth_file = scope.lookup("auth_file")
+    if auth_file is MISSING or auth_file is None:
+        resolved_auth_file = None
+    elif isinstance(auth_file, Path):
+        resolved_auth_file = auth_file
+    else:
+        resolved_auth_file = Path(auth_file).expanduser()
+
+    return AuthCommandOptions(
+        auth_command=str(auth_command),
+        auth=str(_scope_value(scope, "auth", "")),
+        auth_file=resolved_auth_file,
+        auth_profile=str(_scope_value(scope, "auth_profile", "default")),
+        proxy=str(_scope_value(scope, "proxy", "auto")),
+        mode=str(_scope_value(scope, "mode", "terminal")),
+        poll_interval=float(_scope_value(scope, "poll_interval", 2.0)),
+        timeout=int(_scope_value(scope, "timeout", 180)),
+    )
+
+
+def _scope_value(scope: Scope, key: str, default: Any) -> Any:
+    value = scope.lookup(key)
+    return default if value is MISSING or value is None else value
+
+
+@as_sync
+async def run_auth(args: Scope | Any, settings: YuttoConfig | None = None) -> None:
+    if isinstance(args, Scope):
+        options = resolve_auth_command_options(args)
+    else:
+        configured = config_scope(settings) if settings is not None else Scope({})
+        options = resolve_auth_command_options(Scope(vars(args), parent=configured))
+
+    match options.auth_command:
         case "login":
-            await run_login(args)
+            await run_login(options)
         case "logout":
-            run_auth_logout(args)
+            run_auth_logout(options)
         case "status":
-            await run_auth_status(args)
+            await run_auth_status(options)
         case _:
             raise ValueError("Invalid auth command")
 
 
-async def run_login(args: Any) -> None:
+async def run_login(args: AuthCommandOptions) -> None:
     try:
         proxy, trust_env = resolve_proxy(args.proxy)
         validate_profile(args.auth_profile)
@@ -115,7 +148,7 @@ async def run_login(args: Any) -> None:
         )
 
 
-async def run_auth_status(args: Any) -> None:
+async def run_auth_status(args: AuthCommandOptions) -> None:
     try:
         proxy, trust_env = resolve_proxy(args.proxy)
         auth = resolve_auth(args)
@@ -145,8 +178,8 @@ async def run_auth_status(args: Any) -> None:
     sys.exit(ErrorCode.NOT_LOGIN_ERROR.value)
 
 
-def run_auth_logout(args: Any) -> None:
-    if getattr(args, "auth", ""):
+def run_auth_logout(args: AuthCommandOptions) -> None:
+    if args.auth:
         Logger.error("当前认证来源于 inline auth，请删除 `--auth` 参数或配置项 `auth.auth` 后再试。")
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
@@ -164,8 +197,8 @@ def run_auth_logout(args: Any) -> None:
     Logger.info(f"未找到可移除的认证信息，无需退出：{auth_file}（profile: {args.auth_profile}）")
 
 
-def describe_auth_source(args: Any) -> str:
-    if getattr(args, "auth", ""):
+def describe_auth_source(args: AuthCommandOptions) -> str:
+    if args.auth:
         return "来源：inline auth"
     return f"来源：{resolve_auth_file(args)}（profile: {args.auth_profile}）"
 
