@@ -3,16 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from yutto.cli.scope import MISSING, Scope, config_scope
+
 if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
 
 
 @dataclass(frozen=True)
 class RuntimeOptions:
-    """CLI process options after applying persistent configuration overrides.
-
-    ``None`` means the CLI did not override a default owned by a lower layer.
-    """
+    """CLI process options after applying the active scope chain."""
 
     jobs: int | None
     ffmpeg_path: str | None
@@ -23,40 +22,37 @@ class RuntimeOptions:
 
 
 def resolve_runtime_options(
-    values: dict[str, Any],
-    config: YuttoConfig,
+    scope: Scope | dict[str, Any],
+    config: YuttoConfig | None = None,
 ) -> RuntimeOptions:
-    jobs = values.get("jobs", config.basic.jobs)
-    if jobs is not None:
+    if not isinstance(scope, Scope):
+        if config is None:
+            raise TypeError("config is required when resolving a raw value mapping")
+        scope = Scope(scope, parent=config_scope(config))
+
+    jobs = scope.lookup("jobs")
+    if jobs is MISSING:
+        resolved_jobs = None
+    else:
         try:
-            jobs = int(jobs)
-            if jobs < 1:
+            resolved_jobs = int(jobs)
+            if resolved_jobs < 1:
                 raise ValueError
         except (ValueError, TypeError):
             raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）") from None
 
-    ffmpeg_path = values.get("ffmpeg_path", config.basic.ffmpeg_path)
+    ffmpeg_path = scope.lookup("ffmpeg_path")
 
     return RuntimeOptions(
-        jobs=jobs,
-        ffmpeg_path=str(ffmpeg_path) if ffmpeg_path is not None else None,
-        preview_formats=bool(values.get("preview_formats", False)),
-        no_color=bool(
-            values.get(
-                "no_color",
-                config.basic.no_color if config.basic.no_color is not None else False,
-            )
-        ),
-        no_progress=bool(
-            values.get(
-                "no_progress",
-                config.basic.no_progress if config.basic.no_progress is not None else False,
-            )
-        ),
-        debug=bool(
-            values.get(
-                "debug",
-                config.basic.debug if config.basic.debug is not None else False,
-            )
-        ),
+        jobs=resolved_jobs,
+        ffmpeg_path=None if ffmpeg_path is MISSING or ffmpeg_path is None else str(ffmpeg_path),
+        preview_formats=_bool_value(scope, "preview_formats"),
+        no_color=_bool_value(scope, "no_color"),
+        no_progress=_bool_value(scope, "no_progress"),
+        debug=_bool_value(scope, "debug"),
     )
+
+
+def _bool_value(scope: Scope, key: str) -> bool:
+    value = scope.lookup(key)
+    return False if value is MISSING else bool(value)

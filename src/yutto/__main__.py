@@ -11,10 +11,11 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import expand_download_values
+from yutto.cli.input import expand_download_scopes
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
+from yutto.cli.scope import Scope, config_scope
 from yutto.cli.settings import resolve_config, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
@@ -43,11 +44,13 @@ def main() -> None:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
+    configured = config_scope(config)
+    command_scope = Scope(vars(args), parent=configured)
+
     match args.command:
         case "download":
             try:
-                values = vars(args)
-                runtime = resolve_runtime_options(values, config)
+                runtime = resolve_runtime_options(command_scope)
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
@@ -56,8 +59,8 @@ def main() -> None:
                         no_color=runtime.no_color,
                         debug=runtime.debug,
                     )
-                    tasks = expand_download_values(values, parser, config)
-                    requests = [resolve_download_request(task, config) for task in tasks]
+                    tasks = expand_download_scopes(command_scope, parser, configured)
+                    requests = [resolve_download_request(task) for task in tasks]
 
                     if not runtime.preview_formats:
                         if runtime.ffmpeg_path is not None:
@@ -66,7 +69,7 @@ def main() -> None:
                         for request in requests:
                             validate_download_request(request, ffmpeg)
 
-                    credential_options = resolve_credential_options(tasks, config)
+                    credential_options = resolve_credential_options(tasks)
                     auth_list = [resolve_credentials(options) for options in credential_options]
                     auth_by_request = {id(request): auth for request, auth in zip(requests, auth_list, strict=True)}
                     credentials_by_request = {

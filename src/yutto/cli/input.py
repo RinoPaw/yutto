@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
+from yutto.cli.scope import MISSING, Scope, config_scope
 from yutto.core.operation import emit_download_report
 from yutto.utils.console.logger import Logger
 
@@ -56,32 +57,50 @@ def file_scheme_parser(url: str) -> list[str]:
     return result
 
 
+def expand_download_scopes(
+    scope: Scope,
+    parser: argparse.ArgumentParser,
+    config: Scope,
+) -> list[Scope]:
+    """Resolve aliases and task lists by creating child scopes instead of merging dictionaries."""
+
+    source = scope.lookup("source")
+    if source is MISSING or source is None:
+        raise ValueError("download source is missing")
+    source = str(source)
+
+    aliases = scope.lookup("aliases")
+    if aliases is not MISSING and aliases is not None:
+        source = aliases.get(source, source)
+
+    current = Scope({**scope.values, "source": source}, parent=scope.parent)
+
+    if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
+        return [current]
+
+    result: list[Scope] = []
+    current_no_inherit = current.lookup("no_inherit")
+    current_breaks_inheritance = bool(current_no_inherit is not MISSING and current_no_inherit)
+    for line in file_scheme_parser(source):
+        child_values = vars(parser.parse_args(normalize_argv(shlex.split(line))))
+        if child_values.get("command") != "download":
+            raise ValueError("下载列表中只能包含 download 命令")
+
+        child_breaks_inheritance = bool(child_values.get("no_inherit"))
+        parent = config if current_breaks_inheritance or child_breaks_inheritance else current
+        child = Scope(child_values, parent=parent)
+        Logger.debug(f"列表参数: {child.flatten(stop_at=config)}")
+        result.extend(expand_download_scopes(child, parser, config))
+    return result
+
+
 def expand_download_values(
     values: Mapping[str, Any],
     parser: argparse.ArgumentParser,
     config: YuttoConfig,
 ) -> list[dict[str, Any]]:
-    """Resolve aliases and task lists using ordinary inner-scope overrides."""
-    current = dict(values)
-    source = current.get("source")
-    if source is None:
-        raise ValueError("download source is missing")
-    source = str(source)
+    """Compatibility wrapper returning inherited explicit CLI values."""
 
-    aliases = current.get("aliases", config.basic.aliases)
-    if aliases is not None:
-        source = aliases.get(source, source)
-    current["source"] = source
-
-    if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
-        return [current]
-
-    result: list[dict[str, Any]] = []
-    for line in file_scheme_parser(source):
-        child = vars(parser.parse_args(normalize_argv(shlex.split(line))))
-        if child.get("command") != "download":
-            raise ValueError("下载列表中只能包含 download 命令")
-        effective = child if current.get("no_inherit") or child.get("no_inherit") else {**current, **child}
-        Logger.debug(f"列表参数: {effective}")
-        result.extend(expand_download_values(effective, parser, config))
-    return result
+    configured = config_scope(config)
+    scopes = expand_download_scopes(Scope(values, parent=configured), parser, configured)
+    return [scope.flatten(stop_at=configured) for scope in scopes]

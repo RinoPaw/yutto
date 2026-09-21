@@ -2,30 +2,49 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
+
+from yutto.cli.scope import MISSING, Scope, config_scope
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from typing import Any
 
     from yutto.cli.settings import YuttoConfig
 
 
 def resolve_credential_options(
-    tasks: Sequence[Mapping[str, Any]],
-    config: YuttoConfig,
+    scopes: Sequence[Scope] | Sequence[Mapping[str, Any]],
+    config: YuttoConfig | None = None,
 ) -> list[argparse.Namespace]:
-    """Merge explicit task credential options over persistent config values."""
-    configured_auth = config.auth.auth if config.auth.auth is not None else ""
-    configured_auth_file = None if config.auth.auth_file is None else Path(config.auth.auth_file).expanduser()
-    configured_auth_profile = config.auth.auth_profile if config.auth.auth_profile is not None else "default"
-    configured_sessdata = config.basic.sessdata if config.basic.sessdata is not None else ""
+    """Resolve credential options through the same scope chain as download options."""
+
+    if scopes and not isinstance(scopes[0], Scope):
+        if config is None:
+            raise TypeError("config is required when resolving raw task mappings")
+        configured = config_scope(config)
+        resolved_scopes = [Scope(scope, parent=configured) for scope in scopes]
+    else:
+        resolved_scopes = list(cast("Sequence[Scope]", scopes))
 
     return [
         argparse.Namespace(
-            auth=str(task.get("auth", configured_auth)),
-            auth_file=task.get("auth_file", configured_auth_file),
-            auth_profile=str(task.get("auth_profile", configured_auth_profile)),
-            sessdata=str(task.get("sessdata", configured_sessdata)),
+            auth=str(_value(scope, "auth", "")),
+            auth_file=_auth_file(scope),
+            auth_profile=str(_value(scope, "auth_profile", "default")),
+            sessdata=str(_value(scope, "sessdata", "")),
         )
-        for task in tasks
+        for scope in resolved_scopes
     ]
+
+
+def _value(scope: Scope, key: str, default: object) -> object:
+    value = scope.lookup(key)
+    return default if value is MISSING or value is None else value
+
+
+def _auth_file(scope: Scope) -> Path | None:
+    value = scope.lookup("auth_file")
+    if value is MISSING or value is None:
+        return None
+    return value if isinstance(value, Path) else Path(value).expanduser()

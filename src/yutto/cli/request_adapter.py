@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
+from yutto.cli.scope import MISSING, Scope, config_scope
 from yutto.core.request import DownloadRequest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
     from typing import Any
 
     from yutto.cli.settings import YuttoConfig
@@ -14,39 +15,41 @@ if TYPE_CHECKING:
 MEBIBYTE = 1024 * 1024
 
 
-def request_overrides_from_cli(values: Mapping[str, Any]) -> dict[str, Any]:
-    """Translate only explicitly supplied download CLI values into a request patch."""
+def request_overrides_from_scope(
+    scope: Scope,
+    *,
+    include_output_paths: bool = True,
+) -> dict[str, Any]:
+    """Translate resolved CLI/config scope values into a frontend-independent request patch."""
+
     request: dict[str, Any] = {}
 
     access: dict[str, Any] = {}
-    if "auth_profile" in values:
-        access["auth_profile"] = values["auth_profile"]
-    if "login_strict" in values:
-        access["login_strict"] = values["login_strict"]
-    if "vip_strict" in values:
-        access["vip_strict"] = values["vip_strict"]
+    _copy_value(scope, access, "auth_profile")
+    _copy_value(scope, access, "login_strict")
+    _copy_value(scope, access, "vip_strict")
     if access:
         request["access"] = access
 
     selection: dict[str, Any] = {}
-    if "selection_expr" in values:
-        selection["expression"] = values["selection_expr"]
-    elif values.get("batch"):
+    selection_expr = scope.lookup("selection_expr")
+    batch = scope.lookup("batch")
+    if selection_expr is not MISSING:
+        selection["expression"] = selection_expr
+    elif batch is not MISSING and batch:
         selection["expression"] = "~"
-    if "skip_preview" in values:
-        selection["skip_preview"] = values["skip_preview"]
-    if "publication_start_time" in values:
-        selection["start_time"] = values["publication_start_time"]
-    if "publication_end_time" in values:
-        selection["end_time"] = values["publication_end_time"]
+    _copy_value(scope, selection, "skip_preview")
+    _copy_value(scope, selection, "publication_start_time", "start_time")
+    _copy_value(scope, selection, "publication_end_time", "end_time")
     if selection:
         request["selection"] = selection
 
-    if "with_extra_episodes" in values:
-        request["with_extra_episodes"] = values["with_extra_episodes"]
+    with_extra_episodes = scope.lookup("with_extra_episodes")
+    if with_extra_episodes is not MISSING:
+        request["with_extra_episodes"] = with_extra_episodes
 
     resources: dict[str, Any] = {}
-    for cli_name, request_name in (
+    for scope_name, request_name in (
         ("require_video", "video"),
         ("require_audio", "audio"),
         ("require_danmaku", "danmaku"),
@@ -57,80 +60,92 @@ def request_overrides_from_cli(values: Mapping[str, Any]) -> dict[str, Any]:
         ("save_cover", "save_cover"),
         ("ai_translation_language", "ai_translation_language"),
     ):
-        if cli_name in values:
-            resources[request_name] = values[cli_name]
+        _copy_value(scope, resources, scope_name, request_name)
     if resources:
         request["resources"] = resources
 
     stream: dict[str, Any] = {}
-    if "video_quality" in values:
-        stream["video_quality"] = values["video_quality"]
-    if "audio_quality" in values:
-        stream["audio_quality"] = values["audio_quality"]
-    if "vcodec" in values:
-        stream["video_download_codec"], stream["video_save_codec"] = _split_codec_pair(values["vcodec"], "vcodec")
-    if "acodec" in values:
-        stream["audio_download_codec"], stream["audio_save_codec"] = _split_codec_pair(values["acodec"], "acodec")
-    if "download_vcodec_priority" in values:
-        stream["video_download_codec_priority"] = values["download_vcodec_priority"]
+    _copy_value(scope, stream, "video_quality")
+    _copy_value(scope, stream, "audio_quality")
+
+    vcodec = scope.lookup("vcodec")
+    if vcodec is not MISSING:
+        stream["video_download_codec"], stream["video_save_codec"] = _split_codec_pair(vcodec, "vcodec")
+
+    acodec = scope.lookup("acodec")
+    if acodec is not MISSING:
+        stream["audio_download_codec"], stream["audio_save_codec"] = _split_codec_pair(acodec, "acodec")
+
+    _copy_value(scope, stream, "download_vcodec_priority", "video_download_codec_priority")
     if stream:
         request["stream"] = stream
 
     output: dict[str, Any] = {}
-    for cli_name, request_name in (
-        ("dir", "directory"),
-        ("tmp_dir", "temporary_directory"),
+    if include_output_paths:
+        _copy_value(scope, output, "dir", "directory", skip_none=True)
+        _copy_value(scope, output, "tmp_dir", "temporary_directory")
+    for scope_name, request_name in (
         ("output_format", "format"),
         ("output_format_audio_only", "audio_only_format"),
         ("overwrite", "overwrite"),
         ("subpath_template", "subpath_template"),
         ("metadata_premiered_format", "metadata_format_premiered"),
     ):
-        if cli_name in values:
-            output[request_name] = values[cli_name]
+        _copy_value(scope, output, scope_name, request_name)
     if output:
         request["output"] = output
 
     network: dict[str, Any] = {}
-    for cli_name, request_name in (
+    for scope_name, request_name in (
         ("proxy", "proxy"),
         ("fetch_workers", "fetch_workers"),
         ("download_workers", "download_workers"),
         ("download_interval", "download_interval"),
         ("banned_mirrors_pattern", "banned_mirrors_pattern"),
     ):
-        if cli_name in values:
-            network[request_name] = values[cli_name]
-    if "block_size" in values:
-        network["block_size_bytes"] = int(values["block_size"] * MEBIBYTE)
+        _copy_value(scope, network, scope_name, request_name)
+
+    block_size = scope.lookup("block_size")
+    if block_size is not MISSING and block_size is not None:
+        network["block_size_bytes"] = int(block_size * MEBIBYTE)
     if network:
         request["network"] = network
 
     danmaku: dict[str, Any] = {}
-    for cli_name, request_name in (
+    for scope_name, request_name in (
         ("danmaku_format", "format"),
         ("danmaku_font_size", "font_size"),
         ("danmaku_font", "font"),
         ("danmaku_opacity", "opacity"),
         ("danmaku_display_region_ratio", "display_region_ratio"),
         ("danmaku_speed", "speed"),
-        ("danmaku_block_top", "block_top"),
-        ("danmaku_block_bottom", "block_bottom"),
         ("danmaku_block_scroll", "block_scroll"),
         ("danmaku_block_reverse", "block_reverse"),
         ("danmaku_block_special", "block_special"),
         ("danmaku_block_colorful", "block_colorful"),
         ("danmaku_block_keyword_patterns", "block_keyword_patterns"),
     ):
-        if cli_name in values:
-            danmaku[request_name] = values[cli_name]
-    if values.get("danmaku_block_fixed"):
-        danmaku["block_top"] = True
-        danmaku["block_bottom"] = True
+        _copy_value(scope, danmaku, scope_name, request_name)
+
+    fixed = scope.lookup("danmaku_block_fixed")
+    top = scope.lookup("danmaku_block_top")
+    bottom = scope.lookup("danmaku_block_bottom")
+    if top is not MISSING or fixed is not MISSING:
+        danmaku["block_top"] = bool(False if top is MISSING else top) or bool(False if fixed is MISSING else fixed)
+    if bottom is not MISSING or fixed is not MISSING:
+        danmaku["block_bottom"] = bool(False if bottom is MISSING else bottom) or bool(
+            False if fixed is MISSING else fixed
+        )
     if danmaku:
         request["danmaku"] = danmaku
 
     return request
+
+
+def request_overrides_from_cli(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Compatibility wrapper for callers that already have explicit CLI values."""
+
+    return request_overrides_from_scope(Scope(values))
 
 
 def request_overrides_from_settings(
@@ -138,156 +153,46 @@ def request_overrides_from_settings(
     *,
     include_output_paths: bool = True,
 ) -> dict[str, Any]:
-    """Translate explicitly configured TOML fields into a frontend-independent request patch."""
-    request: dict[str, Any] = {}
+    """Translate persistent settings through the same scope adapter used by the CLI."""
 
-    basic = settings.basic
-    basic_set = basic.model_fields_set
-
-    access: dict[str, Any] = {}
-    if "login_strict" in basic_set:
-        access["login_strict"] = basic.login_strict
-    if "vip_strict" in basic_set:
-        access["vip_strict"] = basic.vip_strict
-    if "auth_profile" in settings.auth.model_fields_set:
-        access["auth_profile"] = settings.auth.auth_profile
-    if access:
-        request["access"] = access
-
-    batch_set = settings.batch.model_fields_set
-    selection: dict[str, Any] = {}
-    if "skip_preview" in batch_set:
-        selection["skip_preview"] = settings.batch.skip_preview
-    if "batch_filter_start_time" in batch_set:
-        selection["start_time"] = settings.batch.batch_filter_start_time
-    if "batch_filter_end_time" in batch_set:
-        selection["end_time"] = settings.batch.batch_filter_end_time
-    if selection:
-        request["selection"] = selection
-    if "with_extra_episodes" in batch_set:
-        request["with_extra_episodes"] = settings.batch.with_extra_episodes
-
-    resource = settings.resource
-    resource_set = resource.model_fields_set
-    resources: dict[str, Any] = {}
-    for settings_name, request_name in (
-        ("require_video", "video"),
-        ("require_audio", "audio"),
-        ("require_danmaku", "danmaku"),
-        ("require_subtitle", "subtitle"),
-        ("require_metadata", "metadata"),
-        ("require_cover", "cover"),
-        ("require_chapter_info", "chapter_info"),
-        ("save_cover", "save_cover"),
-    ):
-        if settings_name in resource_set:
-            resources[request_name] = getattr(resource, settings_name)
-    if "ai_translation_language" in basic_set:
-        resources["ai_translation_language"] = basic.ai_translation_language
-    if resources:
-        request["resources"] = resources
-
-    stream: dict[str, Any] = {}
-    if "video_quality" in basic_set:
-        stream["video_quality"] = basic.video_quality
-    if "audio_quality" in basic_set:
-        stream["audio_quality"] = basic.audio_quality
-    if "vcodec" in basic_set:
-        stream["video_download_codec"], stream["video_save_codec"] = _split_codec_pair(basic.vcodec, "vcodec")
-    if "acodec" in basic_set:
-        stream["audio_download_codec"], stream["audio_save_codec"] = _split_codec_pair(basic.acodec, "acodec")
-    if "download_vcodec_priority" in basic_set:
-        stream["video_download_codec_priority"] = basic.download_vcodec_priority
-    if stream:
-        request["stream"] = stream
-
-    output: dict[str, Any] = {}
-    if include_output_paths and "dir" in basic_set and basic.dir is not None:
-        output["directory"] = Path(basic.dir).expanduser()
-    if include_output_paths and "tmp_dir" in basic_set:
-        output["temporary_directory"] = None if basic.tmp_dir is None else Path(basic.tmp_dir).expanduser()
-    for settings_name, request_name in (
-        ("output_format", "format"),
-        ("output_format_audio_only", "audio_only_format"),
-        ("overwrite", "overwrite"),
-        ("subpath_template", "subpath_template"),
-        ("metadata_format_premiered", "metadata_format_premiered"),
-    ):
-        if settings_name in basic_set:
-            output[request_name] = getattr(basic, settings_name)
-    if output:
-        request["output"] = output
-
-    network: dict[str, Any] = {}
-    for settings_name, request_name in (
-        ("proxy", "proxy"),
-        ("fetch_workers", "fetch_workers"),
-        ("num_workers", "download_workers"),
-        ("download_interval", "download_interval"),
-        ("banned_mirrors_pattern", "banned_mirrors_pattern"),
-    ):
-        if settings_name in basic_set:
-            network[request_name] = getattr(basic, settings_name)
-    if "block_size" in basic_set and basic.block_size is not None:
-        network["block_size_bytes"] = int(basic.block_size * MEBIBYTE)
-    if network:
-        request["network"] = network
-
-    danmaku_settings = settings.danmaku
-    danmaku_set = danmaku_settings.model_fields_set
-    danmaku: dict[str, Any] = {}
-    if "danmaku_format" in basic_set:
-        danmaku["format"] = basic.danmaku_format
-    for settings_name, request_name in (
-        ("font_size", "font_size"),
-        ("font", "font"),
-        ("opacity", "opacity"),
-        ("display_region_ratio", "display_region_ratio"),
-        ("speed", "speed"),
-        ("block_scroll", "block_scroll"),
-        ("block_reverse", "block_reverse"),
-        ("block_special", "block_special"),
-        ("block_colorful", "block_colorful"),
-        ("block_keyword_patterns", "block_keyword_patterns"),
-    ):
-        if settings_name in danmaku_set:
-            danmaku[request_name] = getattr(danmaku_settings, settings_name)
-    if {"block_top", "block_fixed"} & danmaku_set:
-        danmaku["block_top"] = bool(danmaku_settings.block_top) or bool(danmaku_settings.block_fixed)
-    if {"block_bottom", "block_fixed"} & danmaku_set:
-        danmaku["block_bottom"] = bool(danmaku_settings.block_bottom) or bool(danmaku_settings.block_fixed)
-    if danmaku:
-        request["danmaku"] = danmaku
-
-    return request
+    return request_overrides_from_scope(
+        config_scope(settings),
+        include_output_paths=include_output_paths,
+    )
 
 
 def resolve_download_request(
-    values: Mapping[str, Any],
-    settings: YuttoConfig,
+    scope: Scope | Mapping[str, Any],
+    settings: YuttoConfig | None = None,
     *,
     include_output_paths: bool = True,
 ) -> DownloadRequest:
-    source = values.get("source")
-    if source is None:
+    if not isinstance(scope, Scope):
+        if settings is None:
+            raise TypeError("settings are required when resolving a raw value mapping")
+        scope = Scope(scope, parent=config_scope(settings))
+
+    source = scope.lookup("source")
+    if source is MISSING or source is None:
         raise ValueError("download source is missing")
 
     payload: dict[str, Any] = {"source": {"url": str(source)}}
     payload = _deep_merge(
         payload,
-        request_overrides_from_settings(settings, include_output_paths=include_output_paths),
+        request_overrides_from_scope(scope, include_output_paths=include_output_paths),
     )
-    payload = _deep_merge(payload, request_overrides_from_cli(values))
     return DownloadRequest.model_validate(payload)
 
 
 def download_request_from_mapping(payload: object, settings: YuttoConfig) -> DownloadRequest:
     """Apply explicit local settings as defaults for an RPC request payload."""
+
     return download_request_parser_from_settings(settings)(payload)
 
 
 def download_request_parser_from_settings(settings: YuttoConfig) -> Callable[[object], DownloadRequest]:
     """Build and eagerly validate a parser for repeated server requests."""
+
     defaults = request_overrides_from_settings(settings, include_output_paths=False)
 
     def parse(payload: object) -> DownloadRequest:
@@ -298,6 +203,20 @@ def download_request_parser_from_settings(settings: YuttoConfig) -> Callable[[ob
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
+
+
+def _copy_value(
+    scope: Scope,
+    target: dict[str, Any],
+    scope_name: str,
+    target_name: str | None = None,
+    *,
+    skip_none: bool = False,
+) -> None:
+    value = scope.lookup(scope_name)
+    if value is MISSING or (skip_none and value is None):
+        return
+    target[target_name or scope_name] = value
 
 
 def _deep_merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
