@@ -7,20 +7,52 @@ from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import YuttoConfig, resolve_config
 
 
+def test_runtime_options_leave_lower_layer_defaults_unresolved():
+    runtime = resolve_runtime_options({}, YuttoConfig())
+
+    assert runtime.jobs is None
+    assert runtime.ffmpeg_path is None
+
+
 def test_runtime_options_resolve_preview_mode():
     config = YuttoConfig()
 
-    assert resolve_runtime_options({}, config)["preview_formats"] is False
-    assert resolve_runtime_options({"preview_formats": True}, config)["preview_formats"] is True
+    assert resolve_runtime_options({}, config).preview_formats is False
+    assert resolve_runtime_options({"preview_formats": True}, config).preview_formats is True
+
+
+def test_runtime_options_merge_cli_over_config():
+    config = YuttoConfig.model_validate(
+        {
+            "basic": {
+                "jobs": 3,
+                "ffmpeg_path": "/config/ffmpeg",
+                "no_progress": True,
+            }
+        }
+    )
+
+    runtime = resolve_runtime_options(
+        {
+            "jobs": 5,
+            "ffmpeg_path": "/cli/ffmpeg",
+        },
+        config,
+    )
+
+    assert runtime.jobs == 5
+    assert runtime.ffmpeg_path == "/cli/ffmpeg"
+    assert runtime.no_progress is True
 
 
 def test_resolve_config_loads_explicit_path(tmp_path: Path):
     config_path = tmp_path / "yutto.toml"
-    config_path.write_text("[basic]\njobs = 3\n", encoding="utf-8")
+    config_path.write_text('[basic]\njobs = 3\nffmpeg_path = "/opt/ffmpeg"\n', encoding="utf-8")
 
     config = resolve_config(config_path)
 
     assert config.basic.jobs == 3
+    assert config.basic.ffmpeg_path == "/opt/ffmpeg"
 
 
 def test_resolve_config_uses_injected_search(tmp_path: Path):

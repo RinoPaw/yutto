@@ -29,6 +29,7 @@ class YuttoBasicConfig(_ConfigModel):
     download_vcodec_priority: list[str] | None = None
     output_format: Literal["infer", "mp4", "mkv", "mov"] | None = None
     output_format_audio_only: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
+    ffmpeg_path: str | None = None
     ai_translation_language: str | None = None
     danmaku_format: Literal["xml", "ass", "protobuf"] | None = None
     block_size: float | None = None

@@ -48,20 +48,20 @@ def main() -> None:
             try:
                 values = vars(args)
                 runtime = resolve_runtime_options(values, config)
-                preview_formats = runtime["preview_formats"]
-                renderer.progress_enabled = not runtime["no_progress"] and sys.stdout.isatty()
+                renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
                     configure_cli(
-                        no_progress=runtime["no_progress"],
-                        no_color=runtime["no_color"],
-                        debug=runtime["debug"],
+                        no_progress=runtime.no_progress,
+                        no_color=runtime.no_color,
+                        debug=runtime.debug,
                     )
                     tasks = expand_download_values(values, parser, config)
                     requests = [resolve_download_request(task, config) for task in tasks]
 
-                    if not preview_formats:
-                        FFmpeg.setup_ffmpeg_path(runtime["ffmpeg_path"])
+                    if not runtime.preview_formats:
+                        if runtime.ffmpeg_path is not None:
+                            FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
                         ffmpeg = FFmpeg()
                         for request in requests:
                             validate_download_request(request, ffmpeg)
@@ -99,10 +99,10 @@ def main() -> None:
                         resolve_request_credentials,
                         on_open=announce_request_auth,
                     )
-                    if preview_formats:
+                    if runtime.preview_formats:
                         run_preview_formats(scope_factory, requests, renderer)
                     else:
-                        run_download(scope_factory, requests, renderer, jobs=runtime["jobs"])
+                        run_download(scope_factory, requests, renderer, jobs=runtime.jobs)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
@@ -151,12 +151,13 @@ async def run_download(
     requests: list[DownloadRequest],
     renderer: CliApplicationEventRenderer,
     *,
-    jobs: int = 1,
+    jobs: int | None = None,
 ) -> None:
+    workflow = DownloadManager() if jobs is None else DownloadManager(jobs=jobs)
     async with renderer:
         application = YuttoApplication(
             scope_factory,
-            workflow=DownloadManager(jobs=jobs),
+            workflow=workflow,
             event_sink=renderer,
         )
         with bind_download_report_sink(renderer.report):
