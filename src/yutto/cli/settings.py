@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class _ConfigModel(BaseModel):

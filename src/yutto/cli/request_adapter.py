@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 from yutto.cli.scope import MISSING, Scope, config_scope
 from yutto.core.request import DownloadRequest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from typing import Any
 
     from yutto.cli.settings import YuttoConfig

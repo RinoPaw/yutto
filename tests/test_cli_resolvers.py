@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import YuttoConfig, resolve_config
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_runtime_options_leave_lower_layer_defaults_unresolved():

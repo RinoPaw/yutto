@@ -16,7 +16,6 @@ from yutto.cli.formats import (
     format_manifest_lines,
 )
 from yutto.cli.parser import build_parser
-from yutto.cli.settings import YuttoConfig
 from yutto.core.request import DownloadRequest
 from yutto.downloader.selector import select_streams
 from yutto.media import UgcPage

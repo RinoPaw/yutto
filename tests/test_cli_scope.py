@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from yutto.cli.auth import resolve_auth_command_options
 from yutto.cli.compat import normalize_argv
@@ -11,6 +11,9 @@ from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.scope import MISSING, Scope, config_scope
 from yutto.cli.settings import YuttoConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_scope_uses_lexical_shadowing_and_preserves_explicit_none():
