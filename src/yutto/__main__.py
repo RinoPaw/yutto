@@ -14,8 +14,8 @@ from yutto.cli.input import expand_download_scopes
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.scope import Scope, config_scope
-from yutto.cli.settings import resolve_config, search_for_settings_file
+from yutto.cli.scope import Scope
+from yutto.cli.settings import resolve_config, scope_from_config, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -45,7 +45,7 @@ def main() -> None:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
-    configured = config_scope(config)
+    configured = scope_from_config(config)
     cli_values = vars(args).copy()
     command = cli_values.pop("command")
     auth_command = cli_values.pop("auth_command", None)
@@ -55,11 +55,6 @@ def main() -> None:
     batch = bool(cli_values.pop("batch", False))
     if batch and "selection_expr" not in cli_values:
         cli_values["selection_expr"] = "~"
-
-    if "publication_start_time" in cli_values:
-        cli_values["published_since"] = cli_values.pop("publication_start_time")
-    if "publication_end_time" in cli_values:
-        cli_values["published_before"] = cli_values.pop("publication_end_time")
 
     command_scope = Scope(cli_values, parent=configured)
 
