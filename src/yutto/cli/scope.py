@@ -29,8 +29,11 @@ ScopePath: TypeAlias = Path | str | None | _Missing
 class Scope:
     """一层 yutto 参数作用域。
 
-    Scope 统一承载 yutto 的参数状态：既可以保存运行前即可确定的输入、偏好和策略，
-    也可以保存必须在运行过程中解析得到的值；两类字段按用途分区标注。
+    Scope 统一承载 yutto 的参数状态，并按生命周期分成三类：
+
+    1. 运行前参数：启动实际执行前即可由 CLI、配置文件、环境或上级 Scope 确定的输入、偏好和策略。
+    2. 运行时解析值：必须读取环境、文件、网络响应或探测外部程序后才能确定，但确定后仍可作为参数继续传递的值。
+    3. 运行时资源 / 状态：只在执行期间存在的对象或可变状态，例如 session、limiter、cache、lock 等。
 
     Scope 字段名是 yutto 参数的权威命名。外部来源必须在创建 Scope 前完成解析和命名转换。
     ``MISSING`` 表示当前层没有定义该字段；``None`` / ``False`` 等显式值会正常遮蔽父作用域。
@@ -39,7 +42,14 @@ class Scope:
     # 当前层找不到参数时继续查询的父作用域。
     parent: Scope | None = None
 
-    # ===== 下载调用：运行前输入 =====
+    # =====================================================================
+    # 运行前参数
+    # =====================================================================
+    # 这些值在真正访问网络、读取认证文件、探测 FFmpeg 或创建执行资源之前即可确定。
+    # ``auto`` / ``infer`` / ``None`` 等仍属于运行前策略；它们描述“运行时如何解析”，
+    # 而不是解析后的最终结果。
+
+    # ----- 下载调用 -----
     # 用户提供的下载源：Bilibili URL、ID、别名、文件路径或 file:// URL。
     source: ScopeText = MISSING
     # 分集/条目选择表达式。
@@ -47,7 +57,7 @@ class Scope:
     # 是否只预览可用媒体格式并退出。
     preview_formats: ScopeBool = MISSING
 
-    # ===== 基础下载：运行前输入 / 策略 =====
+    # ----- 基础下载 -----
     # 单个下载任务同时工作的最大媒体下载 Worker 数。
     download_workers: ScopeInt = MISSING
     # 同时执行的下载任务数量。
@@ -107,7 +117,7 @@ class Scope:
     # 是否启用 debug 日志和 tracing。
     debug: ScopeBool = MISSING
 
-    # ===== 认证：运行前输入 / 策略 =====
+    # ----- 认证 -----
     # 内联 Cookie，例如 SESSDATA=...; bili_jct=...。
     auth: ScopeText = MISSING
     # 认证信息读取/写入的文件路径。
@@ -121,7 +131,7 @@ class Scope:
     # 扫码登录超时时间，单位秒。
     timeout: ScopeInt = MISSING
 
-    # ===== 资源选择：运行前输入 / 策略 =====
+    # ----- 资源选择 -----
     # 下载结果是否要求视频流。
     require_video: ScopeBool = MISSING
     # 下载结果是否要求音频流。
@@ -139,7 +149,7 @@ class Scope:
     # 是否额外保存独立封面文件。
     save_cover: ScopeBool = MISSING
 
-    # ===== 弹幕：运行前输入 / 策略 =====
+    # ----- 弹幕 -----
     # 弹幕字体大小。
     danmaku_font_size: ScopeInt = MISSING
     # 弹幕字体名称。
@@ -167,7 +177,7 @@ class Scope:
     # 用于过滤弹幕文本的关键词/正则列表。
     danmaku_block_keyword_patterns: list[str] | None | _Missing = MISSING
 
-    # ===== 内容筛选：运行前输入 / 策略 =====
+    # ----- 内容筛选 -----
     # 是否包含 PV、预告、特别篇等附加内容。
     with_extra_episodes: ScopeBool = MISSING
     # 是否跳过预告片。
@@ -177,7 +187,7 @@ class Scope:
     # 只选择该时间之前发布的内容。
     published_before: ScopeText = MISSING
 
-    # ===== Server：运行前输入 / 策略 =====
+    # ----- Server -----
     # JSON-RPC server 监听地址。
     host: ScopeText = MISSING
     # JSON-RPC server 监听端口。
@@ -197,9 +207,22 @@ class Scope:
     # server 保留的运行中、排队中和历史任务总数上限。
     task_limit: ScopeInt = MISSING
 
-    # ===== 运行时解析值 =====
+    # =====================================================================
+    # 运行时解析值
+    # =====================================================================
+    # 这类值必须实际读取环境、文件、网络响应或探测外部程序后才能确定。
+    # 它们仍是已经解析完成、可以继续向下传递的值，不是执行资源本身。
+
+    # ----- Server -----
     # 实际使用的 server token；可能来自环境变量、token 文件或运行时随机生成。
     server_token: ScopeText = MISSING
+
+    # =====================================================================
+    # 运行时资源 / 状态
+    # =====================================================================
+    # 这类值只在执行期间存在，并且通常具有生命周期或可变状态，例如：
+    # session、fetch_limiter、nav_cache、nav_lock、touched_urls。
+    # 当前尚未把这些执行资源迁入本 Scope；这里先明确分类边界，后续字段应放在本区。
 
     def __init__(self, values: Mapping[str, Any] | None = None, parent: Scope | None = None, **overrides: Any) -> None:
         object.__setattr__(self, "parent", parent)
