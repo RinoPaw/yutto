@@ -57,10 +57,32 @@ def file_scheme_parser(url: str) -> list[str]:
     return result
 
 
+def _scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Strip CLI control fields and translate legacy CLI names to canonical Scope names."""
+    result = dict(values)
+    result.pop("command", None)
+    result.pop("auth_command", None)
+    result.pop("config", None)
+    no_inherit = bool(result.pop("no_inherit", False))
+
+    batch = bool(result.pop("batch", False))
+    if batch and "selection_expr" not in result:
+        result["selection_expr"] = "~"
+
+    if "publication_start_time" in result:
+        result["published_since"] = result.pop("publication_start_time")
+    if "publication_end_time" in result:
+        result["published_before"] = result.pop("publication_end_time")
+
+    return result, no_inherit
+
+
 def expand_download_scopes(
     scope: Scope,
     parser: argparse.ArgumentParser,
     config: Scope,
+    *,
+    no_inherit: bool = False,
 ) -> list[Scope]:
     """Resolve aliases and task lists by creating child scopes instead of merging dictionaries."""
 
@@ -79,18 +101,23 @@ def expand_download_scopes(
         return [current]
 
     result: list[Scope] = []
-    current_no_inherit = current.lookup("no_inherit")
-    current_breaks_inheritance = bool(current_no_inherit is not MISSING and current_no_inherit)
     for line in file_scheme_parser(source):
-        child_values = vars(parser.parse_args(normalize_argv(shlex.split(line))))
-        if child_values.get("command") != "download":
+        child_raw = vars(parser.parse_args(normalize_argv(shlex.split(line))))
+        if child_raw.get("command") != "download":
             raise ValueError("下载列表中只能包含 download 命令")
 
-        child_breaks_inheritance = bool(child_values.get("no_inherit"))
-        parent = config if current_breaks_inheritance or child_breaks_inheritance else current
+        child_values, child_no_inherit = _scope_values_from_cli(child_raw)
+        parent = config if no_inherit or child_no_inherit else current
         child = Scope(child_values, parent=parent)
         Logger.debug(f"列表参数: {child.flatten(stop_at=config)}")
-        result.extend(expand_download_scopes(child, parser, config))
+        result.extend(
+            expand_download_scopes(
+                child,
+                parser,
+                config,
+                no_inherit=child_no_inherit,
+            )
+        )
     return result
 
 
@@ -102,5 +129,11 @@ def expand_download_values(
     """Compatibility wrapper returning inherited explicit CLI values."""
 
     configured = config_scope(config)
-    scopes = expand_download_scopes(Scope(values, parent=configured), parser, configured)
+    scope_values, no_inherit = _scope_values_from_cli(values)
+    scopes = expand_download_scopes(
+        Scope(scope_values, parent=configured),
+        parser,
+        configured,
+        no_inherit=no_inherit,
+    )
     return [scope.flatten(stop_at=configured) for scope in scopes]

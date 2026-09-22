@@ -24,7 +24,7 @@ from yutto.auth import (
     user_info_matches,
     validate_profile,
 )
-from yutto.cli.scope import MISSING, Scope, config_scope
+from yutto.cli.scope import MISSING, Scope
 from yutto.exceptions import ErrorCode
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
@@ -32,7 +32,6 @@ from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
     from yutto._native import YuttoSession
-    from yutto.cli.settings import YuttoConfig
     from yutto.types import UserInfo
 
 # 这些状态码来自 B 站二维码登录返回 data.code
@@ -61,11 +60,9 @@ class AuthCommandOptions:
     timeout: int
 
 
-def resolve_auth_command_options(scope: Scope) -> AuthCommandOptions:
-    """Resolve auth command inputs from the common CLI/config scope chain."""
-
-    auth_command = scope.lookup("auth_command")
-    if auth_command is MISSING:
+def resolve_auth_command_options(scope: Scope, auth_command: str | None) -> AuthCommandOptions:
+    """Resolve auth inputs from Scope while keeping command dispatch outside Scope."""
+    if auth_command is None:
         raise ValueError("auth command is missing")
 
     auth_file = scope.lookup("auth_file")
@@ -77,7 +74,7 @@ def resolve_auth_command_options(scope: Scope) -> AuthCommandOptions:
         resolved_auth_file = Path(auth_file).expanduser()
 
     return AuthCommandOptions(
-        auth_command=str(auth_command),
+        auth_command=auth_command,
         auth=str(_scope_value(scope, "auth", "")),
         auth_file=resolved_auth_file,
         auth_profile=str(_scope_value(scope, "auth_profile", "default")),
@@ -94,12 +91,8 @@ def _scope_value(scope: Scope, key: str, default: Any) -> Any:
 
 
 @as_sync
-async def run_auth(args: Scope | Any, settings: YuttoConfig | None = None) -> None:
-    if isinstance(args, Scope):
-        options = resolve_auth_command_options(args)
-    else:
-        configured = config_scope(settings) if settings is not None else Scope({})
-        options = resolve_auth_command_options(Scope(vars(args), parent=configured))
+async def run_auth(scope: Scope, auth_command: str | None) -> None:
+    options = resolve_auth_command_options(scope, auth_command)
 
     match options.auth_command:
         case "login":

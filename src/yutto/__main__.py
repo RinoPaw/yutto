@@ -46,9 +46,24 @@ def main() -> None:
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     configured = config_scope(config)
-    command_scope = Scope(vars(args), parent=configured)
+    cli_values = vars(args).copy()
+    command = cli_values.pop("command")
+    auth_command = cli_values.pop("auth_command", None)
+    cli_values.pop("config", None)
+    no_inherit = bool(cli_values.pop("no_inherit", False))
 
-    match args.command:
+    batch = bool(cli_values.pop("batch", False))
+    if batch and "selection_expr" not in cli_values:
+        cli_values["selection_expr"] = "~"
+
+    if "publication_start_time" in cli_values:
+        cli_values["published_since"] = cli_values.pop("publication_start_time")
+    if "publication_end_time" in cli_values:
+        cli_values["published_before"] = cli_values.pop("publication_end_time")
+
+    command_scope = Scope(cli_values, parent=configured)
+
+    match command:
         case "download":
             try:
                 runtime = resolve_runtime_options(command_scope)
@@ -60,7 +75,12 @@ def main() -> None:
                         no_color=runtime.no_color,
                         debug=runtime.debug,
                     )
-                    tasks = expand_download_scopes(command_scope, parser, configured)
+                    tasks = expand_download_scopes(
+                        command_scope,
+                        parser,
+                        configured,
+                        no_inherit=no_inherit,
+                    )
                     requests = [resolve_download_request(task) for task in tasks]
 
                     if not runtime.preview_formats:
@@ -119,7 +139,7 @@ def main() -> None:
 
         case "auth":
             try:
-                run_auth(command_scope)
+                run_auth(command_scope, auth_command)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)

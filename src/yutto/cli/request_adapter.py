@@ -32,14 +32,11 @@ def request_overrides_from_scope(
 
     selection: dict[str, Any] = {}
     selection_expr = scope.lookup("selection_expr")
-    batch = scope.lookup("batch")
     if selection_expr is not MISSING:
         selection["expression"] = selection_expr
-    elif batch is not MISSING and batch:
-        selection["expression"] = "~"
     _copy_value(scope, selection, "skip_preview")
-    _copy_value(scope, selection, "publication_start_time", "start_time")
-    _copy_value(scope, selection, "publication_end_time", "end_time")
+    _copy_value(scope, selection, "published_since", "start_time")
+    _copy_value(scope, selection, "published_before", "end_time")
     if selection:
         request["selection"] = selection
 
