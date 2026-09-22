@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from yutto.cli.scope import MISSING, Scope, config_scope
+from yutto.cli.scope import MISSING, Scope
+from yutto.cli.settings import scope_from_config
 
 if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
@@ -28,7 +29,7 @@ def resolve_runtime_options(
     if not isinstance(scope, Scope):
         if config is None:
             raise TypeError("config is required when resolving a raw value mapping")
-        scope = Scope(scope, parent=config_scope(config))
+        scope = Scope(scope, parent=scope_from_config(config))
 
     jobs = scope.lookup("jobs")
     if jobs is MISSING:
