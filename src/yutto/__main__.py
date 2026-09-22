@@ -10,17 +10,17 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import expand_download_scopes
+from yutto.cli.input import expand_download_scopes, scope_values_from_cli
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.scope import Scope
 from yutto.cli.settings import resolve_config, scope_from_config, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, YuttoBaseException
+from yutto.scope import Scope
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
@@ -46,26 +46,15 @@ def main() -> None:
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     configured = scope_from_config(config)
-    cli_values = vars(args).copy()
-    command = cli_values.pop("command")
-    auth_command = cli_values.pop("auth_command", None)
-    cli_values.pop("config", None)
-    no_inherit = bool(cli_values.pop("no_inherit", False))
-
-    batch = bool(cli_values.pop("batch", False))
-    if batch and "selection_expr" not in cli_values:
-        cli_values["selection_expr"] = "~"
-
-    if "publication_start_time" in cli_values:
-        cli_values["published_since"] = cli_values.pop("publication_start_time")
-    if "publication_end_time" in cli_values:
-        cli_values["published_before"] = cli_values.pop("publication_end_time")
-
-    command_scope = Scope(cli_values, parent=configured)
+    raw_values = vars(args)
+    command = raw_values["command"]
+    auth_command = raw_values.get("auth_command")
 
     match command:
         case "download":
             try:
+                cli_values, no_inherit = scope_values_from_cli(raw_values)
+                command_scope = Scope(cli_values, parent=configured)
                 runtime = resolve_runtime_options(command_scope)
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
@@ -139,6 +128,8 @@ def main() -> None:
 
         case "auth":
             try:
+                cli_values, _ = scope_values_from_cli(raw_values)
+                command_scope = Scope(cli_values, parent=configured)
                 run_auth(command_scope, auth_command)
             except YuttoBaseException as error:
                 Logger.error(error.message)
