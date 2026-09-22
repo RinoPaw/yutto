@@ -336,17 +336,6 @@ class Scope:
                     result[f"{section}.{descriptor.name}"] = value
         return MappingProxyType(result)
 
-    def lookup(self, path: str) -> Any:
-        """按 ``spec.field`` 路径解析字段；未定义时返回 ``MISSING``。"""
-        section, separator, field_name = path.partition(".")
-        if not separator:
-            if section not in _SPEC_TYPES:
-                raise KeyError(f"unknown Scope spec: {path}")
-            return getattr(self, section)
-        if section not in _SPEC_TYPES or field_name not in _SPEC_FIELDS[section]:
-            raise KeyError(f"unknown Scope field: {path}")
-        return self._resolve(section, field_name)
-
     def flatten(self, *, stop_at: Scope | None = None) -> dict[str, Any]:
         """按父到子的顺序展开作用域链，返回权威的 ``spec.field`` 路径。"""
         if self is stop_at:
