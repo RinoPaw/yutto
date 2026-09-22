@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from yutto.cli.scope import Scope
 from yutto.media.quality import AudioQuality, VideoQuality
+from yutto.scope import Scope
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 
 class _ConfigModel(BaseModel):
@@ -67,7 +67,7 @@ class YuttoResourceConfig(_ConfigModel):
 
 
 class YuttoDanmakuConfig(_ConfigModel):
-    """Persistent danmaku overrides using the same names as Scope."""
+    """Persistent danmaku overrides."""
 
     danmaku_font_size: int | None = None
     danmaku_font: str | None = None
@@ -115,26 +115,98 @@ class YuttoConfig(_ConfigModel):
     auth: YuttoAuthConfig = Field(default_factory=YuttoAuthConfig)
 
 
+_BASIC_SCOPE_PATHS = {
+    "download_workers": "network.download_workers",
+    "jobs": "runtime.jobs",
+    "fetch_workers": "network.fetch_workers",
+    "video_quality": "stream.video_quality",
+    "audio_quality": "stream.audio_quality",
+    "vcodec": "stream.video_codec",
+    "acodec": "stream.audio_codec",
+    "download_vcodec_priority": "stream.video_codec_priority",
+    "output_format": "output.format",
+    "output_format_audio_only": "output.audio_only_format",
+    "ffmpeg_path": "runtime.ffmpeg_path",
+    "ai_translation_language": "resource.ai_translation_language",
+    "danmaku_format": "danmaku.format",
+    "block_size": "network.block_size",
+    "overwrite": "output.overwrite",
+    "proxy": "network.proxy",
+    "dir": "output.directory",
+    "tmp_dir": "output.temporary_directory",
+    "sessdata": "auth.sessdata",
+    "subpath_template": "output.subpath_template",
+    "aliases": "source.aliases",
+    "metadata_premiered_format": "output.metadata_premiered_format",
+    "download_interval": "network.download_interval",
+    "banned_mirrors_pattern": "network.banned_mirrors_pattern",
+    "vip_strict": "auth.vip_strict",
+    "login_strict": "auth.login_strict",
+    "no_color": "runtime.no_color",
+    "no_progress": "runtime.no_progress",
+    "debug": "runtime.debug",
+}
+_RESOURCE_SCOPE_PATHS = {
+    "require_video": "resource.video",
+    "require_audio": "resource.audio",
+    "require_danmaku": "resource.danmaku",
+    "require_subtitle": "resource.subtitle",
+    "require_metadata": "resource.metadata",
+    "require_cover": "resource.cover",
+    "require_chapter_info": "resource.chapter_info",
+    "save_cover": "resource.save_cover",
+}
+_DANMAKU_SCOPE_PATHS = {
+    "danmaku_font_size": "danmaku.font_size",
+    "danmaku_font": "danmaku.font",
+    "danmaku_opacity": "danmaku.opacity",
+    "danmaku_display_region_ratio": "danmaku.display_region_ratio",
+    "danmaku_speed": "danmaku.speed",
+    "danmaku_block_top": "danmaku.block_top",
+    "danmaku_block_bottom": "danmaku.block_bottom",
+    "danmaku_block_scroll": "danmaku.block_scroll",
+    "danmaku_block_reverse": "danmaku.block_reverse",
+    "danmaku_block_fixed": "danmaku.block_fixed",
+    "danmaku_block_special": "danmaku.block_special",
+    "danmaku_block_colorful": "danmaku.block_colorful",
+    "danmaku_block_keyword_patterns": "danmaku.block_keyword_patterns",
+}
+_SELECTION_SCOPE_PATHS = {
+    "with_extra_episodes": "selection.with_extra_episodes",
+    "skip_preview": "selection.skip_preview",
+    "published_since": "selection.published_since",
+    "published_before": "selection.published_before",
+}
+_AUTH_SCOPE_PATHS = {
+    "auth": "auth.cookie",
+    "auth_file": "auth.file",
+    "auth_profile": "auth.profile",
+}
+
+
 def scope_from_config(config: YuttoConfig) -> Scope:
     """把持久配置中显式设置的值转换成一层 Scope。"""
     values: dict[str, Any] = {}
-    _copy_explicit(values, config.basic)
-    _copy_explicit(values, config.resource)
-    _copy_explicit(values, config.danmaku)
-    _copy_explicit(values, config.batch)
-    _copy_explicit(values, config.auth)
+    _copy_explicit(values, config.basic, _BASIC_SCOPE_PATHS)
+    _copy_explicit(values, config.resource, _RESOURCE_SCOPE_PATHS)
+    _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_PATHS)
+    _copy_explicit(values, config.batch, _SELECTION_SCOPE_PATHS)
+    _copy_explicit(values, config.auth, _AUTH_SCOPE_PATHS)
 
-    for key in ("dir", "tmp_dir", "auth_file"):
-        value = values.get(key)
+    for path in ("output.directory", "output.temporary_directory", "auth.file"):
+        value = values.get(path)
         if value is not None:
-            values[key] = Path(value).expanduser()
+            values[path] = Path(value).expanduser()
 
     return Scope(values)
 
 
-def _copy_explicit(target: dict[str, Any], model: BaseModel) -> None:
+def _copy_explicit(target: dict[str, Any], model: BaseModel, paths: Mapping[str, str]) -> None:
     for field_name in model.model_fields_set:
-        target[field_name] = getattr(model, field_name)
+        path = paths.get(field_name)
+        if path is None:
+            raise TypeError(f"config field without Scope mapping: {field_name}")
+        target[path] = getattr(model, field_name)
 
 
 def search_for_settings_file() -> Path | None:
