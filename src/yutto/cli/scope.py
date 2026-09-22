@@ -29,12 +29,6 @@ ScopePath: TypeAlias = Path | str | None | _Missing
 class Scope:
     """一层 yutto 参数作用域。
 
-    Scope 统一承载 yutto 的参数状态，并按生命周期分成三类：
-
-    1. 运行前参数：启动实际执行前即可由 CLI、配置文件、环境或上级 Scope 确定的输入、偏好和策略。
-    2. 运行时解析值：必须读取环境、文件、网络响应或探测外部程序后才能确定，但确定后仍可作为参数继续传递的值。
-    3. 运行时资源 / 状态：只在执行期间存在的对象或可变状态，例如 session、limiter、cache、lock 等。
-
     Scope 字段名是 yutto 参数的权威命名。外部来源必须在创建 Scope 前完成解析和命名转换。
     ``MISSING`` 表示当前层没有定义该字段；``None`` / ``False`` 等显式值会正常遮蔽父作用域。
     """
@@ -45,9 +39,8 @@ class Scope:
     # =====================================================================
     # 运行前参数
     # =====================================================================
-    # 这些值在真正访问网络、读取认证文件、探测 FFmpeg 或创建执行资源之前即可确定。
-    # ``auto`` / ``infer`` / ``None`` 等仍属于运行前策略；它们描述“运行时如何解析”，
-    # 而不是解析后的最终结果。
+    # 当前 Scope 管理的参数都可以在实际执行前确定。
+    # ``auto`` / ``infer`` / ``None`` 等也是明确的运行前策略值。
 
     # ----- 下载调用 -----
     # 用户提供的下载源：Bilibili URL、ID、别名、文件路径或 file:// URL。
@@ -64,21 +57,21 @@ class Scope:
     jobs: ScopeInt = MISSING
     # 批量解析阶段同时发起请求的最大 Worker 数。
     fetch_workers: ScopeInt = MISSING
-    # 期望的视频清晰度代码；实际可用清晰度需要运行时解析媒体信息。
+    # 期望的视频清晰度代码。
     video_quality: ScopeInt = MISSING
-    # 期望的音频质量/码率代码；实际可用质量需要运行时解析媒体信息。
+    # 期望的音频质量/码率代码。
     audio_quality: ScopeInt = MISSING
     # 视频下载编码与保存编码策略。
     vcodec: ScopeText = MISSING
     # 音频下载编码与保存编码策略。
     acodec: ScopeText = MISSING
-    # 视频下载编码优先级；显式 None 表示运行时自动推断。
+    # 视频下载编码优先级；显式 None 表示自动推断。
     download_vcodec_priority: list[str] | None | _Missing = MISSING
-    # 普通视频输出封装策略；infer 表示运行时自动推断。
+    # 普通视频输出封装策略；infer 表示自动推断。
     output_format: ScopeText = MISSING
-    # 仅含音频流时的输出封装策略；infer 表示运行时自动推断。
+    # 仅含音频流时的输出封装策略；infer 表示自动推断。
     output_format_audio_only: ScopeText = MISSING
-    # FFmpeg 可执行文件路径；实际存在性与能力需要运行时探测。
+    # FFmpeg 可执行文件路径。
     ffmpeg_path: ScopeText = MISSING
     # AI 原声翻译的目标语言。
     ai_translation_language: ScopeText = MISSING
@@ -88,7 +81,7 @@ class Scope:
     block_size: ScopeFloat = MISSING
     # 是否覆盖已经存在的输出文件。
     overwrite: ScopeBool = MISSING
-    # 代理策略或代理 URL；auto 的最终代理需要运行时环境解析。
+    # 代理策略或显式代理 URL：auto / no / URL。
     proxy: ScopeText = MISSING
     # 下载输出目录。
     dir: ScopePath = MISSING
@@ -106,9 +99,9 @@ class Scope:
     download_interval: ScopeInt = MISSING
     # 用来排除 CDN/镜像下载地址的正则表达式。
     banned_mirrors_pattern: ScopeText = MISSING
-    # 是否严格要求运行时验证大会员状态有效。
+    # 是否严格要求大会员状态有效。
     vip_strict: ScopeBool = MISSING
-    # 是否严格要求运行时验证登录状态有效。
+    # 是否严格要求登录状态有效。
     login_strict: ScopeBool = MISSING
     # 是否关闭彩色 ANSI 输出。
     no_color: ScopeBool = MISSING
@@ -206,23 +199,6 @@ class Scope:
     max_download_workers: ScopeInt = MISSING
     # server 保留的运行中、排队中和历史任务总数上限。
     task_limit: ScopeInt = MISSING
-
-    # =====================================================================
-    # 运行时解析值
-    # =====================================================================
-    # 这类值必须实际读取环境、文件、网络响应或探测外部程序后才能确定。
-    # 它们仍是已经解析完成、可以继续向下传递的值，不是执行资源本身。
-
-    # ----- Server -----
-    # 实际使用的 server token；可能来自环境变量、token 文件或运行时随机生成。
-    server_token: ScopeText = MISSING
-
-    # =====================================================================
-    # 运行时资源 / 状态
-    # =====================================================================
-    # 这类值只在执行期间存在，并且通常具有生命周期或可变状态，例如：
-    # session、fetch_limiter、nav_cache、nav_lock、touched_urls。
-    # 当前尚未把这些执行资源迁入本 Scope；这里先明确分类边界，后续字段应放在本区。
 
     def __init__(self, values: Mapping[str, Any] | None = None, parent: Scope | None = None, **overrides: Any) -> None:
         object.__setattr__(self, "parent", parent)
