@@ -20,16 +20,13 @@ from yutto.exceptions import (
     UnSupportedTypeError,
     WrongArgumentError,
 )
-from yutto.listing import MediaAncestry, PathOptions, iter_media_items, resolve_media_paths
+from yutto.listing import MediaAncestry, iter_media_items, resolve_media_paths
 from yutto.media import UgcFav, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
 from yutto.scope import MISSING, Scope
-from yutto.selection import parse_selection
-from yutto.source import SourceOptions
 from yutto.url_resolver import resolve_redirected_source
-from yutto.utils.filter import PublicationTimeFilter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -97,29 +94,6 @@ def _scope_int(value: object, default: int = 0) -> int:
     if isinstance(value, bool):
         raise ValueError("expected an integer Scope value")
     return int(value)
-
-
-def _source_options(scope: Scope) -> SourceOptions:
-    expression = scope.selection.expression
-    since = scope.selection.published_since
-    before = scope.selection.published_before
-    publication_time_filter = None
-    if since is not MISSING or before is not MISSING:
-        publication_time_filter = PublicationTimeFilter.from_strings(
-            None if since is MISSING else since,
-            None if before is MISSING else before,
-        )
-    return SourceOptions(
-        selection=(
-            None
-            if expression is MISSING or expression is None
-            else parse_selection(str(expression))
-        ),
-        with_extra_episodes=_scope_bool(scope.selection.with_extra_episodes),
-        skip_preview=_scope_bool(scope.selection.skip_preview),
-        fetch_tags=_scope_bool(scope.resource.metadata),
-        publication_time_filter=publication_time_filter,
-    )
 
 
 class DownloadManager:
@@ -199,8 +173,8 @@ class DownloadManager:
             return ()
 
         template = scope.output.subpath_template
-        path_options = PathOptions() if template is MISSING else PathOptions(subpath_template=str(template))
-        path_entries = resolve_media_paths(result.media, path_options)
+        subpath_template = "{auto}" if template is MISSING else str(template)
+        path_entries = resolve_media_paths(result.media, subpath_template=subpath_template)
         download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
         current_display_group: str | None = None
@@ -292,7 +266,6 @@ class DownloadManager:
         if source is None:
             source = await resolve_redirected_source(execution, source_text)
 
-        source_options = _source_options(scope)
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
 
         if not await validate_user_info(
@@ -304,7 +277,7 @@ class DownloadManager:
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-        result = await source.resolve(execution, source_options)
+        result = await source.resolve(execution, scope)
         if result.media is None and not result.failures:
             raise TypeError(f"{type(source).__name__}.resolve() returned no media")
 

@@ -32,11 +32,6 @@ if TYPE_CHECKING:
 MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class PathOptions:
-    subpath_template: str = "{auto}"
-
-
 @dataclass(frozen=True, slots=True)
 class ResolvedMediaPath:
     ancestry: MediaAncestry
@@ -221,7 +216,7 @@ def _episode_name(item: BangumiEpisode | CheeseEpisode) -> str:
 def _resolve_media_path(
     ancestry: MediaAncestry,
     item: MediaItem,
-    options: PathOptions,
+    subpath_template: str,
 ) -> Path:
     if isinstance(item, UgcPage):
         video, auto_path, name, title, username, series_title = _ugc_context(ancestry, item)
@@ -235,7 +230,7 @@ def _resolve_media_path(
             username=username,
             series_title=series_title,
         )
-        return Path(resolve_path_template(options.subpath_template, auto_path, variables))
+        return Path(resolve_path_template(subpath_template, auto_path, variables))
 
     if isinstance(item, BangumiEpisode):
         parent = ancestry[-1] if ancestry else None
@@ -254,19 +249,20 @@ def _resolve_media_path(
 
     variables = _path_variables(parent, item, aid, index=index, name=_episode_name(item))
     auto_path = "{name}" if parent is None else "{title}/{name}"
-    return Path(resolve_path_template(options.subpath_template, auto_path, variables))
+    return Path(resolve_path_template(subpath_template, auto_path, variables))
 
 
 def resolve_media_paths(
     root_media: Media,
-    path_options: PathOptions,
+    *,
+    subpath_template: str = "{auto}",
 ) -> tuple[ResolvedMediaPath, ...]:
     """Resolve paths for every downloadable leaf in a Media tree."""
     return tuple(
         ResolvedMediaPath(
             ancestry=ancestry,
             item=item,
-            path=_resolve_media_path(ancestry, item, path_options),
+            path=_resolve_media_path(ancestry, item, subpath_template),
         )
         for ancestry, item in iter_media_items(root_media)
     )
@@ -274,7 +270,6 @@ def resolve_media_paths(
 
 __all__ = [
     "MediaAncestry",
-    "PathOptions",
     "ResolvedMediaPath",
     "filter_media_by_publication_time",
     "filter_media_tree",
