@@ -56,6 +56,11 @@ def main() -> None:
     if batch and "selection_expr" not in cli_values:
         cli_values["selection_expr"] = "~"
 
+    if "publication_start_time" in cli_values:
+        cli_values["published_since"] = cli_values.pop("publication_start_time")
+    if "publication_end_time" in cli_values:
+        cli_values["published_before"] = cli_values.pop("publication_end_time")
+
     command_scope = Scope(cli_values, parent=configured)
 
     match command:
