@@ -220,17 +220,22 @@ _SPEC_FIELDS = {
 }
 
 
-def _merge_spec(spec_type: type[Any], inherited: Any, local: Any) -> Any:
-    return spec_type(
-        **{
-            descriptor.name: (
-                getattr(local, descriptor.name)
-                if getattr(local, descriptor.name) is not MISSING
-                else getattr(inherited, descriptor.name)
-            )
-            for descriptor in fields(spec_type)
-        }
-    )
+class _SpecView:
+    """把 ``scope.spec.field`` 转成一次惰性的作用域字段查询。"""
+
+    __slots__ = ("_scope", "_section")
+
+    def __init__(self, scope: Scope, section: str) -> None:
+        self._scope = scope
+        self._section = section
+
+    def __getattr__(self, name: str) -> Any:
+        if name not in _SPEC_FIELDS[self._section]:
+            raise AttributeError(f"{self._section} has no field {name!r}")
+        return self._scope._resolve(self._section, name)
+
+    def __dir__(self) -> list[str]:
+        return sorted({*super().__dir__(), *_SPEC_FIELDS[self._section]})
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -240,8 +245,8 @@ class Scope:
     Scope 字段名是 yutto 参数的唯一权威命名，并按 Spec 分类。
     例如 ``scope.network.proxy``、``scope.output.directory``、``scope.danmaku.font_size``。
 
-    每个 Scope 只保存当前层显式设置的字段。访问某个 Spec 时，Scope 会逐字段沿 parent 链解析，
-    因此子层只覆盖自己真正设置的字段，不会整组覆盖父层 Spec。
+    每个 Scope 只保存当前层显式设置的字段。访问 ``scope.spec.field`` 时只解析这个字段，
+    如果当前层是 ``MISSING``，就沿 parent 链继续查找，因此子层只覆盖自己真正设置的字段。
 
     ``MISSING`` 表示当前层没有定义该字段；``None`` / ``False`` 等显式值会正常遮蔽父作用域。
     外部来源必须在创建 Scope 前把自己的命名转换成这里的权威路径。
@@ -291,15 +296,20 @@ class Scope:
             object.__setattr__(self, section, local)
 
     def __getattribute__(self, name: str) -> Any:
-        spec_type = _SPEC_TYPES.get(name)
-        if spec_type is None:
-            return object.__getattribute__(self, name)
+        if name in _SPEC_TYPES:
+            return _SpecView(self, name)
+        return object.__getattribute__(self, name)
 
-        local = object.__getattribute__(self, name)
+    def _resolve(self, section: str, field_name: str) -> Any:
+        local = object.__getattribute__(self, section)
+        value = getattr(local, field_name)
+        if value is not MISSING:
+            return value
+
         parent = object.__getattribute__(self, "parent")
         if parent is None:
-            return local
-        return _merge_spec(spec_type, getattr(parent, name), local)
+            return MISSING
+        return parent._resolve(section, field_name)
 
     @staticmethod
     def _coerce_spec(section: str, value: Any) -> Any:
@@ -335,7 +345,7 @@ class Scope:
             return getattr(self, section)
         if section not in _SPEC_TYPES or field_name not in _SPEC_FIELDS[section]:
             raise KeyError(f"unknown Scope field: {path}")
-        return getattr(getattr(self, section), field_name)
+        return self._resolve(section, field_name)
 
     def flatten(self, *, stop_at: Scope | None = None) -> dict[str, Any]:
         """按父到子的顺序展开作用域链，返回权威的 ``spec.field`` 路径。"""
