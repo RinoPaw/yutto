@@ -49,7 +49,7 @@ from yutto.media import (
     UgcVideo,
     UgcWatchLater,
 )
-from yutto.selection import Range, Selection, parse_selection
+from yutto.selection import Range, Selection
 from yutto.types import (
     AId,
     AvId,
@@ -70,7 +70,6 @@ from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.core.request import DownloadRequest
     from yutto.exceptions import YuttoBaseException
 
 T = TypeVar("T")
@@ -90,23 +89,6 @@ class SourceOptions:
     skip_preview: bool = False
     fetch_tags: bool = False
     publication_time_filter: PublicationTimeFilter | None = None
-
-    @classmethod
-    def from_request(cls, request: DownloadRequest) -> SourceOptions:
-        expression = request.selection.expression
-        publication_time_filter = None
-        if request.selection.start_time is not None or request.selection.end_time is not None:
-            publication_time_filter = PublicationTimeFilter.from_strings(
-                request.selection.start_time,
-                request.selection.end_time,
-            )
-        return cls(
-            selection=parse_selection(expression) if expression is not None else None,
-            with_extra_episodes=request.with_extra_episodes,
-            skip_preview=request.selection.skip_preview,
-            fetch_tags=request.resources.metadata,
-            publication_time_filter=publication_time_filter,
-        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
