@@ -3,22 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from biliass import get_danmaku_meta_size
-
+from yutto.api.danmaku import get_protobuf_danmaku_urls, get_xml_danmaku_url
 from yutto.api.player import (
     get_bangumi_playurl as get_bangumi_playurl_response,
     get_cheese_playurl as get_cheese_playurl_response,
     get_player_info,
+    get_player_info_url,
     get_ugc_playurl,
 )
 from yutto.auth import get_user_info
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
-from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
+from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
 from yutto.scope import MISSING, Scope
 from yutto.types import AudioUrlMeta, VideoUrlMeta
-from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
 
 if TYPE_CHECKING:
@@ -313,21 +312,9 @@ async def _resolve_danmaku(
         "xml" if save_type == "xml" or not (await get_user_info(scope))["is_login"] else "protobuf"
     )
     if source_type == "xml":
-        return source_type, [f"http://comment.bilibili.com/{cid}.xml"]
+        return source_type, [get_xml_danmaku_url(cid)]
 
-    meta = unwrap_fetch_result(
-        await Fetcher.fetch_bin(
-            scope,
-            f"https://api.bilibili.com/x/v2/dm/web/view?type=1&oid={cid}&pid={aid.value}",
-        )
-    )
-    if meta is None:
-        raise NoAccessPermissionError(f"无法获取该视频弹幕元数据（{aid}, cid: {cid}）")
-    size = get_danmaku_meta_size(meta)
-    return source_type, [
-        f"http://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={segment_id}"
-        for segment_id in range(1, size + 1)
-    ]
+    return source_type, list(await get_protobuf_danmaku_urls(scope, aid, cid))
 
 
 async def resolve_resource_manifest(
@@ -362,7 +349,7 @@ async def resolve_resource_manifest(
                 cast("str | None", ai_translation_language),
             )
         if chapter_info:
-            chapter_info_url = f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={item.cid}"
+            chapter_info_url = get_player_info_url(aid, item.cid, wbi=False)
     elif isinstance(item, BangumiEpisode):
         aid = item.aid
         if video or audio:
