@@ -4,7 +4,8 @@ import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from yutto.cli.scope import MISSING, Scope, config_scope
+from yutto.cli.scope import MISSING, Scope
+from yutto.cli.settings import scope_from_config
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -27,7 +28,7 @@ def resolve_credential_options(
     else:
         if config is None:
             raise TypeError("config is required when resolving raw task mappings")
-        configured = config_scope(config)
+        configured = scope_from_config(config)
         raw_scopes = cast("Sequence[Mapping[str, Any]]", scopes)
         resolved_scopes = [Scope(scope, parent=configured) for scope in raw_scopes]
 
