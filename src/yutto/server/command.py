@@ -176,7 +176,7 @@ async def run_server_command(args: argparse.Namespace, settings: YuttoConfig) ->
     values = vars(args)
     configured_jobs = settings.basic.jobs if settings.basic.jobs is not None else 1
     configured_fetch_workers = settings.basic.fetch_workers if settings.basic.fetch_workers is not None else 8
-    configured_download_workers = settings.basic.num_workers if settings.basic.num_workers is not None else 8
+    configured_download_workers = settings.basic.download_workers if settings.basic.download_workers is not None else 8
 
     values.setdefault("request_settings", settings)
     values.setdefault("ffmpeg_path", "ffmpeg")
