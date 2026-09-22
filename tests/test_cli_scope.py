@@ -5,48 +5,48 @@ from typing import TYPE_CHECKING
 from yutto.cli.auth import resolve_auth_command_options
 from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
-from yutto.cli.input import expand_download_scopes
+from yutto.cli.input import expand_download_scopes, scope_values_from_cli
 from yutto.cli.parser import build_parser
 from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.scope import MISSING, Scope, config_scope
-from yutto.cli.settings import YuttoConfig
+from yutto.cli.settings import YuttoConfig, scope_from_config
+from yutto.scope import MISSING, Scope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def test_scope_uses_lexical_shadowing_and_preserves_explicit_none():
-    configured = Scope({"value": "config", "cleared": "config"})
-    cli = Scope({"value": "cli", "cleared": None}, parent=configured)
+    configured = Scope({"network.proxy": "config", "output.temporary_directory": "config"})
+    cli = Scope({"network.proxy": "cli", "output.temporary_directory": None}, parent=configured)
 
-    assert cli.lookup("value") == "cli"
-    assert cli.lookup("cleared") is None
-    assert cli.lookup("missing") is MISSING
+    assert cli.network.proxy == "cli"
+    assert cli.output.temporary_directory is None
+    assert cli.stream.video_quality is MISSING
 
 
-def test_config_scope_maps_persistent_names_to_cli_namespace():
+def test_config_scope_maps_persistent_names_to_scope_specs():
     config = YuttoConfig.model_validate(
         {
             "basic": {
-                "num_workers": 12,
-                "metadata_format_premiered": "%Y-%m-%d",
+                "download_workers": 12,
+                "metadata_premiered_format": "%Y-%m-%d",
                 "ffmpeg_path": "/opt/ffmpeg",
             },
-            "danmaku": {"font_size": 36},
-            "batch": {"batch_filter_start_time": "2026-01-01"},
+            "danmaku": {"danmaku_font_size": 36},
+            "batch": {"published_since": "2026-01-01"},
             "auth": {"auth_profile": "work"},
         }
     )
 
-    scope = config_scope(config)
+    scope = scope_from_config(config)
 
-    assert scope.lookup("download_workers") == 12
-    assert scope.lookup("metadata_premiered_format") == "%Y-%m-%d"
-    assert scope.lookup("ffmpeg_path") == "/opt/ffmpeg"
-    assert scope.lookup("danmaku_font_size") == 36
-    assert scope.lookup("publication_start_time") == "2026-01-01"
-    assert scope.lookup("auth_profile") == "work"
+    assert scope.network.download_workers == 12
+    assert scope.output.metadata_premiered_format == "%Y-%m-%d"
+    assert scope.runtime.ffmpeg_path == "/opt/ffmpeg"
+    assert scope.danmaku.font_size == 36
+    assert scope.selection.published_since == "2026-01-01"
+    assert scope.auth.profile == "work"
 
 
 def test_no_inherit_cuts_parent_cli_scope_but_keeps_config_scope(tmp_path: Path):
@@ -62,30 +62,29 @@ def test_no_inherit_cuts_parent_cli_scope_but_keeps_config_scope(tmp_path: Path)
     )
     parser = build_parser()
     config = YuttoConfig.model_validate({"basic": {"proxy": "config-proxy"}})
-    configured = config_scope(config)
-    outer = Scope(
-        vars(
-            parser.parse_args(
-                normalize_argv(
-                    [
-                        str(task_list),
-                        "--proxy",
-                        "no",
-                        "--fetch-workers",
-                        "11",
-                    ]
-                )
+    configured = scope_from_config(config)
+    raw = vars(
+        parser.parse_args(
+            normalize_argv(
+                [
+                    str(task_list),
+                    "--proxy",
+                    "no",
+                    "--fetch-workers",
+                    "11",
+                ]
             )
-        ),
-        parent=configured,
+        )
     )
+    values, no_inherit = scope_values_from_cli(raw)
+    outer = Scope(values, parent=configured)
 
-    first, second = expand_download_scopes(outer, parser, configured)
+    first, second = expand_download_scopes(outer, parser, configured, no_inherit=no_inherit)
 
-    assert first.lookup("proxy") == "no"
-    assert first.lookup("fetch_workers") == 2
-    assert second.lookup("proxy") == "config-proxy"
-    assert second.lookup("fetch_workers") == 5
+    assert first.network.proxy == "no"
+    assert first.network.fetch_workers == 2
+    assert second.network.proxy == "config-proxy"
+    assert second.network.fetch_workers == 5
 
 
 def test_scope_feeds_request_runtime_and_credentials_from_one_chain():
@@ -99,14 +98,14 @@ def test_scope_feeds_request_runtime_and_credentials_from_one_chain():
             "auth": {"auth_profile": "config-profile"},
         }
     )
-    configured = config_scope(config)
+    configured = scope_from_config(config)
     cli = Scope(
         {
-            "source": "BV1xx411c7mD",
-            "jobs": 5,
-            "proxy": "no",
-            "download_vcodec_priority": None,
-            "auth_profile": "cli-profile",
+            "source.value": "BV1xx411c7mD",
+            "runtime.jobs": 5,
+            "network.proxy": "no",
+            "stream.video_codec_priority": None,
+            "auth.profile": "cli-profile",
         },
         parent=configured,
     )
@@ -132,17 +131,16 @@ def test_auth_command_uses_the_same_scope_chain():
             },
         }
     )
-    configured = config_scope(config)
+    configured = scope_from_config(config)
     cli = Scope(
         {
-            "auth_command": "login",
-            "auth_profile": "cli-profile",
-            "mode": "web",
+            "auth.profile": "cli-profile",
+            "auth.mode": "web",
         },
         parent=configured,
     )
 
-    options = resolve_auth_command_options(cli)
+    options = resolve_auth_command_options(cli, "login")
 
     assert options.auth_command == "login"
     assert options.auth == "SESSDATA=config"
@@ -154,8 +152,8 @@ def test_auth_command_uses_the_same_scope_chain():
 
 
 def test_empty_scope_leaves_owned_defaults_to_lower_layers():
-    configured = config_scope(YuttoConfig())
-    cli = Scope({"source": "BV1xx411c7mD"}, parent=configured)
+    configured = scope_from_config(YuttoConfig())
+    cli = Scope({"source.value": "BV1xx411c7mD"}, parent=configured)
 
     request = resolve_download_request(cli)
     runtime = resolve_runtime_options(cli)
