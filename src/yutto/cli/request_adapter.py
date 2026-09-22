@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from yutto.cli.scope import MISSING, Scope
 from yutto.cli.settings import scope_from_config
 from yutto.core.request import DownloadRequest
+from yutto.scope import MISSING, Scope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -20,113 +20,97 @@ def request_overrides_from_scope(
     *,
     include_output_paths: bool = True,
 ) -> dict[str, Any]:
-    """Translate resolved CLI/config scope values into a frontend-independent request patch."""
+    """Translate resolved Scope specs into the temporary DownloadRequest model."""
 
     request: dict[str, Any] = {}
 
     access: dict[str, Any] = {}
-    _copy_value(scope, access, "auth_profile")
-    _copy_value(scope, access, "login_strict")
-    _copy_value(scope, access, "vip_strict")
+    _copy_value(scope.auth.profile, access, "auth_profile")
+    _copy_value(scope.auth.login_strict, access, "login_strict")
+    _copy_value(scope.auth.vip_strict, access, "vip_strict")
     if access:
         request["access"] = access
 
     selection: dict[str, Any] = {}
-    selection_expr = scope.lookup("selection_expr")
-    if selection_expr is not MISSING:
-        selection["expression"] = selection_expr
-    _copy_value(scope, selection, "skip_preview")
-    _copy_value(scope, selection, "published_since", "start_time")
-    _copy_value(scope, selection, "published_before", "end_time")
+    _copy_value(scope.selection.expression, selection, "expression")
+    _copy_value(scope.selection.skip_preview, selection, "skip_preview")
+    _copy_value(scope.selection.published_since, selection, "start_time")
+    _copy_value(scope.selection.published_before, selection, "end_time")
     if selection:
         request["selection"] = selection
 
-    with_extra_episodes = scope.lookup("with_extra_episodes")
-    if with_extra_episodes is not MISSING:
-        request["with_extra_episodes"] = with_extra_episodes
+    _copy_value(scope.selection.with_extra_episodes, request, "with_extra_episodes")
 
     resources: dict[str, Any] = {}
-    for scope_name, request_name in (
-        ("require_video", "video"),
-        ("require_audio", "audio"),
-        ("require_danmaku", "danmaku"),
-        ("require_subtitle", "subtitle"),
-        ("require_metadata", "metadata"),
-        ("require_cover", "cover"),
-        ("require_chapter_info", "chapter_info"),
-        ("save_cover", "save_cover"),
-        ("ai_translation_language", "ai_translation_language"),
-    ):
-        _copy_value(scope, resources, scope_name, request_name)
+    _copy_value(scope.resource.video, resources, "video")
+    _copy_value(scope.resource.audio, resources, "audio")
+    _copy_value(scope.resource.danmaku, resources, "danmaku")
+    _copy_value(scope.resource.subtitle, resources, "subtitle")
+    _copy_value(scope.resource.metadata, resources, "metadata")
+    _copy_value(scope.resource.cover, resources, "cover")
+    _copy_value(scope.resource.chapter_info, resources, "chapter_info")
+    _copy_value(scope.resource.save_cover, resources, "save_cover")
+    _copy_value(scope.resource.ai_translation_language, resources, "ai_translation_language")
     if resources:
         request["resources"] = resources
 
     stream: dict[str, Any] = {}
-    _copy_value(scope, stream, "video_quality")
-    _copy_value(scope, stream, "audio_quality")
+    _copy_value(scope.stream.video_quality, stream, "video_quality")
+    _copy_value(scope.stream.audio_quality, stream, "audio_quality")
 
-    vcodec = scope.lookup("vcodec")
-    if vcodec is not MISSING:
-        stream["video_download_codec"], stream["video_save_codec"] = _split_codec_pair(vcodec, "vcodec")
+    video_codec = scope.stream.video_codec
+    if video_codec is not MISSING:
+        stream["video_download_codec"], stream["video_save_codec"] = _split_codec_pair(video_codec, "vcodec")
 
-    acodec = scope.lookup("acodec")
-    if acodec is not MISSING:
-        stream["audio_download_codec"], stream["audio_save_codec"] = _split_codec_pair(acodec, "acodec")
+    audio_codec = scope.stream.audio_codec
+    if audio_codec is not MISSING:
+        stream["audio_download_codec"], stream["audio_save_codec"] = _split_codec_pair(audio_codec, "acodec")
 
-    _copy_value(scope, stream, "download_vcodec_priority", "video_download_codec_priority")
+    _copy_value(scope.stream.video_codec_priority, stream, "video_download_codec_priority")
     if stream:
         request["stream"] = stream
 
     output: dict[str, Any] = {}
     if include_output_paths:
-        _copy_value(scope, output, "dir", "directory", skip_none=True)
-        _copy_value(scope, output, "tmp_dir", "temporary_directory")
-    for scope_name, request_name in (
-        ("output_format", "format"),
-        ("output_format_audio_only", "audio_only_format"),
-        ("overwrite", "overwrite"),
-        ("subpath_template", "subpath_template"),
-        ("metadata_premiered_format", "metadata_format_premiered"),
-    ):
-        _copy_value(scope, output, scope_name, request_name)
+        _copy_value(scope.output.directory, output, "directory", skip_none=True)
+        _copy_value(scope.output.temporary_directory, output, "temporary_directory")
+    _copy_value(scope.output.format, output, "format")
+    _copy_value(scope.output.audio_only_format, output, "audio_only_format")
+    _copy_value(scope.output.overwrite, output, "overwrite")
+    _copy_value(scope.output.subpath_template, output, "subpath_template")
+    _copy_value(scope.output.metadata_premiered_format, output, "metadata_format_premiered")
     if output:
         request["output"] = output
 
     network: dict[str, Any] = {}
-    for scope_name, request_name in (
-        ("proxy", "proxy"),
-        ("fetch_workers", "fetch_workers"),
-        ("download_workers", "download_workers"),
-        ("download_interval", "download_interval"),
-        ("banned_mirrors_pattern", "banned_mirrors_pattern"),
-    ):
-        _copy_value(scope, network, scope_name, request_name)
+    _copy_value(scope.network.proxy, network, "proxy")
+    _copy_value(scope.network.fetch_workers, network, "fetch_workers")
+    _copy_value(scope.network.download_workers, network, "download_workers")
+    _copy_value(scope.network.download_interval, network, "download_interval")
+    _copy_value(scope.network.banned_mirrors_pattern, network, "banned_mirrors_pattern")
 
-    block_size = scope.lookup("block_size")
+    block_size = scope.network.block_size
     if block_size is not MISSING and block_size is not None:
         network["block_size_bytes"] = int(block_size * MEBIBYTE)
     if network:
         request["network"] = network
 
     danmaku: dict[str, Any] = {}
-    for scope_name, request_name in (
-        ("danmaku_format", "format"),
-        ("danmaku_font_size", "font_size"),
-        ("danmaku_font", "font"),
-        ("danmaku_opacity", "opacity"),
-        ("danmaku_display_region_ratio", "display_region_ratio"),
-        ("danmaku_speed", "speed"),
-        ("danmaku_block_scroll", "block_scroll"),
-        ("danmaku_block_reverse", "block_reverse"),
-        ("danmaku_block_special", "block_special"),
-        ("danmaku_block_colorful", "block_colorful"),
-        ("danmaku_block_keyword_patterns", "block_keyword_patterns"),
-    ):
-        _copy_value(scope, danmaku, scope_name, request_name)
+    _copy_value(scope.danmaku.format, danmaku, "format")
+    _copy_value(scope.danmaku.font_size, danmaku, "font_size")
+    _copy_value(scope.danmaku.font, danmaku, "font")
+    _copy_value(scope.danmaku.opacity, danmaku, "opacity")
+    _copy_value(scope.danmaku.display_region_ratio, danmaku, "display_region_ratio")
+    _copy_value(scope.danmaku.speed, danmaku, "speed")
+    _copy_value(scope.danmaku.block_scroll, danmaku, "block_scroll")
+    _copy_value(scope.danmaku.block_reverse, danmaku, "block_reverse")
+    _copy_value(scope.danmaku.block_special, danmaku, "block_special")
+    _copy_value(scope.danmaku.block_colorful, danmaku, "block_colorful")
+    _copy_value(scope.danmaku.block_keyword_patterns, danmaku, "block_keyword_patterns")
 
-    fixed = scope.lookup("danmaku_block_fixed")
-    top = scope.lookup("danmaku_block_top")
-    bottom = scope.lookup("danmaku_block_bottom")
+    fixed = scope.danmaku.block_fixed
+    top = scope.danmaku.block_top
+    bottom = scope.danmaku.block_bottom
     if top is not MISSING or fixed is not MISSING:
         danmaku["block_top"] = bool(False if top is MISSING else top) or bool(False if fixed is MISSING else fixed)
     if bottom is not MISSING or fixed is not MISSING:
@@ -140,8 +124,7 @@ def request_overrides_from_scope(
 
 
 def request_overrides_from_cli(values: Mapping[str, Any]) -> dict[str, Any]:
-    """Compatibility wrapper for callers that already have explicit CLI values."""
-
+    """Translate a mapping that already uses canonical Scope paths."""
     return request_overrides_from_scope(Scope(values))
 
 
@@ -150,7 +133,7 @@ def request_overrides_from_settings(
     *,
     include_output_paths: bool = True,
 ) -> dict[str, Any]:
-    """Translate persistent settings through the same scope adapter used by the CLI."""
+    """Translate persistent settings through the same Scope adapter used by the CLI."""
 
     return request_overrides_from_scope(
         scope_from_config(settings),
@@ -169,7 +152,7 @@ def resolve_download_request(
             raise TypeError("settings are required when resolving a raw value mapping")
         scope = Scope(scope, parent=scope_from_config(settings))
 
-    source = scope.lookup("source")
+    source = scope.source.value
     if source is MISSING or source is None:
         raise ValueError("download source is missing")
 
@@ -203,17 +186,15 @@ def download_request_parser_from_settings(settings: YuttoConfig) -> Callable[[ob
 
 
 def _copy_value(
-    scope: Scope,
+    value: Any,
     target: dict[str, Any],
-    scope_name: str,
-    target_name: str | None = None,
+    target_name: str,
     *,
     skip_none: bool = False,
 ) -> None:
-    value = scope.lookup(scope_name)
     if value is MISSING or (skip_none and value is None):
         return
-    target[target_name or scope_name] = value
+    target[target_name] = value
 
 
 def _deep_merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -230,9 +211,11 @@ def _deep_merge(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str
     return merged
 
 
-def _split_codec_pair(value: str | None, option: str) -> tuple[str, str]:
+def _split_codec_pair(value: str | None | object, option: str) -> tuple[str, str]:
     if value is None:
         raise ValueError(f"{option} must not be null")
+    if not isinstance(value, str):
+        raise TypeError(f"{option} must be a string")
     codecs = value.split(":")
     if len(codecs) != 2:
         raise ValueError(f"{option} must contain exactly one ':' separator")
