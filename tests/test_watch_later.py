@@ -7,13 +7,14 @@ import pytest
 from returns.result import Success
 
 from yutto.exceptions import NotLoginError
-from yutto.source import SourceOptions, UgcWatchLaterSource
+from yutto.scope import Scope
+from yutto.source import UgcWatchLaterSource
 from yutto.types import BilibiliId
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
 
-_SCOPE = cast("ExecutionScope", None)
+_EXECUTION = cast("ExecutionScope", None)
 
 
 @pytest.mark.api
@@ -28,7 +29,7 @@ def test_watch_later_not_login_is_reported_as_source_failure(
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
     source = UgcWatchLaterSource(id=BilibiliId("watchlater"))
 
-    result = asyncio.run(source.resolve(_SCOPE, SourceOptions()))
+    result = asyncio.run(source.resolve(_EXECUTION, Scope()))
 
     assert result.media is None
     assert len(result.failures) == 1

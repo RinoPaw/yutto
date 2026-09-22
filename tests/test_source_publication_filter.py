@@ -1,28 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from returns.result import Success
 
-from yutto.core.request import DownloadRequest
 from yutto.media import UgcSeries, UgcSpace
-from yutto.selection import parse_selection
-from yutto.source import SourceOptions, UgcSeriesSource, UgcSpaceSource
+from yutto.scope import Scope
+from yutto.source import UgcSeriesSource, UgcSpaceSource
 from yutto.types import MId, SeriesId
-from yutto.utils.filter import PublicationTimeFilter
 
 if TYPE_CHECKING:
     import pytest
+    from yutto.core.execution import ExecutionScope
 
-_SCOPE = cast("Any", None)
+_EXECUTION = cast("ExecutionScope", None)
 
 
-def _filter(start: int, end: int) -> PublicationTimeFilter:
-    return PublicationTimeFilter(
-        start_time=datetime.datetime.fromtimestamp(start),
-        end_time=datetime.datetime.fromtimestamp(end),
+def _scope(*, since: str, before: str, expression: str = "~") -> Scope:
+    return Scope(
+        {
+            "selection.expression": expression,
+            "selection.published_since": since,
+            "selection.published_before": before,
+        }
     )
 
 
@@ -43,20 +44,6 @@ def _video_response(aid: int, bvid: str, title: str, pubdate: int) -> dict[str, 
     }
 
 
-def test_request_builds_publication_filter_for_sources() -> None:
-    request = DownloadRequest.model_validate(
-        {
-            "source": {"url": "BV1D84y1t76J"},
-            "selection": {"start_time": "2024-01-01", "end_time": "2024-02-01"},
-        }
-    )
-
-    publication_filter = SourceOptions.from_request(request).publication_time_filter
-    assert publication_filter is not None
-    assert publication_filter.matches(int(datetime.datetime(2024, 1, 15).timestamp()))
-    assert not publication_filter.matches(int(datetime.datetime(2024, 2, 15).timestamp()))
-
-
 def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
         if "/x/series/series" in url:
@@ -72,24 +59,24 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
                 }
             )
         if "/x/web-interface/view?bvid=BVOLD" in url:
-            return Success(_video_response(100, "BVOLD", "旧视频", 100))
+            return Success(_video_response(100, "BVOLD", "旧视频", 1_704_067_200))
         if "/x/web-interface/view?bvid=BVKEEP" in url:
-            return Success(_video_response(300, "BVKEEP", "保留视频", 300))
+            return Success(_video_response(300, "BVKEEP", "保留视频", 1_706_745_600))
         raise AssertionError(f"unexpected fetch url: {url}")
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
-    options = SourceOptions(
-        selection=parse_selection("~"),
-        publication_time_filter=_filter(200, 400),
+    result = asyncio.run(
+        UgcSeriesSource(id=SeriesId("456")).resolve(
+            _EXECUTION,
+            _scope(since="2024-02-01", before="2024-03-01"),
+        )
     )
-
-    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_SCOPE, options))
 
     assert isinstance(result.media, UgcSeries)
     assert [video.metadata.title for video in result.media.items] == ["保留视频"]
 
 
-def test_space_source_filters_and_stops_old_pages_before_video_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_get_wbi_img(scope: object) -> object:
@@ -112,16 +99,19 @@ def test_space_source_filters_and_stops_old_pages_before_video_resolution(monkey
                     "data": {
                         "list": {
                             "vlist": [
-                                {"bvid": "BVKEEP", "created": 300},
-                                {"bvid": "BVOLD", "created": 100},
+                                {"bvid": "BVKEEP1", "created": 1_706_745_600},
+                                {"bvid": "BVKEEP2", "created": 1_706_832_000},
+                                {"bvid": "BVOLD", "created": 1_704_067_200},
                             ]
                         },
                         "page": {"count": 60},
                     },
                 }
             )
-        if "/x/web-interface/view?bvid=BVKEEP" in url:
-            return Success(_video_response(300, "BVKEEP", "保留视频", 300))
+        if "/x/web-interface/view?bvid=BVKEEP1" in url:
+            return Success(_video_response(300, "BVKEEP1", "保留一", 1_706_745_600))
+        if "/x/web-interface/view?bvid=BVKEEP2" in url:
+            return Success(_video_response(301, "BVKEEP2", "保留二", 1_706_832_000))
         if "/x/web-interface/view?bvid=BVOLD" in url:
             raise AssertionError("old video should be filtered before resolving its details")
         raise AssertionError(f"unexpected fetch url: {url}")
@@ -130,12 +120,13 @@ def test_space_source_filters_and_stops_old_pages_before_video_resolution(monkey
     monkeypatch.setattr("yutto.api.ugc.encode_wbi", fake_encode_wbi)
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
 
-    options = SourceOptions(
-        selection=parse_selection("~"),
-        publication_time_filter=_filter(200, 400),
+    result = asyncio.run(
+        UgcSpaceSource(id=MId("123")).resolve(
+            _EXECUTION,
+            _scope(since="2024-02-01", before="2024-03-01", expression="2"),
+        )
     )
-    result = asyncio.run(UgcSpaceSource(id=MId("123")).resolve(_SCOPE, options))
 
     assert isinstance(result.media, UgcSpace)
-    assert [video.metadata.title for video in result.media.items] == ["保留视频"]
+    assert [video.metadata.title for video in result.media.items] == ["保留二"]
     assert sum("/x/space/wbi/arc/search" in url for url, _ in calls) == 1

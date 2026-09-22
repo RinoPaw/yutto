@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from yutto.listing import (
-    PathOptions,
-    filter_media_by_publication_time,
-    filter_media_tree,
-    resolve_media_paths,
-)
+from yutto.listing import filter_media_by_publication_time, filter_media_tree, resolve_media_paths
 from yutto.media import (
     BangumiEpisode,
     BangumiSeason,
@@ -28,7 +23,7 @@ from yutto.utils.metadata import ItemMetaData
 
 
 def _paths(media: Media, *, template: str = "{auto}") -> list[Path]:
-    return [entry.path for entry in resolve_media_paths(media, PathOptions(subpath_template=template))]
+    return [entry.path for entry in resolve_media_paths(media, subpath_template=template)]
 
 
 def test_root_ugc_path_uses_original_page_count() -> None:

@@ -7,13 +7,16 @@ from returns.result import Success
 
 from yutto.media import UgcAllFavourites
 from yutto.parser import parse
-from yutto.source import SourceOptions, UgcAllFavouritesSource, UgcFavSource
+from yutto.scope import Scope
+from yutto.source import UgcAllFavouritesSource, UgcFavSource
 from yutto.types import MId
 
 if TYPE_CHECKING:
     import pytest
+    from yutto.core.execution import ExecutionScope
 
-_SCOPE = cast("Any", None)
+_EXECUTION = cast("ExecutionScope", None)
+_SCOPE = Scope()
 
 
 def _video_response() -> dict[str, Any]:
@@ -77,7 +80,7 @@ def test_all_favourites_resolves_every_folder(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
 
-    result = asyncio.run(UgcAllFavouritesSource(id=MId("123")).resolve(_SCOPE, SourceOptions()))
+    result = asyncio.run(UgcAllFavouritesSource(id=MId("123")).resolve(_EXECUTION, _SCOPE))
 
     assert isinstance(result.media, UgcAllFavourites)
     assert [favourite.fid.value for favourite in result.media.items] == ["11", "22"]

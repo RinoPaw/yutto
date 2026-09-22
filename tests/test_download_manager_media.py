@@ -6,10 +6,10 @@ from typing import Any, cast
 import pytest
 from returns.result import Success
 
-from yutto.core.request import DownloadRequest
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import NotFoundError
 from yutto.media import UgcPage, UgcSeries, UgcVideo
+from yutto.scope import Scope
 from yutto.source import MediaResolveFailure, MediaResolveResult
 from yutto.types import AId, BvId, CId, SeriesId
 from yutto.utils.metadata import ItemMetaData
@@ -38,8 +38,8 @@ async def _allow_user_info(scope: object, required: dict[str, bool]) -> bool:
     return True
 
 
-def _request() -> DownloadRequest:
-    return DownloadRequest.model_validate({"source": {"url": "fake-source"}})
+def _scope() -> Scope:
+    return Scope({"source.value": "fake-source"})
 
 
 def _install_manager_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,14 +71,13 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
     _install_manager_stubs(monkeypatch)
 
-    request = DownloadRequest.model_validate(
+    scope = Scope(
         {
-            "source": {"url": "https://www.bilibili.com/video/BV1D84y1t76J?p=2"},
-            "selection": {"expression": "3,1,3"},
+            "source.value": "https://www.bilibili.com/video/BV1D84y1t76J?p=2",
+            "selection.expression": "3,1,3",
         }
     )
-
-    result = asyncio.run(DownloadManager().resolve_request(cast("Any", None), request))
+    result = asyncio.run(DownloadManager().resolve_scope(cast("Any", None), scope))
 
     assert isinstance(result.media, UgcVideo)
     assert result.media.metadata.title == "投稿"
@@ -91,7 +90,7 @@ def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: py
     error = NotFoundError("视频已失效")
 
     class FakeSource:
-        async def resolve(self, scope: object, options: object) -> MediaResolveResult:
+        async def resolve(self, execution: object, scope: Scope) -> MediaResolveResult:
             return MediaResolveResult(
                 media=_series_with_one_video(),
                 failures=(MediaResolveFailure(index=2, source=BvId("BVBAD"), error=error),),
@@ -105,7 +104,7 @@ def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: py
     )
     _install_manager_stubs(monkeypatch)
 
-    result = asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
+    result = asyncio.run(DownloadManager().resolve_scope(cast("Any", None), _scope()))
 
     assert isinstance(result.media, UgcSeries)
     assert len(result.media.items) == 1
@@ -117,7 +116,7 @@ def test_manager_keeps_all_child_failures_for_download(monkeypatch: pytest.Monke
     error = NotFoundError("视频已失效")
 
     class FakeSource:
-        async def resolve(self, scope: object, options: object) -> MediaResolveResult:
+        async def resolve(self, execution: object, scope: Scope) -> MediaResolveResult:
             return MediaResolveResult(
                 media=UgcSeries(
                     series_id=SeriesId("456"),
@@ -131,7 +130,7 @@ def test_manager_keeps_all_child_failures_for_download(monkeypatch: pytest.Monke
     monkeypatch.setattr("yutto.download_manager.emit_download_report", lambda *args, **kwargs: None)
     _install_manager_stubs(monkeypatch)
 
-    result = asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
+    result = asyncio.run(DownloadManager().resolve_scope(cast("Any", None), _scope()))
 
     assert isinstance(result.media, UgcSeries)
     assert result.media.items == []
@@ -142,7 +141,7 @@ def test_manager_returns_empty_download_for_expected_root_failure(monkeypatch: p
     error = NotFoundError("视频已失效")
 
     class FakeSource:
-        async def resolve(self, scope: object, options: object) -> MediaResolveResult:
+        async def resolve(self, execution: object, scope: Scope) -> MediaResolveResult:
             return MediaResolveResult(
                 media=None,
                 failures=(MediaResolveFailure(index=1, source=BvId("BVBAD"), error=error),),
@@ -152,8 +151,7 @@ def test_manager_returns_empty_download_for_expected_root_failure(monkeypatch: p
     monkeypatch.setattr("yutto.download_manager.emit_download_report", lambda *args, **kwargs: None)
     _install_manager_stubs(monkeypatch)
 
-    result = asyncio.run(DownloadManager().process_request(cast("Any", None), _request()))
-
+    result = asyncio.run(DownloadManager().process_scope(cast("Any", None), _scope()))
     assert result == ()
 
 
@@ -161,13 +159,13 @@ def test_manager_propagates_root_source_failure_directly(monkeypatch: pytest.Mon
     error = NotFoundError("根列表不存在")
 
     class FakeSource:
-        async def resolve(self, scope: object, options: object) -> MediaResolveResult:
+        async def resolve(self, execution: object, scope: Scope) -> MediaResolveResult:
             raise error
 
     monkeypatch.setattr("yutto.download_manager.parse", lambda value: FakeSource())
     _install_manager_stubs(monkeypatch)
 
     with pytest.raises(NotFoundError) as raised:
-        asyncio.run(DownloadManager().resolve_request(cast("Any", None), _request()))
+        asyncio.run(DownloadManager().resolve_scope(cast("Any", None), _scope()))
 
     assert raised.value is error
