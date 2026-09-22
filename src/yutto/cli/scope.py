@@ -8,10 +8,6 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from pydantic import BaseModel
-
-    from yutto.cli.settings import YuttoConfig
-
 
 class _Missing:
     __slots__ = ()
@@ -33,6 +29,9 @@ ScopePath: TypeAlias = Path | str | None | _Missing
 class Scope:
     """一层 yutto 参数作用域。
 
+    Scope 只保存执行前即可确定的输入、偏好和策略；网络解析结果、文件系统检查结果、
+    FFmpeg 探测结果、账号状态等运行时事实不进入 Scope。
+
     Scope 字段名是 yutto 参数的权威命名。外部来源必须在创建 Scope 前完成解析和命名转换。
     ``MISSING`` 表示当前层没有定义该字段；``None`` / ``False`` 等显式值会正常遮蔽父作用域。
     """
@@ -41,35 +40,35 @@ class Scope:
     parent: Scope | None = None
 
     # ===== 下载调用 =====
-    # 下载源：Bilibili URL、ID、别名、文件路径或 file:// URL。
+    # 用户提供的下载源；这里只保存输入，不保存解析后的媒体资源。
     source: ScopeText = MISSING
-    # 分集/条目选择表达式。
+    # 分集/条目选择表达式；保存选择意图，不保存最终筛选结果。
     selection_expr: ScopeText = MISSING
     # 是否只预览可用媒体格式并退出。
     preview_formats: ScopeBool = MISSING
 
-    # ===== 基础下载 / 运行时 =====
-    # 单个下载任务同时工作的最大媒体下载 Worker 数。
+    # ===== 基础下载 / 运行时策略 =====
+    # 单个下载任务允许同时工作的最大媒体下载 Worker 数。
     download_workers: ScopeInt = MISSING
     # 同时执行的下载任务数量。
-    jobs: ScopeInt = MISSING
-    # 批量解析阶段同时发起请求的最大 Worker 数。
+    download_jobs: ScopeInt = MISSING
+    # 批量解析阶段允许同时发起请求的最大 Worker 数。
     fetch_workers: ScopeInt = MISSING
-    # 首选 Bilibili 视频清晰度代码。
+    # 期望的视频清晰度代码；实际可用清晰度由运行时媒体信息决定。
     video_quality: ScopeInt = MISSING
-    # 首选 Bilibili 音频质量/码率代码。
+    # 期望的音频质量/码率代码；实际可用质量由运行时媒体信息决定。
     audio_quality: ScopeInt = MISSING
-    # 视频下载编码与保存编码组合。
+    # 视频下载编码与保存编码策略。
     vcodec: ScopeText = MISSING
-    # 音频下载编码与保存编码组合。
+    # 音频下载编码与保存编码策略。
     acodec: ScopeText = MISSING
-    # 视频下载编码优先级；显式 None 表示自动推断。
+    # 视频下载编码优先级；显式 None 表示交给运行时自动推断。
     download_vcodec_priority: list[str] | None | _Missing = MISSING
-    # 普通视频输出封装格式。
+    # 普通视频输出封装策略；infer 表示交给运行时推断。
     output_format: ScopeText = MISSING
-    # 仅含音频流时的输出封装格式。
-    output_format_audio_only: ScopeText = MISSING
-    # FFmpeg 可执行文件路径。
+    # 仅含音频流时的输出封装策略；infer 表示交给运行时推断。
+    audio_only_output_format: ScopeText = MISSING
+    # FFmpeg 可执行文件路径输入；是否存在及支持哪些能力由运行时探测。
     ffmpeg_path: ScopeText = MISSING
     # AI 原声翻译的目标语言。
     ai_translation_language: ScopeText = MISSING
@@ -77,15 +76,15 @@ class Scope:
     danmaku_format: ScopeText = MISSING
     # 分块下载时单个块大小，单位 MiB。
     block_size: ScopeFloat = MISSING
-    # 是否覆盖已经存在的输出文件。
+    # 是否允许覆盖已经存在的输出文件。
     overwrite: ScopeBool = MISSING
-    # 代理策略或代理 URL：auto / no / 显式地址。
+    # 代理策略或显式代理 URL；auto 的最终代理由运行时环境解析。
     proxy: ScopeText = MISSING
-    # 下载输出目录。
-    dir: ScopePath = MISSING
-    # 下载中间文件使用的临时目录。
-    tmp_dir: ScopePath = MISSING
-    # 旧版兼容的内联 SESSDATA。
+    # 下载输出目录输入；最终路径及可写性由运行时确定。
+    download_dir: ScopePath = MISSING
+    # 临时文件目录输入；最终路径及可写性由运行时确定。
+    temp_dir: ScopePath = MISSING
+    # 旧版兼容的内联 SESSDATA 输入。
     sessdata: ScopeText = MISSING
     # 构造多级输出目录时使用的路径模板。
     subpath_template: ScopeText = MISSING
@@ -97,9 +96,9 @@ class Scope:
     download_interval: ScopeInt = MISSING
     # 用来排除 CDN/镜像下载地址的正则表达式。
     banned_mirrors_pattern: ScopeText = MISSING
-    # 是否严格要求大会员状态有效。
+    # 是否要求运行时验证大会员状态有效。
     vip_strict: ScopeBool = MISSING
-    # 是否严格要求登录状态有效。
+    # 是否要求运行时验证登录状态有效。
     login_strict: ScopeBool = MISSING
     # 是否关闭彩色 ANSI 输出。
     no_color: ScopeBool = MISSING
@@ -109,23 +108,23 @@ class Scope:
     debug: ScopeBool = MISSING
 
     # ===== 认证 =====
-    # 内联 Cookie，例如 SESSDATA=...; bili_jct=...。
+    # 内联 Cookie 输入，例如 SESSDATA=...; bili_jct=...。
     auth: ScopeText = MISSING
-    # 认证信息读取/写入的文件路径。
+    # 认证信息文件路径输入；实际读取出的认证内容不进入 Scope。
     auth_file: ScopePath = MISSING
     # 认证文件中的 profile 名称。
     auth_profile: ScopeText = MISSING
-    # 登录二维码展示方式：terminal / web。
-    mode: ScopeText = MISSING
+    # 扫码登录二维码展示方式：terminal / web。
+    auth_login_mode: ScopeText = MISSING
     # 扫码登录轮询间隔，单位秒。
-    poll_interval: ScopeFloat = MISSING
+    auth_poll_interval: ScopeFloat = MISSING
     # 扫码登录超时时间，单位秒。
-    timeout: ScopeInt = MISSING
+    auth_login_timeout: ScopeInt = MISSING
 
     # ===== 资源选择 =====
-    # 下载结果是否要求视频流。
+    # 是否要求最终结果包含视频流。
     require_video: ScopeBool = MISSING
-    # 下载结果是否要求音频流。
+    # 是否要求最终结果包含音频流。
     require_audio: ScopeBool = MISSING
     # 是否要求生成弹幕文件。
     require_danmaku: ScopeBool = MISSING
@@ -168,30 +167,28 @@ class Scope:
     # 用于过滤弹幕文本的关键词/正则列表。
     danmaku_block_keyword_patterns: list[str] | None | _Missing = MISSING
 
-    # ===== 批量选择 =====
+    # ===== 内容筛选 =====
     # 是否包含 PV、预告、特别篇等附加内容。
     with_extra_episodes: ScopeBool = MISSING
     # 是否跳过预告片。
     skip_preview: ScopeBool = MISSING
-    # 只选择该时间及之后发布的内容。
+    # 只选择该时间及之后发布的内容；这里只保存筛选条件。
     published_since: ScopeText = MISSING
-    # 只选择该时间之前发布的内容。
+    # 只选择该时间之前发布的内容；这里只保存筛选条件。
     published_before: ScopeText = MISSING
 
     # ===== Server =====
-    # JSON-RPC server 监听地址。
+    # JSON-RPC server 监听地址输入。
     host: ScopeText = MISSING
-    # JSON-RPC server 监听端口。
+    # JSON-RPC server 监听端口输入。
     port: ScopeInt = MISSING
     # 允许访问 server 的浏览器 Origin 列表。
     allow_origin: list[str] | tuple[str, ...] | None | _Missing = MISSING
-    # server token 文件路径。
+    # server token 文件路径输入；文件内容或运行时生成的 token 不进入 Scope。
     token_file: ScopePath = MISSING
-    # 环境变量或其他来源提供的 server token。
-    server_token: ScopeText = MISSING
-    # RPC 下载允许写入的根目录。
+    # RPC 下载允许写入的根目录输入。
     download_root: ScopePath = MISSING
-    # RPC 临时文件允许写入的根目录。
+    # RPC 临时文件允许写入的根目录输入。
     tmp_root: ScopePath = MISSING
     # 单个 server 任务允许的最大解析并发数。
     max_fetch_workers: ScopeInt = MISSING
@@ -247,55 +244,3 @@ class Scope:
         values = self.parent.flatten(stop_at=stop_at) if self.parent is not None else {}
         values.update(self.values)
         return values
-
-
-_BASIC_SCOPE_NAMES = {
-    "num_workers": "download_workers",
-    "metadata_format_premiered": "metadata_premiered_format",
-}
-_BATCH_SCOPE_NAMES = {
-    "batch_filter_start_time": "published_since",
-    "batch_filter_end_time": "published_before",
-}
-_DANMAKU_SCOPE_NAMES = {
-    "font_size": "danmaku_font_size",
-    "font": "danmaku_font",
-    "opacity": "danmaku_opacity",
-    "display_region_ratio": "danmaku_display_region_ratio",
-    "speed": "danmaku_speed",
-    "block_top": "danmaku_block_top",
-    "block_bottom": "danmaku_block_bottom",
-    "block_scroll": "danmaku_block_scroll",
-    "block_reverse": "danmaku_block_reverse",
-    "block_fixed": "danmaku_block_fixed",
-    "block_special": "danmaku_block_special",
-    "block_colorful": "danmaku_block_colorful",
-    "block_keyword_patterns": "danmaku_block_keyword_patterns",
-}
-
-
-def config_scope(config: YuttoConfig) -> Scope:
-    """把 TOML 中显式设置的字段转换到 Scope 权威命名。"""
-    values: dict[str, Any] = {}
-    _copy_explicit(values, config.basic, _BASIC_SCOPE_NAMES)
-    _copy_explicit(values, config.resource)
-    _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_NAMES)
-    _copy_explicit(values, config.batch, _BATCH_SCOPE_NAMES)
-    _copy_explicit(values, config.auth)
-
-    for key in ("dir", "tmp_dir", "auth_file"):
-        value = values.get(key, MISSING)
-        if value is not MISSING and value is not None:
-            values[key] = Path(value).expanduser()
-
-    return Scope(values)
-
-
-def _copy_explicit(
-    target: dict[str, Any],
-    model: BaseModel,
-    names: Mapping[str, str] | None = None,
-) -> None:
-    names = names or {}
-    for field_name in model.model_fields_set:
-        target[names.get(field_name, field_name)] = getattr(model, field_name)
