@@ -59,7 +59,7 @@ def file_scheme_parser(url: str) -> list[str]:
 
 
 def _scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
-    """移除 CLI 控制字段，并把弃用的 --batch 翻译成选择表达式。"""
+    """移除 CLI 控制字段，并在进入 Scope 前转换成权威字段名。"""
     result = dict(values)
     result.pop("command", None)
     result.pop("auth_command", None)
@@ -69,6 +69,11 @@ def _scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], b
     batch = bool(result.pop("batch", False))
     if batch and "selection_expr" not in result:
         result["selection_expr"] = "~"
+
+    if "publication_start_time" in result:
+        result["published_since"] = result.pop("publication_start_time")
+    if "publication_end_time" in result:
+        result["published_before"] = result.pop("publication_end_time")
 
     return result, no_inherit
 
