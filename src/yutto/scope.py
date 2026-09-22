@@ -27,12 +27,10 @@ ScopePath: TypeAlias = Path | str | None | _Missing
 
 @dataclass(frozen=True, slots=True)
 class SourceSpec:
-    """下载源及其本地别名。"""
+    """下载源。"""
 
     # 用户提供的下载源：Bilibili URL、ID、文件路径或 file:// URL。
     value: ScopeText = MISSING
-    # 用户自定义别名到下载源的映射。
-    aliases: dict[str, str] | None | _Missing = MISSING
 
 
 @dataclass(frozen=True, slots=True)

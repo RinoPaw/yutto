@@ -136,7 +136,6 @@ _BASIC_SCOPE_PATHS = {
     "tmp_dir": "output.temporary_directory",
     "sessdata": "auth.sessdata",
     "subpath_template": "output.subpath_template",
-    "aliases": "source.aliases",
     "metadata_premiered_format": "output.metadata_premiered_format",
     "download_interval": "network.download_interval",
     "banned_mirrors_pattern": "network.banned_mirrors_pattern",
@@ -187,7 +186,14 @@ _AUTH_SCOPE_PATHS = {
 def scope_from_config(config: YuttoConfig) -> Scope:
     """把持久配置中显式设置的值转换成一层 Scope。"""
     values: dict[str, Any] = {}
-    _copy_explicit(values, config.basic, _BASIC_SCOPE_PATHS)
+    for field_name in config.basic.model_fields_set:
+        if field_name == "aliases":
+            continue
+        path = _BASIC_SCOPE_PATHS.get(field_name)
+        if path is None:
+            raise TypeError(f"config field without Scope mapping: {field_name}")
+        values[path] = getattr(config.basic, field_name)
+
     _copy_explicit(values, config.resource, _RESOURCE_SCOPE_PATHS)
     _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_PATHS)
     _copy_explicit(values, config.batch, _SELECTION_SCOPE_PATHS)

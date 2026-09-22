@@ -53,7 +53,12 @@ def main() -> None:
     match command:
         case "download":
             try:
-                cli_values, no_inherit = scope_values_from_cli(raw_values)
+                config_aliases = config.basic.aliases
+                aliases = raw_values.get("aliases", config_aliases)
+                cli_values, no_inherit = scope_values_from_cli(
+                    raw_values,
+                    inherited_aliases=config_aliases,
+                )
                 command_scope = Scope(cli_values, parent=configured)
                 runtime = resolve_runtime_options(command_scope)
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
@@ -69,6 +74,8 @@ def main() -> None:
                         parser,
                         configured,
                         no_inherit=no_inherit,
+                        aliases=aliases,
+                        config_aliases=config_aliases,
                     )
                     requests = [resolve_download_request(task) for task in tasks]
 

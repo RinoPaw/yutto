@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 _CLI_SCOPE_PATHS = {
     "source": "source.value",
-    "aliases": "source.aliases",
     "selection_expr": "selection.expression",
     "with_extra_episodes": "selection.with_extra_episodes",
     "skip_preview": "selection.skip_preview",
@@ -87,7 +86,7 @@ _CLI_SCOPE_PATHS = {
     "danmaku_block_colorful": "danmaku.block_colorful",
     "danmaku_block_keyword_patterns": "danmaku.block_keyword_patterns",
 }
-_CLI_CONTROL_FIELDS = frozenset({"command", "auth_command", "config", "no_inherit", "batch"})
+_CLI_CONTROL_FIELDS = frozenset({"command", "auth_command", "config", "no_inherit", "batch", "aliases"})
 
 
 def path_from_cli(path: str) -> Path:
@@ -126,7 +125,11 @@ def file_scheme_parser(url: str) -> list[str]:
     return result
 
 
-def scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+def scope_values_from_cli(
+    values: Mapping[str, Any],
+    *,
+    inherited_aliases: Mapping[str, str] | None = None,
+) -> tuple[dict[str, Any], bool]:
     """把 argparse 字段转换成 Scope 的权威 ``spec.field`` 路径。"""
     result: dict[str, Any] = {}
     unknown: list[str] = []
@@ -144,6 +147,11 @@ def scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], bo
         names = ", ".join(sorted(unknown))
         raise TypeError(f"CLI fields without Scope mapping: {names}")
 
+    aliases = values.get("aliases", inherited_aliases)
+    source = result.get("source.value")
+    if source is not None and aliases:
+        result["source.value"] = aliases.get(str(source), source)
+
     if values.get("batch") and "selection.expression" not in result:
         result["selection.expression"] = "~"
 
@@ -156,17 +164,15 @@ def expand_download_scopes(
     config: Scope,
     *,
     no_inherit: bool = False,
+    aliases: Mapping[str, str] | None = None,
+    config_aliases: Mapping[str, str] | None = None,
 ) -> list[Scope]:
-    """Resolve aliases and task lists by creating child scopes instead of merging dictionaries."""
+    """Expand task lists by creating child scopes instead of merging dictionaries."""
 
     source = scope.source.value
     if source is MISSING or source is None:
         raise ValueError("download source is missing")
     source = str(source)
-
-    aliases = scope.source.aliases
-    if aliases is not MISSING and aliases is not None:
-        source = aliases.get(source, source)
 
     current = Scope({**scope.values, "source.value": source}, parent=scope.parent)
 
@@ -179,7 +185,13 @@ def expand_download_scopes(
         if child_raw.get("command") != "download":
             raise ValueError("下载列表中只能包含 download 命令")
 
-        child_values, child_no_inherit = scope_values_from_cli(child_raw)
+        child_no_inherit = bool(child_raw.get("no_inherit", False))
+        inherited_aliases = config_aliases if no_inherit or child_no_inherit else aliases
+        child_aliases = child_raw.get("aliases", inherited_aliases)
+        child_values, child_no_inherit = scope_values_from_cli(
+            child_raw,
+            inherited_aliases=inherited_aliases,
+        )
         parent = config if no_inherit or child_no_inherit else current
         child = Scope(child_values, parent=parent)
         Logger.debug(f"列表参数: {child.flatten(stop_at=config)}")
@@ -189,6 +201,8 @@ def expand_download_scopes(
                 parser,
                 config,
                 no_inherit=child_no_inherit,
+                aliases=child_aliases,
+                config_aliases=config_aliases,
             )
         )
     return result
@@ -202,11 +216,15 @@ def expand_download_values(
     """Return canonical explicit Scope paths for expanded download tasks."""
 
     configured = scope_from_config(config)
-    scope_values, no_inherit = scope_values_from_cli(values)
+    config_aliases = config.basic.aliases
+    aliases = values.get("aliases", config_aliases)
+    scope_values, no_inherit = scope_values_from_cli(values, inherited_aliases=config_aliases)
     scopes = expand_download_scopes(
         Scope(scope_values, parent=configured),
         parser,
         configured,
         no_inherit=no_inherit,
+        aliases=aliases,
+        config_aliases=config_aliases,
     )
     return [scope.flatten(stop_at=configured) for scope in scopes]
