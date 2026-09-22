@@ -223,16 +223,23 @@ _SPEC_FIELDS = {
 class _SpecView:
     """把 ``scope.spec.field`` 转成一次惰性的作用域字段查询。"""
 
-    __slots__ = ("_scope", "_section")
+    __slots__ = ("_local", "_parent", "_section")
 
-    def __init__(self, scope: Scope, section: str) -> None:
-        self._scope = scope
+    def __init__(self, local: Any, parent: _SpecView | None, section: str) -> None:
+        self._local = local
+        self._parent = parent
         self._section = section
 
     def __getattr__(self, name: str) -> Any:
         if name not in _SPEC_FIELDS[self._section]:
             raise AttributeError(f"{self._section} has no field {name!r}")
-        return self._scope._resolve(self._section, name)
+
+        value = getattr(self._local, name)
+        if value is not MISSING:
+            return value
+        if self._parent is None:
+            return MISSING
+        return getattr(self._parent, name)
 
     def __dir__(self) -> list[str]:
         return sorted({*super().__dir__(), *_SPEC_FIELDS[self._section]})
@@ -253,15 +260,15 @@ class Scope:
     """
 
     parent: Scope | None
-    source: SourceSpec
-    selection: SelectionSpec
-    runtime: RuntimeSpec
-    auth: AuthSpec
-    resource: ResourceSpec
-    stream: StreamSpec
-    output: OutputSpec
-    network: NetworkSpec
-    danmaku: DanmakuSpec
+    _source: SourceSpec
+    _selection: SelectionSpec
+    _runtime: RuntimeSpec
+    _auth: AuthSpec
+    _resource: ResourceSpec
+    _stream: StreamSpec
+    _output: OutputSpec
+    _network: NetworkSpec
+    _danmaku: DanmakuSpec
 
     def __init__(
         self,
@@ -270,8 +277,6 @@ class Scope:
         **overrides: Any,
     ) -> None:
         object.__setattr__(self, "parent", parent)
-        for section, spec_type in _SPEC_TYPES.items():
-            object.__setattr__(self, section, spec_type())
 
         supplied = dict(values or {})
         supplied.update(overrides)
@@ -288,28 +293,68 @@ class Scope:
                 raise TypeError(f"unknown Scope field: {name}")
             field_updates.setdefault(section, {})[field_name] = value
 
+        local_specs: dict[str, Any] = {}
         for section, spec_type in _SPEC_TYPES.items():
             local = section_values.get(section, spec_type())
             updates = field_updates.get(section)
             if updates:
                 local = replace(local, **updates)
-            object.__setattr__(self, section, local)
+            local_specs[section] = local
 
-    def __getattribute__(self, name: str) -> Any:
-        if name in _SPEC_TYPES:
-            return _SpecView(self, name)
-        return object.__getattribute__(self, name)
+        object.__setattr__(self, "_source", local_specs["source"])
+        object.__setattr__(self, "_selection", local_specs["selection"])
+        object.__setattr__(self, "_runtime", local_specs["runtime"])
+        object.__setattr__(self, "_auth", local_specs["auth"])
+        object.__setattr__(self, "_resource", local_specs["resource"])
+        object.__setattr__(self, "_stream", local_specs["stream"])
+        object.__setattr__(self, "_output", local_specs["output"])
+        object.__setattr__(self, "_network", local_specs["network"])
+        object.__setattr__(self, "_danmaku", local_specs["danmaku"])
 
-    def _resolve(self, section: str, field_name: str) -> Any:
-        local = object.__getattribute__(self, section)
-        value = getattr(local, field_name)
-        if value is not MISSING:
-            return value
+    @property
+    def source(self) -> _SpecView:
+        parent = self.parent.source if self.parent is not None else None
+        return _SpecView(self._source, parent, "source")
 
-        parent = object.__getattribute__(self, "parent")
-        if parent is None:
-            return MISSING
-        return parent._resolve(section, field_name)
+    @property
+    def selection(self) -> _SpecView:
+        parent = self.parent.selection if self.parent is not None else None
+        return _SpecView(self._selection, parent, "selection")
+
+    @property
+    def runtime(self) -> _SpecView:
+        parent = self.parent.runtime if self.parent is not None else None
+        return _SpecView(self._runtime, parent, "runtime")
+
+    @property
+    def auth(self) -> _SpecView:
+        parent = self.parent.auth if self.parent is not None else None
+        return _SpecView(self._auth, parent, "auth")
+
+    @property
+    def resource(self) -> _SpecView:
+        parent = self.parent.resource if self.parent is not None else None
+        return _SpecView(self._resource, parent, "resource")
+
+    @property
+    def stream(self) -> _SpecView:
+        parent = self.parent.stream if self.parent is not None else None
+        return _SpecView(self._stream, parent, "stream")
+
+    @property
+    def output(self) -> _SpecView:
+        parent = self.parent.output if self.parent is not None else None
+        return _SpecView(self._output, parent, "output")
+
+    @property
+    def network(self) -> _SpecView:
+        parent = self.parent.network if self.parent is not None else None
+        return _SpecView(self._network, parent, "network")
+
+    @property
+    def danmaku(self) -> _SpecView:
+        parent = self.parent.danmaku if self.parent is not None else None
+        return _SpecView(self._danmaku, parent, "danmaku")
 
     @staticmethod
     def _coerce_spec(section: str, value: Any) -> Any:
@@ -328,9 +373,19 @@ class Scope:
     def values(self) -> Mapping[str, Any]:
         """返回当前层显式定义的权威字段路径，不包含父作用域。"""
         result: dict[str, Any] = {}
-        for section, spec_type in _SPEC_TYPES.items():
-            local = object.__getattribute__(self, section)
-            for descriptor in fields(spec_type):
+        local_specs = (
+            ("source", self._source),
+            ("selection", self._selection),
+            ("runtime", self._runtime),
+            ("auth", self._auth),
+            ("resource", self._resource),
+            ("stream", self._stream),
+            ("output", self._output),
+            ("network", self._network),
+            ("danmaku", self._danmaku),
+        )
+        for section, local in local_specs:
+            for descriptor in fields(local):
                 value = getattr(local, descriptor.name)
                 if value is not MISSING:
                     result[f"{section}.{descriptor.name}"] = value
