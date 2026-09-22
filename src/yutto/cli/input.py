@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
-from yutto.cli.scope import MISSING, Scope, config_scope
+from yutto.cli.scope import MISSING, Scope
+from yutto.cli.settings import scope_from_config
 from yutto.core.operation import emit_download_report
 from yutto.utils.console.logger import Logger
 
@@ -58,7 +59,7 @@ def file_scheme_parser(url: str) -> list[str]:
 
 
 def _scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Strip CLI control fields and translate legacy CLI names to canonical Scope names."""
+    """移除 CLI 控制字段，并把弃用的 --batch 翻译成选择表达式。"""
     result = dict(values)
     result.pop("command", None)
     result.pop("auth_command", None)
@@ -68,11 +69,6 @@ def _scope_values_from_cli(values: Mapping[str, Any]) -> tuple[dict[str, Any], b
     batch = bool(result.pop("batch", False))
     if batch and "selection_expr" not in result:
         result["selection_expr"] = "~"
-
-    if "publication_start_time" in result:
-        result["published_since"] = result.pop("publication_start_time")
-    if "publication_end_time" in result:
-        result["published_before"] = result.pop("publication_end_time")
 
     return result, no_inherit
 
@@ -128,7 +124,7 @@ def expand_download_values(
 ) -> list[dict[str, Any]]:
     """Compatibility wrapper returning inherited explicit CLI values."""
 
-    configured = config_scope(config)
+    configured = scope_from_config(config)
     scope_values, no_inherit = _scope_values_from_cli(values)
     scopes = expand_download_scopes(
         Scope(scope_values, parent=configured),
