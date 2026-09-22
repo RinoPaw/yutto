@@ -7,7 +7,23 @@ from typing import TYPE_CHECKING
 import biliass
 
 from yutto.auth import format_auth_inline, resolve_auth
-from yutto.stream import audio_codec_priority_default, video_codec_priority_default
+from yutto.core.execution import (
+    resolve_download_workers,
+    resolve_fetch_workers,
+    resolve_network_proxy,
+)
+from yutto.downloader.planner import resolve_block_size_bytes
+from yutto.resource import resolve_danmaku_format, should_save_cover
+from yutto.scope import MISSING
+from yutto.stream import (
+    audio_codec_priority_default,
+    resolve_audio_codecs,
+    resolve_audio_quality,
+    resolve_video_codec_priority,
+    resolve_video_codecs,
+    resolve_video_quality,
+    video_codec_priority_default,
+)
 from yutto.utils.console.colorful import set_no_color
 from yutto.utils.console.logger import Logger, set_logger_debug
 from yutto.utils.fetcher import resolve_proxy
@@ -16,7 +32,7 @@ if TYPE_CHECKING:
     import argparse
 
     from yutto.auth import AuthInfo
-    from yutto.core.request import DownloadRequest
+    from yutto.scope import Scope
     from yutto.utils.ffmpeg import FFmpeg
 
 
@@ -37,10 +53,19 @@ def resolve_credentials(options: argparse.Namespace) -> AuthInfo | None:
     return resolve_auth(options)
 
 
-def validate_download_request(request: DownloadRequest, ffmpeg: FFmpeg) -> None:
-    resolve_proxy(request.network.proxy)
+def validate_download_scope(scope: Scope, ffmpeg: FFmpeg) -> None:
+    resolve_proxy(resolve_network_proxy(scope))
+    resolve_fetch_workers(scope)
+    resolve_download_workers(scope)
+    resolve_block_size_bytes(scope)
+    should_save_cover(scope)
+    resolve_danmaku_format(scope)
+    resolve_video_quality(scope)
+    resolve_audio_quality(scope)
 
-    priority = request.stream.video_download_codec_priority
+    video_download_codec, video_save_codec = resolve_video_codecs(scope)
+    audio_download_codec, audio_save_codec = resolve_audio_codecs(scope)
+    priority = resolve_video_codec_priority(scope)
     if priority is not None:
         if len(priority) < len(video_codec_priority_default):
             Logger.warning(
@@ -48,26 +73,42 @@ def validate_download_request(request: DownloadRequest, ffmpeg: FFmpeg) -> None:
                     ", ".join(priority), ", ".join(video_codec_priority_default)
                 )
             )
-        if priority[0] != request.stream.video_download_codec:
+        if priority[0] != video_download_codec:
             Logger.warning(
-                f"download_vcodec 参数值（{request.stream.video_download_codec}）不是优先级最高的编码（{priority[0]}），可能会导致下载失败哦"
+                f"download_vcodec 参数值（{video_download_codec}）不是优先级最高的编码（{priority[0]}），可能会导致下载失败哦"
             )
 
-    if request.stream.video_save_codec not in ffmpeg.video_encodecs + ["copy"]:
+    if video_save_codec not in ffmpeg.video_encodecs + ["copy"]:
         raise ValueError(
             "save_vcodec 参数值（{}）不满足要求哦（允许值：{{{}}}）".format(
-                request.stream.video_save_codec, ", ".join(ffmpeg.video_encodecs + ["copy"])
+                video_save_codec, ", ".join(ffmpeg.video_encodecs + ["copy"])
             )
         )
-    if request.stream.audio_download_codec not in audio_codec_priority_default:
+    if audio_download_codec not in audio_codec_priority_default:
         raise ValueError(
             "download_acodec 参数值（{}）不满足要求哦（允许值：{{{}}}）".format(
-                request.stream.audio_download_codec, ", ".join(audio_codec_priority_default)
+                audio_download_codec, ", ".join(audio_codec_priority_default)
             )
         )
-    if request.stream.audio_save_codec not in ffmpeg.audio_encodecs + ["copy"]:
+    if audio_save_codec not in ffmpeg.audio_encodecs + ["copy"]:
         raise ValueError(
             "save_acodec 参数值（{}）不满足要求哦（允许值：{{{}}}）".format(
-                request.stream.audio_save_codec, ", ".join(ffmpeg.audio_encodecs + ["copy"])
+                audio_save_codec, ", ".join(ffmpeg.audio_encodecs + ["copy"])
             )
         )
+
+    output_format = scope.output.format
+    if output_format is not MISSING and output_format not in {"infer", "mp4", "mkv", "mov"}:
+        raise ValueError(f"unsupported output format: {output_format}")
+    audio_only_format = scope.output.audio_only_format
+    if audio_only_format is not MISSING and audio_only_format not in {
+        "infer",
+        "m4a",
+        "aac",
+        "mp3",
+        "flac",
+        "mp4",
+        "mkv",
+        "mov",
+    }:
+        raise ValueError(f"unsupported audio-only output format: {audio_only_format}")

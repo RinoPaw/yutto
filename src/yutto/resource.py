@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from biliass import get_danmaku_meta_size
 
@@ -16,13 +16,13 @@ from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
 from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
+from yutto.scope import MISSING, Scope
 from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 from yutto.utils.functional import data_has_chained_keys
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.core.request import DownloadRequest
     from yutto.types import AId, CId, EpisodeId
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
@@ -41,6 +41,66 @@ class ResourceManifest:
     danmaku_urls: tuple[str, ...] = ()
     cover_url: str | None = None
     chapter_info_url: str | None = None
+
+
+def wants_video(scope: Scope) -> bool:
+    return _flag(scope.resource.video, True)
+
+
+def wants_audio(scope: Scope) -> bool:
+    return _flag(scope.resource.audio, True)
+
+
+def wants_danmaku(scope: Scope) -> bool:
+    return _flag(scope.resource.danmaku, True)
+
+
+def wants_subtitle(scope: Scope) -> bool:
+    return _flag(scope.resource.subtitle, True)
+
+
+def wants_metadata(scope: Scope) -> bool:
+    return _flag(scope.resource.metadata, False)
+
+
+def wants_cover(scope: Scope) -> bool:
+    return _flag(scope.resource.cover, True)
+
+
+def wants_chapter_info(scope: Scope) -> bool:
+    return _flag(scope.resource.chapter_info, True)
+
+
+def should_save_cover(scope: Scope) -> bool:
+    cover = wants_cover(scope)
+    save_cover = _flag(scope.resource.save_cover, False)
+    if save_cover and not cover:
+        raise ValueError("save_cover requires cover")
+    if cover and not any(
+        (
+            wants_video(scope),
+            wants_audio(scope),
+            wants_danmaku(scope),
+            wants_subtitle(scope),
+            wants_metadata(scope),
+            wants_chapter_info(scope),
+        )
+    ):
+        return True
+    return save_cover
+
+
+def resolve_danmaku_format(scope: Scope) -> DanmakuSaveType:
+    value = scope.danmaku.format
+    if value is MISSING:
+        return cast("DanmakuSaveType", "ass")
+    if value not in {"xml", "ass", "protobuf"}:
+        raise ValueError(f"unsupported danmaku format: {value}")
+    return cast("DanmakuSaveType", value)
+
+
+def _flag(value: object, default: bool) -> bool:
+    return default if value is MISSING else bool(value)
 
 
 def _video_streams(items: list[dict[str, Any]]) -> list[VideoUrlMeta]:
@@ -271,13 +331,22 @@ async def _resolve_danmaku(
 
 
 async def resolve_resource_manifest(
-    scope: ExecutionScope,
+    execution: ExecutionScope,
     item: MediaItem,
-    request: DownloadRequest,
+    scope: Scope,
 ) -> ResourceManifest:
     """Resolve resource locations for one MediaItem without downloading resource bodies."""
 
-    resources = request.resources
+    video = wants_video(scope)
+    audio = wants_audio(scope)
+    subtitle = wants_subtitle(scope)
+    danmaku = wants_danmaku(scope)
+    cover = wants_cover(scope)
+    chapter_info = wants_chapter_info(scope)
+    ai_translation_language = scope.resource.ai_translation_language
+    if ai_translation_language is MISSING:
+        ai_translation_language = None
+
     videos: list[VideoUrlMeta] = []
     audios: list[AudioUrlMeta] = []
     subtitles: list[SubtitleResource] = []
@@ -285,41 +354,42 @@ async def resolve_resource_manifest(
 
     if isinstance(item, UgcPage):
         aid = item.aid
-        if resources.video or resources.audio:
+        if video or audio:
             videos, audios = await get_ugc_video_playurl(
-                scope,
+                execution,
                 aid,
                 item.cid,
-                resources.ai_translation_language,
+                cast("str | None", ai_translation_language),
             )
-        if resources.chapter_info:
+        if chapter_info:
             chapter_info_url = f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={item.cid}"
     elif isinstance(item, BangumiEpisode):
         aid = item.aid
-        if resources.video or resources.audio:
-            videos, audios = await get_bangumi_playurl(scope, aid, item.cid)
+        if video or audio:
+            videos, audios = await get_bangumi_playurl(execution, aid, item.cid)
     elif isinstance(item, CheeseEpisode):
         aid = item.aid
-        if resources.video or resources.audio:
-            videos, audios = await get_cheese_playurl(scope, aid, item.episode_id, item.cid)
+        if video or audio:
+            videos, audios = await get_cheese_playurl(execution, aid, item.episode_id, item.cid)
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
-    if resources.subtitle:
-        subtitles = await _resolve_subtitles(scope, item, aid, item.cid)
-    if not resources.video:
+    if subtitle:
+        subtitles = await _resolve_subtitles(execution, item, aid, item.cid)
+    if not video:
         videos = []
-    if not resources.audio:
+    if not audio:
         audios = []
 
+    danmaku_format = resolve_danmaku_format(scope)
     danmaku_source_type: DanmakuSourceType | None = None
     danmaku_urls: list[str] = []
-    if resources.danmaku:
+    if danmaku:
         danmaku_source_type, danmaku_urls = await _resolve_danmaku(
-            scope,
+            execution,
             aid,
             item.cid,
-            request.danmaku.format,
+            danmaku_format,
         )
 
     return ResourceManifest(
@@ -327,8 +397,8 @@ async def resolve_resource_manifest(
         audios=tuple(audios),
         subtitles=tuple(subtitles),
         danmaku_source_type=danmaku_source_type,
-        danmaku_save_type=request.danmaku.format if danmaku_urls else None,
+        danmaku_save_type=danmaku_format if danmaku_urls else None,
         danmaku_urls=tuple(danmaku_urls),
-        cover_url=item.metadata.thumb if resources.cover and item.metadata.thumb else None,
+        cover_url=item.metadata.thumb if cover and item.metadata.thumb else None,
         chapter_info_url=chapter_info_url,
     )

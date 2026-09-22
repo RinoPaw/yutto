@@ -8,13 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from yutto.auth import default_auth_file
-from yutto.cli.request_adapter import download_request_parser_from_settings
 from yutto.core.application import YuttoApplication
 from yutto.core.task_service import DownloadTaskService, ResolveTaskService
 from yutto.download_manager import DownloadManager
 from yutto.downloader.path_leases import DownloadPathLeasePool
 from yutto.runtime import TaskCapacityPool, monotonic_seq_allocator
-from yutto.server.service import ServerPolicy, ServerPolicyOptions
+from yutto.server.service import ServerPolicy, ServerPolicyOptions, scope_parser_from_settings
 from yutto.server.websocket import WebSocketServerOptions, YuttoWebSocketServer
 from yutto.utils.console.logger import Logger
 from yutto.utils.ffmpeg import FFmpeg
@@ -111,10 +110,10 @@ def build_server(
             allowed_audio_save_codecs=frozenset([*ffmpeg.audio_encodecs, "copy"]),
         )
     )
-    parse_request = download_request_parser_from_settings(options.request_settings)
-    default_request = parse_request({"source": {"url": "yutto-server-default-validation"}})
-    policy.prepare_request(default_request)
-    policy.resolve_credentials(default_request)
+    parse_scope = scope_parser_from_settings(options.request_settings)
+    default_scope = parse_scope({"source": {"url": "yutto-server-default-validation"}})
+    prepared_default = policy.prepare_scope(default_scope)
+    policy.resolve_credentials(prepared_default)
     scope_factory = policy.build_scope_factory()
 
     event_seq_allocator = monotonic_seq_allocator()
@@ -150,8 +149,8 @@ def build_server(
             port=options.port,
             allowed_origins=options.allow_origin,
         ),
-        prepare_request=policy.prepare_request,
-        parse_request=parse_request,
+        prepare_scope=policy.prepare_scope,
+        parse_scope=parse_scope,
         resolve_service=resolve_service,
     )
 

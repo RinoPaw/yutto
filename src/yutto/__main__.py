@@ -12,7 +12,6 @@ from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
 from yutto.cli.input import expand_download_scopes, scope_values_from_cli
 from yutto.cli.parser import build_parser
-from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import resolve_config, scope_from_config, search_for_settings_file
 from yutto.core.application import YuttoApplication
@@ -24,14 +23,13 @@ from yutto.scope import Scope
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
-from yutto.validator import configure_cli, resolve_credentials, validate_download_request
+from yutto.validator import configure_cli, resolve_credentials, validate_download_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.auth import AuthInfo
     from yutto.core.execution import ExecutionScope
-    from yutto.core.request import DownloadRequest
 
 
 def main() -> None:
@@ -77,32 +75,31 @@ def main() -> None:
                         aliases=aliases,
                         config_aliases=config_aliases,
                     )
-                    requests = [resolve_download_request(task) for task in tasks]
 
                     if not runtime.preview_formats:
                         if runtime.ffmpeg_path is not None:
                             FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
                         ffmpeg = FFmpeg()
-                        for request in requests:
-                            validate_download_request(request, ffmpeg)
+                        for task in tasks:
+                            validate_download_scope(task, ffmpeg)
 
                     credential_options = resolve_credential_options(tasks)
                     auth_list = [resolve_credentials(options) for options in credential_options]
-                    auth_by_request = {id(request): auth for request, auth in zip(requests, auth_list, strict=True)}
-                    credentials_by_request = {
-                        id(request): options for request, options in zip(requests, credential_options, strict=True)
+                    auth_by_scope = {id(scope): auth for scope, auth in zip(tasks, auth_list, strict=True)}
+                    credentials_by_scope = {
+                        id(scope): options for scope, options in zip(tasks, credential_options, strict=True)
                     }
 
-                    def resolve_request_credentials(request: DownloadRequest) -> AuthInfo | None:
-                        return auth_by_request[id(request)]
+                    def resolve_scope_credentials(scope: Scope) -> AuthInfo | None:
+                        return auth_by_scope[id(scope)]
 
                     announced_profiles: set[tuple[Path, str]] = set()
                     inline_auth_announced = False
 
-                    async def announce_request_auth(scope: ExecutionScope, request: DownloadRequest) -> None:
+                    async def announce_scope_auth(execution: ExecutionScope, scope: Scope) -> None:
                         nonlocal inline_auth_announced
 
-                        options = credentials_by_request[id(request)]
+                        options = credentials_by_scope[id(scope)]
                         if options.auth or options.sessdata:
                             if inline_auth_announced:
                                 return
@@ -113,16 +110,16 @@ def main() -> None:
                                 return
                             announced_profiles.add(profile)
 
-                        await announce_cli_auth(scope, request)
+                        await announce_cli_auth(execution, scope)
 
                     scope_factory = RequestExecutionScopeFactory(
-                        resolve_request_credentials,
-                        on_open=announce_request_auth,
+                        resolve_scope_credentials,
+                        on_open=announce_scope_auth,
                     )
                     if runtime.preview_formats:
-                        run_preview_formats(scope_factory, requests, renderer)
+                        run_preview_formats(scope_factory, tasks, renderer)
                     else:
-                        run_download(scope_factory, requests, renderer, jobs=runtime.jobs)
+                        run_download(scope_factory, tasks, renderer, jobs=runtime.jobs)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
@@ -170,7 +167,7 @@ def main() -> None:
 @as_sync
 async def run_download(
     scope_factory: ExecutionScopeFactory,
-    requests: list[DownloadRequest],
+    scopes: list[Scope],
     renderer: CliApplicationEventRenderer,
     *,
     jobs: int | None = None,
@@ -183,16 +180,16 @@ async def run_download(
             event_sink=renderer,
         )
         with bind_download_report_sink(renderer.report):
-            await application.download_all(requests)
+            await application.download_all(scopes)
 
 
-async def announce_cli_auth(scope: ExecutionScope, _request: DownloadRequest) -> None:
-    if scope.session.cookie("SESSDATA") is None:
+async def announce_cli_auth(execution: ExecutionScope, _scope: Scope) -> None:
+    if execution.session.cookie("SESSDATA") is None:
         Logger.info(
             "未提供登录认证信息，无法下载高清视频、字幕等资源哦～请通过 `--auth` 参数提供认证信息，或者先使用 `yutto auth login` 登录存储认证信息后再下载～"
         )
         return
-    if await validate_user_info(scope, {"vip_status": True, "is_login": True}):
+    if await validate_user_info(execution, {"vip_status": True, "is_login": True}):
         Logger.custom("成功以大会员身份登录～", badge=Badge("大会员", fore="white", back="magenta", style=["bold"]))
     else:
         Logger.warning("以非大会员身份登录，注意无法下载会员专享剧集喔～")

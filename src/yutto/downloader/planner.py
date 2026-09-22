@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from yutto.downloader.selector import select_streams
-from yutto.utils.time import TIME_FULL_FMT
+from yutto.resource import should_save_cover, wants_audio, wants_metadata, wants_video
+from yutto.scope import MISSING, Scope
+from yutto.stream import resolve_audio_codecs, resolve_video_codecs
+from yutto.utils.time import TIME_DATE_FMT, TIME_FULL_FMT
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from yutto.core.request import DownloadRequest
     from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
+
+MEBIBYTE = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +69,7 @@ class MetadataPlan:
 
 @dataclass(frozen=True, slots=True)
 class DownloadResources:
-    """Frozen write policy derived from DownloadRequest and ResourceManifest."""
+    """Frozen write policy derived from Scope and ResourceManifest."""
 
     subtitle_languages: tuple[str, ...]
     has_danmaku: bool
@@ -105,64 +108,61 @@ class DownloadPlan:
 
 
 class DownloadPlanner:
-    """Turn a ResourceManifest plus a path and DownloadRequest into a pure download plan."""
+    """Turn a ResourceManifest plus a path and Scope into a pure download plan."""
 
-    def plan(self, resources: ResourceManifest, path: Path, request: DownloadRequest) -> DownloadPlan:
-        resource_options = request.resources
-        stream = request.stream
-        output = request.output
-        network = request.network
-        danmaku = request.danmaku
-        selection = select_streams(resources, request)
+    def plan(self, resources: ResourceManifest, path: Path, scope: Scope) -> DownloadPlan:
+        selection = select_streams(resources, scope)
         video_meta = selection.video
         audio_meta = selection.audio
-        suffix = resolve_output_suffix(video_meta, audio_meta, request)
+        suffix = resolve_output_suffix(video_meta, audio_meta, scope)
+        output_directory, temporary_directory = resolve_output_directories(scope)
         paths = resolve_paths(
-            output.directory,
-            output.temporary_directory or output.directory,
+            output_directory,
+            temporary_directory,
             path,
             suffix,
         )
 
-        video_save_codec = stream.video_save_codec
+        _, video_save_codec = resolve_video_codecs(scope)
         attach_hvc1_tag = should_attach_hvc1_tag(video_meta, video_save_codec)
         if video_meta is not None and video_meta["codec"] == video_save_codec:
             video_save_codec = "copy"
 
-        requested_audio_save_codec = stream.audio_save_codec
+        _, requested_audio_save_codec = resolve_audio_codecs(scope)
         audio_save_codec = (
             resolve_audio_save_codec(audio_meta["codec"], requested_audio_save_codec, suffix)
             if audio_meta is not None
             else requested_audio_save_codec
         )
 
+        fixed = _bool(scope.danmaku.block_fixed, False)
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
             danmaku_save_type=resources.danmaku_save_type,
-            has_metadata=resource_options.metadata,
+            has_metadata=wants_metadata(scope),
             has_cover=resources.cover_url is not None,
             has_chapter_info=resources.chapter_info_url is not None,
-            save_cover=resource_options.save_cover,
+            save_cover=should_save_cover(scope),
             danmaku_width=video_meta["width"] if video_meta is not None else 1920,
             danmaku_height=video_meta["height"] if video_meta is not None else 1080,
             metadata=MetadataPlan(
-                premiered=output.metadata_format_premiered,
+                premiered=_text(scope.output.metadata_premiered_format, TIME_DATE_FMT),
                 dateadded=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
-                font_size=danmaku.font_size,
-                font=danmaku.font,
-                opacity=danmaku.opacity,
-                display_region_ratio=danmaku.display_region_ratio,
-                speed=danmaku.speed,
-                block_top=danmaku.block_top,
-                block_bottom=danmaku.block_bottom,
-                block_scroll=danmaku.block_scroll,
-                block_reverse=danmaku.block_reverse,
-                block_special=danmaku.block_special,
-                block_colorful=danmaku.block_colorful,
-                block_keyword_patterns=tuple(danmaku.block_keyword_patterns),
+                font_size=_optional_int(scope.danmaku.font_size),
+                font=_text(scope.danmaku.font, "SimHei"),
+                opacity=_float(scope.danmaku.opacity, 0.8),
+                display_region_ratio=_float(scope.danmaku.display_region_ratio, 1.0),
+                speed=_float(scope.danmaku.speed, 1.0),
+                block_top=_bool(scope.danmaku.block_top, False) or fixed,
+                block_bottom=_bool(scope.danmaku.block_bottom, False) or fixed,
+                block_scroll=_bool(scope.danmaku.block_scroll, False),
+                block_reverse=_bool(scope.danmaku.block_reverse, False),
+                block_special=_bool(scope.danmaku.block_special, False),
+                block_colorful=_bool(scope.danmaku.block_colorful, False),
+                block_keyword_patterns=_patterns(scope.danmaku.block_keyword_patterns),
             ),
         )
         return DownloadPlan(
@@ -170,18 +170,38 @@ class DownloadPlanner:
             paths=paths,
             video=freeze_video_stream(video_meta, selection.video_index),
             audio=freeze_audio_stream(audio_meta, selection.audio_index),
-            media_requested=resource_options.video or resource_options.audio,
+            media_requested=wants_video(scope) or wants_audio(scope),
             video_save_codec=video_save_codec,
             audio_save_codec=audio_save_codec,
             attach_hvc1_tag=attach_hvc1_tag,
             requires_audio_transcode_notice=(
                 audio_meta is not None and audio_save_codec not in {requested_audio_save_codec, "copy"}
             ),
-            overwrite=output.overwrite,
-            block_size=network.block_size_bytes,
-            banned_mirrors_pattern=network.banned_mirrors_pattern,
+            overwrite=_bool(scope.output.overwrite, False),
+            block_size=resolve_block_size_bytes(scope),
+            banned_mirrors_pattern=_optional_text(scope.network.banned_mirrors_pattern),
             resources=resource_plan,
         )
+
+
+def resolve_output_directories(scope: Scope) -> tuple[Path, Path]:
+    directory = scope.output.directory
+    output_directory = Path() if directory is MISSING or directory is None else Path(directory)
+    temporary = scope.output.temporary_directory
+    temporary_directory = output_directory if temporary is MISSING or temporary is None else Path(temporary)
+    return output_directory, temporary_directory
+
+
+def resolve_block_size_bytes(scope: Scope) -> int:
+    value = scope.network.block_size
+    if value is MISSING:
+        return 512 * 1024
+    if value is None or isinstance(value, bool):
+        raise ValueError("block_size must be a positive number")
+    size = int(float(value) * MEBIBYTE)
+    if size < 1:
+        raise ValueError("block_size must be a positive number")
+    return size
 
 
 def resolve_paths(
@@ -210,21 +230,22 @@ def resolve_paths(
 def resolve_output_suffix(
     video: VideoUrlMeta | None,
     audio: AudioUrlMeta | None,
-    request: DownloadRequest,
+    scope: Scope,
 ) -> str:
-    output = request.output
-    stream = request.stream
+    output_format = _text(scope.output.format, "infer")
+    audio_only_format = _text(scope.output.audio_only_format, "infer")
+    _, audio_save_codec = resolve_audio_codecs(scope)
     if video is None:
-        if output.audio_only_format != "infer":
-            return f".{output.audio_only_format}"
-        if audio is not None and audio["codec"] == "flac" and stream.audio_save_codec in {"copy", "flac"}:
+        if audio_only_format != "infer":
+            return f".{audio_only_format}"
+        if audio is not None and audio["codec"] == "flac" and audio_save_codec in {"copy", "flac"}:
             return ".flac"
-        if audio is not None and audio["codec"] == "eac3" and stream.audio_save_codec in {"copy", "eac3"}:
+        if audio is not None and audio["codec"] == "eac3" and audio_save_codec in {"copy", "eac3"}:
             return ".mkv"
         return ".m4a"
 
-    if output.format != "infer":
-        return f".{output.format}"
+    if output_format != "infer":
+        return f".{output_format}"
     if audio is not None and audio["codec"] == "flac":
         return ".mkv"
     return ".mp4"
@@ -279,3 +300,47 @@ def resolve_audio_save_codec(audio_codec: str, audio_save_codec: str, container_
         if audio_codec not in compatible_codecs:
             return transcode_codec
     return audio_save_codec
+
+
+def _bool(value: object, default: bool) -> bool:
+    return default if value is MISSING else bool(value)
+
+
+def _text(value: object, default: str) -> str:
+    if value is MISSING:
+        return default
+    if not isinstance(value, str):
+        raise ValueError("expected a string Scope value")
+    return value
+
+
+def _optional_text(value: object) -> str | None:
+    if value is MISSING or value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("expected a string Scope value")
+    return value
+
+
+def _float(value: object, default: float) -> float:
+    if value is MISSING:
+        return default
+    if value is None or isinstance(value, bool):
+        raise ValueError("expected a numeric Scope value")
+    return float(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is MISSING or value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("expected an integer Scope value")
+    return int(value)
+
+
+def _patterns(value: object) -> tuple[str, ...]:
+    if value is MISSING or value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("danmaku block keyword patterns must be a list of strings")
+    return tuple(cast("list[str]", value))

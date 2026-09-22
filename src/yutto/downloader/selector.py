@@ -4,19 +4,25 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from yutto.exceptions import CryptoError
+from yutto.resource import wants_audio, wants_video
 from yutto.stream import (
     gen_acodec_priority,
     gen_audio_quality_priority,
     gen_vcodec_priority,
     gen_video_quality_priority,
     is_encrypted_audio_quality,
+    resolve_audio_codecs,
+    resolve_audio_quality,
+    resolve_video_codec_priority,
+    resolve_video_codecs,
+    resolve_video_quality,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from yutto.core.request import DownloadRequest
     from yutto.resource import ResourceManifest
+    from yutto.scope import Scope
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
 
@@ -79,23 +85,23 @@ def select_audio(
     return None
 
 
-def select_streams(resources: ResourceManifest, request: DownloadRequest) -> StreamSelection:
-    """Apply the download request's stream policy to one resolved manifest."""
-    stream = request.stream
-    resource_options = request.resources
+def select_streams(resources: ResourceManifest, scope: Scope) -> StreamSelection:
+    """Apply the active Scope's stream policy to one resolved manifest."""
+    video_download_codec, _ = resolve_video_codecs(scope)
+    audio_download_codec, _ = resolve_audio_codecs(scope)
     video_candidate = select_video(
         resources.videos,
-        stream.video_quality,
-        stream.video_download_codec,
-        stream.video_download_codec_priority,
+        resolve_video_quality(scope),
+        video_download_codec,
+        resolve_video_codec_priority(scope),
     )
     audio_candidate = select_audio(
         resources.audios,
-        stream.audio_quality,
-        stream.audio_download_codec,
+        resolve_audio_quality(scope),
+        audio_download_codec,
     )
-    video = video_candidate if resource_options.video else None
-    audio = audio_candidate if resource_options.audio else None
+    video = video_candidate if wants_video(scope) else None
+    audio = audio_candidate if wants_audio(scope) else None
     return StreamSelection(
         video=video,
         audio=audio,

@@ -4,16 +4,15 @@ import asyncio
 import hmac
 import ipaddress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Protocol, TypeAlias, cast
 
-from pydantic import ValidationError
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
 from yutto.__version__ import VERSION
-from yutto.core.request import DownloadRequest
 from yutto.runtime import TaskCapacityError
+from yutto.scope import MISSING, Scope
 from yutto.server.rpc import JsonRpcDispatcher, JsonRpcError, encode_notification
 from yutto.server.service import event_to_json, replay_to_json, snapshot_summary_to_json, snapshot_to_json
 
@@ -25,9 +24,7 @@ if TYPE_CHECKING:
     from yutto.core.result import DownloadResult, ResolveResult
     from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
 
-    _AnyTaskSnapshot: TypeAlias = (
-        TaskSnapshot[DownloadRequest, DownloadResult] | TaskSnapshot[DownloadRequest, ResolveResult]
-    )
+    _AnyTaskSnapshot: TypeAlias = TaskSnapshot[Scope, DownloadResult] | TaskSnapshot[Scope, ResolveResult]
 
 
 AUTHENTICATION_ERROR = -32001
@@ -41,13 +38,13 @@ class DownloadTaskApi(Protocol):
 
     async def close(self, *, cancel_pending: bool = False) -> None: ...
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, DownloadResult]: ...
+    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, DownloadResult]: ...
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None: ...
+    def get(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None: ...
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, DownloadResult], ...]: ...
+    def list(self) -> tuple[TaskSnapshot[Scope, DownloadResult], ...]: ...
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None: ...
+    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None: ...
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None: ...
 
@@ -59,13 +56,13 @@ class ResolveTaskApi(Protocol):
 
     async def close(self, *, cancel_pending: bool = False) -> None: ...
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, ResolveResult]: ...
+    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, ResolveResult]: ...
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None: ...
+    def get(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None: ...
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, ResolveResult], ...]: ...
+    def list(self) -> tuple[TaskSnapshot[Scope, ResolveResult], ...]: ...
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None: ...
+    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None: ...
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None: ...
 
@@ -94,11 +91,7 @@ class _SlowConsumerCloser:
 
 
 def _task_snapshot_order(snapshot: _AnyTaskSnapshot) -> tuple[datetime, str]:
-    """task.list 的全局顺序：按提交时间升序、并列时按 task_id 稳定。
-
-    download / resolve 两个 runtime 的快照如按分块拼接，新任务会插入合并序列中段，
-    offset 分页就会跨页漏掉或重复条目。
-    """
+    """task.list 的全局顺序：按提交时间升序、并列时按 task_id 稳定。"""
     return (snapshot.created_at, snapshot.task_id)
 
 
@@ -106,13 +99,12 @@ def _task_snapshot_summary_to_json(
     snapshot: _AnyTaskSnapshot,
 ) -> dict[str, object]:
     summary = snapshot_summary_to_json(snapshot)
-    summary["url"] = snapshot.payload.source.url
+    source = snapshot.payload.source.value
+    summary["url"] = "" if source is MISSING or source is None else str(source)
     return summary
 
 
 def _snapshot_to_json_with_kind(snapshot: _AnyTaskSnapshot, kind: str) -> dict[str, object]:
-    # download 与 resolve 任务共用 task.* 接口且 queued/running 快照结构相同，
-    # 客户端（尤其重连后）需要稳定的 kind 字段区分任务类别
     data = snapshot_to_json(snapshot)
     data["kind"] = kind
     return data
@@ -148,16 +140,16 @@ class YuttoWebSocketServer:
         task_service: DownloadTaskApi,
         options: WebSocketServerOptions,
         *,
-        prepare_request: Callable[[DownloadRequest], DownloadRequest] | None = None,
-        parse_request: Callable[[object], DownloadRequest] | None = None,
+        prepare_scope: Callable[[Scope], Scope] | None = None,
+        parse_scope: Callable[[object], Scope] | None = None,
         resolve_service: ResolveTaskApi | None = None,
     ):
         self._task_service = task_service
         self._resolve_service = resolve_service
         self.options = options
         self._token_bytes = options.token.encode("utf-8")
-        self._prepare_request = prepare_request or (lambda request: request)
-        self._parse_request = parse_request or DownloadRequest.model_validate
+        self._prepare_scope = prepare_scope or (lambda scope: scope)
+        self._parse_scope = parse_scope or _parse_canonical_scope
         self._server: Server | None = None
 
     @property
@@ -392,12 +384,13 @@ class YuttoWebSocketServer:
 
         return dispatcher
 
-    def _parse_and_prepare(self, request: dict[str, object]) -> DownloadRequest:
-        validated = self._parse_request(request)
+    def _parse_and_prepare(self, request: dict[str, object]) -> Scope:
         try:
-            return self._prepare_request(validated)
-        except ValidationError:
-            raise
+            parsed = self._parse_scope(request)
+        except (TypeError, ValueError) as error:
+            raise JsonRpcError(-32602, "Invalid params", {"reason": str(error)}) from error
+        try:
+            return self._prepare_scope(parsed)
         except ValueError as error:
             raise JsonRpcError(
                 REQUEST_REJECTED_ERROR,
@@ -428,6 +421,12 @@ class YuttoWebSocketServer:
                 await connection.send(message)
             finally:
                 outgoing.task_done()
+
+
+def _parse_canonical_scope(payload: object) -> Scope:
+    if not isinstance(payload, dict):
+        raise TypeError("request must be an object")
+    return Scope(cast("dict[str, object]", payload))
 
 
 def _is_loopback_host(host: str) -> bool:
