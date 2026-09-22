@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from yutto.cli.scope import MISSING, Scope
 from yutto.cli.settings import scope_from_config
+from yutto.scope import MISSING, Scope
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -34,22 +34,21 @@ def resolve_credential_options(
 
     return [
         argparse.Namespace(
-            auth=str(_value(scope, "auth", "")),
+            auth=str(_value(scope.auth.cookie, "")),
             auth_file=_auth_file(scope),
-            auth_profile=str(_value(scope, "auth_profile", "default")),
-            sessdata=str(_value(scope, "sessdata", "")),
+            auth_profile=str(_value(scope.auth.profile, "default")),
+            sessdata=str(_value(scope.auth.sessdata, "")),
         )
         for scope in resolved_scopes
     ]
 
 
-def _value(scope: Scope, key: str, default: object) -> object:
-    value = scope.lookup(key)
+def _value(value: object, default: object) -> object:
     return default if value is MISSING or value is None else value
 
 
 def _auth_file(scope: Scope) -> Path | None:
-    value = scope.lookup("auth_file")
+    value = scope.auth.file
     if value is MISSING or value is None:
         return None
     return value if isinstance(value, Path) else Path(value).expanduser()
