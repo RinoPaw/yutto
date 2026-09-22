@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from yutto.cli.scope import MISSING, Scope, config_scope
+from yutto.cli.scope import MISSING, Scope
+from yutto.cli.settings import scope_from_config
 from yutto.core.request import DownloadRequest
 
 if TYPE_CHECKING:
@@ -152,7 +153,7 @@ def request_overrides_from_settings(
     """Translate persistent settings through the same scope adapter used by the CLI."""
 
     return request_overrides_from_scope(
-        config_scope(settings),
+        scope_from_config(settings),
         include_output_paths=include_output_paths,
     )
 
@@ -166,7 +167,7 @@ def resolve_download_request(
     if not isinstance(scope, Scope):
         if settings is None:
             raise TypeError("settings are required when resolving a raw value mapping")
-        scope = Scope(scope, parent=config_scope(settings))
+        scope = Scope(scope, parent=scope_from_config(settings))
 
     source = scope.lookup("source")
     if source is MISSING or source is None:
