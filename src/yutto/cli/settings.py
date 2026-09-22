@@ -12,7 +12,7 @@ from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
 
 class _ConfigModel(BaseModel):
@@ -23,7 +23,7 @@ class YuttoBasicConfig(_ConfigModel):
     """Persistent configuration overrides for basic download and CLI behavior."""
 
     download_workers: int | None = Field(default=None, gt=0)
-    download_jobs: int | None = Field(default=None, gt=0)
+    jobs: int | None = Field(default=None, gt=0)
     fetch_workers: int | None = Field(default=None, gt=0)
     video_quality: VideoQuality | None = None
     audio_quality: AudioQuality | None = None
@@ -31,15 +31,15 @@ class YuttoBasicConfig(_ConfigModel):
     acodec: str | None = None
     download_vcodec_priority: list[str] | None = None
     output_format: Literal["infer", "mp4", "mkv", "mov"] | None = None
-    audio_only_output_format: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
+    output_format_audio_only: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
     ffmpeg_path: str | None = None
     ai_translation_language: str | None = None
     danmaku_format: Literal["xml", "ass", "protobuf"] | None = None
     block_size: float | None = None
     overwrite: bool | None = None
     proxy: str | None = None
-    download_dir: str | None = None
-    temp_dir: str | None = None
+    dir: str | None = None
+    tmp_dir: str | None = None
     sessdata: str | None = None  # legacy 兼容字段，推荐使用 [auth].auth
     subpath_template: str | None = None
     aliases: dict[str, str] | None = None
@@ -67,21 +67,21 @@ class YuttoResourceConfig(_ConfigModel):
 
 
 class YuttoDanmakuConfig(_ConfigModel):
-    """Persistent danmaku overrides."""
+    """Persistent danmaku overrides using the same names as Scope."""
 
-    font_size: int | None = None
-    font: str | None = None
-    opacity: float | None = None
-    display_region_ratio: float | None = None
-    speed: float | None = None
-    block_top: bool | None = None
-    block_bottom: bool | None = None
-    block_scroll: bool | None = None
-    block_reverse: bool | None = None
-    block_fixed: bool | None = None
-    block_special: bool | None = None
-    block_colorful: bool | None = None
-    block_keyword_patterns: list[str] | None = None
+    danmaku_font_size: int | None = None
+    danmaku_font: str | None = None
+    danmaku_opacity: float | None = None
+    danmaku_display_region_ratio: float | None = None
+    danmaku_speed: float | None = None
+    danmaku_block_top: bool | None = None
+    danmaku_block_bottom: bool | None = None
+    danmaku_block_scroll: bool | None = None
+    danmaku_block_reverse: bool | None = None
+    danmaku_block_fixed: bool | None = None
+    danmaku_block_special: bool | None = None
+    danmaku_block_colorful: bool | None = None
+    danmaku_block_keyword_patterns: list[str] | None = None
 
 
 class YuttoBatchConfig(_ConfigModel):
@@ -115,33 +115,16 @@ class YuttoConfig(_ConfigModel):
     auth: YuttoAuthConfig = Field(default_factory=YuttoAuthConfig)
 
 
-_DANMAKU_SCOPE_NAMES = {
-    "font_size": "danmaku_font_size",
-    "font": "danmaku_font",
-    "opacity": "danmaku_opacity",
-    "display_region_ratio": "danmaku_display_region_ratio",
-    "speed": "danmaku_speed",
-    "block_top": "danmaku_block_top",
-    "block_bottom": "danmaku_block_bottom",
-    "block_scroll": "danmaku_block_scroll",
-    "block_reverse": "danmaku_block_reverse",
-    "block_fixed": "danmaku_block_fixed",
-    "block_special": "danmaku_block_special",
-    "block_colorful": "danmaku_block_colorful",
-    "block_keyword_patterns": "danmaku_block_keyword_patterns",
-}
-
-
 def scope_from_config(config: YuttoConfig) -> Scope:
     """把持久配置中显式设置的值转换成一层 Scope。"""
     values: dict[str, Any] = {}
     _copy_explicit(values, config.basic)
     _copy_explicit(values, config.resource)
-    _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_NAMES)
+    _copy_explicit(values, config.danmaku)
     _copy_explicit(values, config.batch)
     _copy_explicit(values, config.auth)
 
-    for key in ("download_dir", "temp_dir", "auth_file"):
+    for key in ("dir", "tmp_dir", "auth_file"):
         value = values.get(key)
         if value is not None:
             values[key] = Path(value).expanduser()
@@ -149,14 +132,9 @@ def scope_from_config(config: YuttoConfig) -> Scope:
     return Scope(values)
 
 
-def _copy_explicit(
-    target: dict[str, Any],
-    model: BaseModel,
-    names: Mapping[str, str] | None = None,
-) -> None:
-    names = names or {}
+def _copy_explicit(target: dict[str, Any], model: BaseModel) -> None:
     for field_name in model.model_fields_set:
-        target[names.get(field_name, field_name)] = getattr(model, field_name)
+        target[field_name] = getattr(model, field_name)
 
 
 def search_for_settings_file() -> Path | None:
