@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from yutto.cli.scope import Scope
 from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 
 class _ConfigModel(BaseModel):
@@ -21,8 +22,8 @@ class _ConfigModel(BaseModel):
 class YuttoBasicConfig(_ConfigModel):
     """Persistent configuration overrides for basic download and CLI behavior."""
 
-    num_workers: int | None = Field(default=None, gt=0)
-    jobs: int | None = Field(default=None, gt=0)
+    download_workers: int | None = Field(default=None, gt=0)
+    download_jobs: int | None = Field(default=None, gt=0)
     fetch_workers: int | None = Field(default=None, gt=0)
     video_quality: VideoQuality | None = None
     audio_quality: AudioQuality | None = None
@@ -30,19 +31,19 @@ class YuttoBasicConfig(_ConfigModel):
     acodec: str | None = None
     download_vcodec_priority: list[str] | None = None
     output_format: Literal["infer", "mp4", "mkv", "mov"] | None = None
-    output_format_audio_only: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
+    audio_only_output_format: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
     ffmpeg_path: str | None = None
     ai_translation_language: str | None = None
     danmaku_format: Literal["xml", "ass", "protobuf"] | None = None
     block_size: float | None = None
     overwrite: bool | None = None
     proxy: str | None = None
-    dir: str | None = None
-    tmp_dir: str | None = None
+    download_dir: str | None = None
+    temp_dir: str | None = None
     sessdata: str | None = None  # legacy 兼容字段，推荐使用 [auth].auth
     subpath_template: str | None = None
     aliases: dict[str, str] | None = None
-    metadata_format_premiered: str | None = None
+    metadata_premiered_format: str | None = None
     download_interval: int | None = None
     banned_mirrors_pattern: str | None = None
     vip_strict: bool | None = None
@@ -84,12 +85,12 @@ class YuttoDanmakuConfig(_ConfigModel):
 
 
 class YuttoBatchConfig(_ConfigModel):
-    """Persistent batch-selection overrides."""
+    """Persistent content-selection overrides."""
 
     with_extra_episodes: bool | None = None
     skip_preview: bool | None = None
-    batch_filter_start_time: str | None = None
-    batch_filter_end_time: str | None = None
+    published_since: str | None = None
+    published_before: str | None = None
 
 
 class YuttoAuthConfig(_ConfigModel):
@@ -112,6 +113,50 @@ class YuttoConfig(_ConfigModel):
     danmaku: YuttoDanmakuConfig = Field(default_factory=YuttoDanmakuConfig)
     batch: YuttoBatchConfig = Field(default_factory=YuttoBatchConfig)
     auth: YuttoAuthConfig = Field(default_factory=YuttoAuthConfig)
+
+
+_DANMAKU_SCOPE_NAMES = {
+    "font_size": "danmaku_font_size",
+    "font": "danmaku_font",
+    "opacity": "danmaku_opacity",
+    "display_region_ratio": "danmaku_display_region_ratio",
+    "speed": "danmaku_speed",
+    "block_top": "danmaku_block_top",
+    "block_bottom": "danmaku_block_bottom",
+    "block_scroll": "danmaku_block_scroll",
+    "block_reverse": "danmaku_block_reverse",
+    "block_fixed": "danmaku_block_fixed",
+    "block_special": "danmaku_block_special",
+    "block_colorful": "danmaku_block_colorful",
+    "block_keyword_patterns": "danmaku_block_keyword_patterns",
+}
+
+
+def scope_from_config(config: YuttoConfig) -> Scope:
+    """把持久配置中显式设置的值转换成一层 Scope。"""
+    values: dict[str, Any] = {}
+    _copy_explicit(values, config.basic)
+    _copy_explicit(values, config.resource)
+    _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_NAMES)
+    _copy_explicit(values, config.batch)
+    _copy_explicit(values, config.auth)
+
+    for key in ("download_dir", "temp_dir", "auth_file"):
+        value = values.get(key)
+        if value is not None:
+            values[key] = Path(value).expanduser()
+
+    return Scope(values)
+
+
+def _copy_explicit(
+    target: dict[str, Any],
+    model: BaseModel,
+    names: Mapping[str, str] | None = None,
+) -> None:
+    names = names or {}
+    for field_name in model.model_fields_set:
+        target[names.get(field_name, field_name)] = getattr(model, field_name)
 
 
 def search_for_settings_file() -> Path | None:
