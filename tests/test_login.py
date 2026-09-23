@@ -11,6 +11,7 @@ import yutto.cli.auth as login_module
 from yutto._native import HttpTransportError
 from yutto.auth import USER_INFO_API
 from yutto.exceptions import ErrorCode
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.functional import as_sync
 
 
@@ -239,8 +240,9 @@ def test_run_auth_is_the_single_sync_cli_boundary(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(login_module, "run_auth_status", fake_status)
     monkeypatch.setattr(login_module, "run_auth_logout", fake_logout)
 
+    scope = Scope(parent=ROOT_SCOPE)
     for command in ("login", "status", "logout"):
-        login_module.run_auth(SimpleNamespace(auth_command=command))
+        login_module.run_auth(scope, command)
 
     assert calls == ["login:login", "status:status", "logout:logout"]
 
