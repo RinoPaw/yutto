@@ -16,12 +16,12 @@ from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
 from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
-from yutto.scope import Scope
 from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.functional import data_has_chained_keys
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
+    from yutto.scope import Scope
     from yutto.types import AId, CId, EpisodeId
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
