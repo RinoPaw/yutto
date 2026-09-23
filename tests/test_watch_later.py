@@ -19,7 +19,7 @@ _EXECUTION = cast("ExecutionScope", None)
 
 @pytest.mark.api
 @pytest.mark.parametrize("code", [-101, -400])
-def test_watch_later_not_login_is_reported_as_source_failure(
+def test_watch_later_not_login_propagates_root_source_failure(
     monkeypatch: pytest.MonkeyPatch,
     code: int,
 ) -> None:
@@ -29,12 +29,7 @@ def test_watch_later_not_login_is_reported_as_source_failure(
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
     source = UgcWatchLaterSource(id=BilibiliId("watchlater"))
 
-    result = asyncio.run(source.resolve(_EXECUTION, Scope()))
+    with pytest.raises(NotLoginError) as raised:
+        asyncio.run(source.resolve(_EXECUTION, Scope()))
 
-    assert result.media is None
-    assert len(result.failures) == 1
-    failure = result.failures[0]
-    assert failure.index == 1
-    assert failure.source == BilibiliId("watchlater")
-    assert isinstance(failure.error, NotLoginError)
-    assert failure.error.message == "账号未登录，无法获取稍后再看列表哦~ Ծ‸Ծ"
+    assert raised.value.message == "账号未登录，无法获取稍后再看列表哦~ Ծ‸Ծ"
