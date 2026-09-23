@@ -81,8 +81,8 @@ class ArtifactWriter:
                 metadata_for_write,
                 plan.paths.output,
                 {
-                    "premiered": resources.metadata.premiered,
-                    "dateadded": resources.metadata.dateadded,
+                    "premiered": resources.metadata.published_at,
+                    "dateadded": resources.metadata.added_at,
                 },
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))

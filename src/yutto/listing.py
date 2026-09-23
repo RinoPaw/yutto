@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -23,11 +23,10 @@ from yutto.media import (
 from yutto.path_templates import UNKNOWN, resolve_path_template
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
 
     from yutto.path_templates import PathTemplateVariableDict
     from yutto.types import AId
-    from yutto.utils.filter import PublicationTimeFilter
 
 MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
 
@@ -54,68 +53,6 @@ def iter_media_items(
     raise TypeError(f"unsupported media: {type(media).__name__}")
 
 
-def _filter_media_tree(
-    media: Media,
-    predicate: Callable[[MediaAncestry, MediaItem], bool],
-    ancestry: MediaAncestry,
-    *,
-    preserve_container: bool,
-) -> Media | None:
-    if isinstance(media, MediaContainer):
-        child_ancestry = (*ancestry, media)
-        items = [
-            filtered
-            for child in media.items
-            if (
-                filtered := _filter_media_tree(
-                    child,
-                    predicate,
-                    child_ancestry,
-                    preserve_container=False,
-                )
-            )
-            is not None
-        ]
-        if items or preserve_container:
-            return replace(media, items=items)
-        return None
-    if isinstance(media, MediaItem):
-        return media if predicate(ancestry, media) else None
-    raise TypeError(f"unsupported media: {type(media).__name__}")
-
-
-def filter_media_tree(
-    media: Media,
-    predicate: Callable[[MediaAncestry, MediaItem], bool],
-) -> Media | None:
-    """Filter Media leaves while retaining an empty root container when possible."""
-    return _filter_media_tree(
-        media,
-        predicate,
-        (),
-        preserve_container=isinstance(media, MediaContainer),
-    )
-
-
-def media_item_pubdate(ancestry: MediaAncestry, item: MediaItem) -> int:
-    if item.metadata.premiered:
-        return item.metadata.premiered
-    if ancestry:
-        return ancestry[-1].metadata.premiered
-    return 0
-
-
-def filter_media_by_publication_time(
-    media: Media,
-    publication_time_filter: PublicationTimeFilter,
-) -> Media | None:
-    """Filter downloadable leaves by publication time without discarding an empty root container."""
-    return filter_media_tree(
-        media,
-        lambda ancestry, item: publication_time_filter.matches(media_item_pubdate(ancestry, item)),
-    )
-
-
 def _owner(media: MediaItem, parent: MediaContainer | None) -> tuple[str, str]:
     owner = media.metadata.owner or (parent.metadata.owner if parent is not None else "")
     mid = media.metadata.mid or (parent.metadata.mid if parent is not None else None)
@@ -135,8 +72,8 @@ def _path_variables(
 ) -> PathTemplateVariableDict:
     owner, owner_uid = _owner(item, parent)
     parent_metadata = parent.metadata if parent is not None else None
-    pubdate = item.metadata.premiered or (parent_metadata.premiered if parent_metadata is not None else 0)
-    download_date = item.metadata.dateadded or (parent_metadata.dateadded if parent_metadata is not None else 0)
+    pubdate = item.metadata.published_at or (parent_metadata.published_at if parent_metadata is not None else 0)
+    download_date = item.metadata.added_at or (parent_metadata.added_at if parent_metadata is not None else 0)
     default_title = (
         parent_metadata.title if parent_metadata is not None else (item.metadata.show_title or item.metadata.title)
     )
@@ -272,9 +209,6 @@ def resolve_media_paths(
 __all__ = [
     "MediaAncestry",
     "ResolvedMediaPath",
-    "filter_media_by_publication_time",
-    "filter_media_tree",
     "iter_media_items",
-    "media_item_pubdate",
     "resolve_media_paths",
 ]

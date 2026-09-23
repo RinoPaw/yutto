@@ -47,7 +47,7 @@ class MetaData(TypedDict):
 class ItemMetaData:
     title: str = ""
     plot: str = ""
-    premiered: int = 0
+    published_at: int = 0
     duration: int = 0
     mid: MId | None = None
     owner: str = ""
@@ -58,7 +58,7 @@ class ItemMetaData:
     tag: list[str] = field(default_factory=list)
     actors: list[Actor] = field(default_factory=list)
 
-    dateadded: int = 0
+    added_at: int = 0
     source: str = ""
     original_filename: str = ""
     website: str = ""
@@ -72,8 +72,8 @@ def _metadata_as_dict(metadata: MetaData | ItemMetaData) -> dict[str, Any]:
             "show_title": metadata.show_title,
             "plot": metadata.plot,
             "thumb": metadata.thumb,
-            "premiered": metadata.premiered,
-            "dateadded": metadata.dateadded,
+            "premiered": metadata.published_at,
+            "dateadded": metadata.added_at,
             "actor": metadata.actors,
             "genre": metadata.genre,
             "tag": metadata.tag,

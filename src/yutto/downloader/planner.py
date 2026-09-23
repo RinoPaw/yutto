@@ -63,8 +63,8 @@ class DanmakuPlan:
 
 @dataclass(frozen=True, slots=True)
 class MetadataPlan:
-    premiered: str
-    dateadded: str
+    published_at: str
+    added_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,8 +147,8 @@ class DownloadPlanner:
             danmaku_width=video_meta["width"] if video_meta is not None else 1920,
             danmaku_height=video_meta["height"] if video_meta is not None else 1080,
             metadata=MetadataPlan(
-                premiered=_text(scope.output.metadata_premiered_format),
-                dateadded=TIME_FULL_FMT,
+                published_at=_text(scope.output.metadata_premiered_format),
+                added_at=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
                 font_size=_optional_int(scope.danmaku.font_size),

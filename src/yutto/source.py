@@ -130,15 +130,15 @@ class UgcVideoSource(MediaSource):
     page: int | None = None
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        video_info = await get_ugc_video_info(execution, self.id)
-        aid = AId(video_info["aid"])
+        video_data = await get_ugc_video_info(execution, self.id)
+        aid = AId(video_data["aid"])
         tags = await get_ugc_video_tags(execution, aid) if scope.resource.metadata else []
-        dateadded = get_time_stamp_by_now()
-        page_items: list[dict[str, Any]] = list(video_info["pages"])
-        expression = scope.selection.expression
-        selection = parse_selection(expression) if expression is not None else None
+        added_at = get_time_stamp_by_now()
+        page_data: list[dict[str, Any]] = list(video_data["pages"])
+        selection_expression = scope.selection.expression
+        selection = parse_selection(selection_expression) if selection_expression is not None else None
         if selection is not None:
-            total = len(page_items)
+            total = len(page_data)
             result = selection.evaluate(total)
             if result.out_of_range:
                 emit_download_report(
@@ -153,12 +153,12 @@ class UgcVideoSource(MediaSource):
             indexes = result.indexes
         else:
             page = self.page if self.page is not None else 1
-            if page > len(page_items):
-                raise WrongArgumentError(f"序号 {page} 超出范围（1~{len(page_items)}）")
+            if page > len(page_data):
+                raise WrongArgumentError(f"序号 {page} 超出范围（1~{len(page_data)}）")
             indexes = (page,)
 
         actors: list[Actor] = []
-        if staff := video_info.get("staff"):
+        if staff := video_data.get("staff"):
             actors = [
                 Actor(
                     name=staff_info["name"],
@@ -169,7 +169,7 @@ class UgcVideoSource(MediaSource):
                 )
                 for index, staff_info in enumerate(staff)
             ]
-        elif owner := video_info.get("owner"):
+        elif owner := video_data.get("owner"):
             actors = [
                 Actor(
                     name=owner["name"],
@@ -180,36 +180,36 @@ class UgcVideoSource(MediaSource):
                 )
             ]
 
-        genre = video_info.get("tname")
+        genre = video_data.get("tname")
         genres = [genre] if isinstance(genre, str) and genre else []
 
         def make_metadata(*, title: str, duration: int) -> ItemMetaData:
-            owner_info = video_info.get("owner") or {}
+            owner_info = video_data.get("owner") or {}
             mid_value = owner_info.get("mid")
             return ItemMetaData(
                 title=title,
-                show_title=str(video_info.get("title", title)),
-                plot=str(video_info.get("desc", "")),
-                thumb=str(video_info.get("pic", "")),
-                premiered=int(video_info.get("pubdate", 0)),
+                show_title=str(video_data.get("title", title)),
+                plot=str(video_data.get("desc", "")),
+                thumb=str(video_data.get("pic", "")),
+                published_at=int(video_data.get("pubdate", 0)),
                 duration=duration,
                 mid=MId(str(mid_value)) if mid_value is not None else None,
                 owner=str(owner_info.get("name", "")),
-                dateadded=dateadded,
+                added_at=added_at,
                 actors=list(actors),
                 genre=list(genres),
                 tag=list(tags),
-                website=BvId(video_info["bvid"]).to_url(),
+                website=BvId(video_data["bvid"]).to_url(),
             )
 
         pages = [
             UgcPage(
                 index=index,
                 aid=aid,
-                cid=CId(page_items[index - 1]["cid"]),
+                cid=CId(page_data[index - 1]["cid"]),
                 metadata=make_metadata(
-                    title=str(page_items[index - 1].get("part", video_info["title"])),
-                    duration=int(page_items[index - 1].get("duration", 0)),
+                    title=str(page_data[index - 1].get("part", video_data["title"])),
+                    duration=int(page_data[index - 1].get("duration", 0)),
                 ),
             )
             for index in indexes
@@ -217,10 +217,10 @@ class UgcVideoSource(MediaSource):
         return MediaResolveResult(
             media=UgcVideo(
                 aid=aid,
-                page_count=len(page_items),
+                page_count=len(page_data),
                 metadata=make_metadata(
-                    title=str(video_info["title"]),
-                    duration=int(video_info.get("duration", 0)),
+                    title=str(video_data["title"]),
+                    duration=int(video_data.get("duration", 0)),
                 ),
                 items=pages,
             )
@@ -242,9 +242,9 @@ async def _resolve_ugc_videos(
 
         if not isinstance(result.media, UgcVideo):
             raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
-        if not _publication_time_matches(result.media.metadata.premiered, scope):
+        if not _publication_time_matches(result.media.metadata.published_at, scope):
             emit_download_report(
-                f"因为发布时间为 {result.media.metadata.premiered}，跳过 {result.media.metadata.title}",
+                f"因为发布时间为 {result.media.metadata.published_at}，跳过 {result.media.metadata.title}",
                 ReportLevel.DEBUG,
             )
             return None
@@ -491,9 +491,9 @@ def _parse_bangumi_episode(index: int, item: dict[str, Any]) -> BangumiEpisode:
             show_title=item.get("share_copy", title),
             plot=item.get("share_copy", ""),
             thumb=item.get("cover", ""),
-            premiered=int(item.get("pub_time", 0)),
+            published_at=int(item.get("pub_time", 0)),
             duration=int(item.get("duration", 0)) // 1000,
-            dateadded=get_time_stamp_by_now(),
+            added_at=get_time_stamp_by_now(),
         ),
     )
 
@@ -631,9 +631,9 @@ def _parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
             show_title=title,
             plot=title,
             thumb=item.get("cover", ""),
-            premiered=int(item.get("release_date", 0)),
+            published_at=int(item.get("release_date", 0)),
             duration=int(item.get("duration", 0)),
-            dateadded=get_time_stamp_by_now(),
+            added_at=get_time_stamp_by_now(),
         ),
     )
 
