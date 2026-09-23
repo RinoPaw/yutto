@@ -109,11 +109,6 @@ class _FilteredUgcVideo:
     source: AvId
 
 
-def _selection(scope: Scope) -> Selection | None:
-    expression = scope.selection.expression
-    return None if expression is None else parse_selection(str(expression))
-
-
 def _publication_time_filter(scope: Scope) -> PublicationTimeFilter | None:
     since = scope.selection.published_since
     before = scope.selection.published_before
@@ -340,7 +335,8 @@ class BangumiEpisodeSource(MediaSource):
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
 
         season_metadata = make_bangumi_season_metadata(result)
-        selection = _selection(scope)
+        expression = scope.selection.expression
+        selection = parse_selection(str(expression)) if expression is not None else None
         if selection is None:
             index, item = anchor_item
             episode = parse_bangumi_episode(index, item)
@@ -375,7 +371,9 @@ class BangumiSeasonSource(MediaSource):
         if scope.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
         episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
-        episode_items = _apply_selection(episode_items, _selection(scope))
+        expression = scope.selection.expression
+        selection = parse_selection(str(expression)) if expression is not None else None
+        episode_items = _apply_selection(episode_items, selection)
         return MediaResolveResult(
             media=BangumiSeason(
                 season_id=season_id,
@@ -407,7 +405,9 @@ def parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
 def _cheese_episode_items(result: dict[str, Any], scope: Scope) -> list[tuple[int, dict[str, Any]]]:
     items = list(enumerate(result["episodes"], start=1))
     items = _filter_indexed_by_publication_time(items, _publication_time_filter(scope))
-    return _apply_selection(items, _selection(scope))
+    expression = scope.selection.expression
+    selection = parse_selection(str(expression)) if expression is not None else None
+    return _apply_selection(items, selection)
 
 
 class CheeseEpisodeSource(MediaSource):
@@ -419,7 +419,7 @@ class CheeseEpisodeSource(MediaSource):
         anchor_item = next(((index, entry) for index, entry in indexed_items if entry["id"] == int(self.id.value)), None)
         if anchor_item is None:
             raise NotFoundError(f"无法在课程 {result['title']} 中找到剧集 ep{self.id}")
-        if _selection(scope) is None:
+        if scope.selection.expression is None:
             index, item = anchor_item
             return MediaResolveResult(media=parse_cheese_episode(index, item))
         episode_items = _cheese_episode_items(result, scope)
@@ -464,7 +464,8 @@ class UgcVideoSource(MediaSource):
         tags = await get_ugc_video_tags(execution, resolved_aid) if scope.resource.metadata else []
         dateadded = get_time_stamp_by_now()
         page_items: list[dict[str, Any]] = list(video_info["pages"])
-        selection = _selection(scope)
+        expression = scope.selection.expression
+        selection = parse_selection(str(expression)) if expression is not None else None
         if selection is not None:
             indexes = _resolve_selection_indexes(selection, len(page_items))
         else:
@@ -586,7 +587,9 @@ async def resolve_ugc_videos(
 def _ugc_candidates(items: list[dict[str, Any]], scope: Scope) -> list[tuple[int, dict[str, Any]]]:
     indexed = list(enumerate(items, start=1))
     indexed = _filter_indexed_by_publication_time(indexed, _publication_time_filter(scope))
-    return _apply_selection(indexed, _selection(scope))
+    expression = scope.selection.expression
+    selection = parse_selection(str(expression)) if expression is not None else None
+    return _apply_selection(indexed, selection)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -718,7 +721,9 @@ class UgcSpaceSource(MediaSource):
             created = item.get("created")
             if publication_filter is None or created is None or publication_filter.matches(int(created)):
                 archives.append(item)
-        selected_archives = _select_indexed(archives, _selection(scope))
+        expression = scope.selection.expression
+        selection = parse_selection(str(expression)) if expression is not None else None
+        selected_archives = _select_indexed(archives, selection)
         resolved, failures = await resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
         )
