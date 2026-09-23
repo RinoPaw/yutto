@@ -11,17 +11,17 @@ import yutto.__main__ as main_module
 import yutto.download_manager as download_manager_module
 from yutto._native import InvalidUrlError
 from yutto.core.execution import ExecutionScope
-from yutto.core.request import DownloadRequest
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, NotLoginError, WrongUrlError, YuttoBaseException
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.fetcher import Fetcher
 from yutto.utils.functional import as_sync
 
 pytestmark = pytest.mark.processor
 
 
-def make_request(url: str = "BV1structured") -> DownloadRequest:
-    return DownloadRequest.model_validate({"source": {"url": url}})
+def make_scope(url: str = "BV1structured") -> Scope:
+    return Scope({"source.value": url}, parent=ROOT_SCOPE)
 
 
 def assert_error(error: YuttoBaseException, message: str, code: ErrorCode) -> None:
@@ -37,9 +37,9 @@ async def test_manager_raises_login_error(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(download_manager_module, "validate_user_info", reject_login)
     with pytest.raises(NotLoginError) as exc_info:
-        await DownloadManager().process_request(
+        await DownloadManager().process_scope(
             ExecutionScope(cast("Any", object())),
-            make_request(),
+            make_scope(),
         )
 
     assert_error(
@@ -56,9 +56,9 @@ async def test_manager_raises_url_errors_without_network(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(Fetcher, "get_redirected_url", reject_url)
     with pytest.raises(WrongUrlError) as exc_info:
-        await DownloadManager().process_request(
+        await DownloadManager().process_scope(
             ExecutionScope(cast("Any", object())),
-            make_request("not-a-url"),
+            make_scope("not-a-url"),
         )
 
     assert_error(
@@ -76,9 +76,9 @@ async def test_manager_reports_unmatched_url_as_structured_error(monkeypatch: py
     monkeypatch.setattr(Fetcher, "get_redirected_url", keep_url)
 
     with pytest.raises(WrongUrlError) as exc_info:
-        await DownloadManager().process_request(
+        await DownloadManager().process_scope(
             ExecutionScope(cast("Any", object())),
-            make_request("https://example.com/unsupported"),
+            make_scope("https://example.com/unsupported"),
         )
 
     assert_error(
@@ -106,7 +106,7 @@ def configure_download_cli(
 
     def fail_download(
         scope_factory: object,
-        requests: list[DownloadRequest],
+        scopes: list[Scope],
         renderer: object,
         *,
         jobs: int | None,
@@ -122,10 +122,9 @@ def configure_download_cli(
     monkeypatch.setattr(
         main_module,
         "expand_download_scopes",
-        lambda scope, active_parser, configured: [scope],
+        lambda scope, active_parser, configured, **kwargs: [scope],
     )
-    monkeypatch.setattr(main_module, "resolve_download_request", lambda scope: make_request())
-    monkeypatch.setattr(main_module, "validate_download_request", lambda request, ffmpeg: None)
+    monkeypatch.setattr(main_module, "validate_download_scope", lambda scope, ffmpeg: None)
     monkeypatch.setattr(main_module, "resolve_credentials", lambda options: None)
     monkeypatch.setattr(main_module, "run_download", fail_download)
     if replace_logger:
