@@ -10,6 +10,7 @@ from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.scope import Scope
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
+from yutto.utils.time import parse_local_timestamp
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -198,6 +199,11 @@ def scope_from_config(config: YuttoConfig) -> Scope:
     _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_PATHS)
     _copy_explicit(values, config.batch, _SELECTION_SCOPE_PATHS)
     _copy_explicit(values, config.auth, _AUTH_SCOPE_PATHS)
+
+    for path in ("selection.published_since", "selection.published_before"):
+        value = values.get(path)
+        if value is not None:
+            values[path] = parse_local_timestamp(value)
 
     for path in ("output.directory", "output.temporary_directory", "auth.file"):
         value = values.get(path)

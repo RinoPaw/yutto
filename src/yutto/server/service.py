@@ -32,6 +32,7 @@ from yutto.stream import (
 )
 from yutto.types import BilibiliId
 from yutto.utils.fetcher import resolve_proxy
+from yutto.utils.time import parse_local_timestamp
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -346,17 +347,30 @@ def _scope_values_from_rpc_payload(payload: object, parent: Scope) -> dict[str, 
         },
         values,
     )
-    selection = _copy_section(
+    selection = _section(
         request,
         "selection",
-        {
-            "expression": "selection.expression",
-            "skip_preview": "selection.skip_preview",
-            "start_time": "selection.published_since",
-            "end_time": "selection.published_before",
-        },
-        values,
+        {"expression", "skip_preview", "start_time", "end_time"},
     )
+    for field, path in {
+        "expression": "selection.expression",
+        "skip_preview": "selection.skip_preview",
+    }.items():
+        if field in selection:
+            values[path] = selection[field]
+    for field, path in {
+        "start_time": "selection.published_since",
+        "end_time": "selection.published_before",
+    }.items():
+        if field not in selection:
+            continue
+        value = selection[field]
+        if value is None:
+            values[path] = None
+        elif not isinstance(value, str):
+            raise TypeError(f"selection.{field} must be a string or null")
+        else:
+            values[path] = parse_local_timestamp(value)
     if "with_extra_episodes" in request:
         values["selection.with_extra_episodes"] = request["with_extra_episodes"]
     if request.get("batch") and "expression" not in selection:

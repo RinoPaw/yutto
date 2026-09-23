@@ -64,7 +64,6 @@ from yutto.types import (
     SeasonId,
     SeriesId,
 )
-from yutto.utils.filter import PublicationTimeFilter
 from yutto.utils.metadata import Actor, ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
@@ -97,20 +96,10 @@ class MediaSource(ABC):
         raise NotImplementedError
 
 
-def _publication_time_filter(scope: Scope) -> PublicationTimeFilter | None:
+def _publication_time_matches(timestamp: int, scope: Scope) -> bool:
     since = scope.selection.published_since
     before = scope.selection.published_before
-    if since is None and before is None:
-        return None
-    return PublicationTimeFilter.from_strings(since, before)
-
-
-def _candidate_publication_time(item: dict[str, Any]) -> int | None:
-    for key in ("pub_time", "release_date", "pubdate", "pubtime", "ctime", "created"):
-        value = item.get(key)
-        if value is not None:
-            return int(value)
-    return None
+    return (since is None or timestamp >= since) and (before is None or timestamp < before)
 
 
 def _select_items(items: list[tuple[int, T]], selection: Selection | None) -> list[tuple[int, T]]:
@@ -127,19 +116,6 @@ def _select_items(items: list[tuple[int, T]], selection: Selection | None) -> li
     if not result.indexes:
         emit_download_report("没有可供选择的项目" if total == 0 else "没有选中任何项目", ReportLevel.WARNING)
     return [items[index - 1] for index in result.indexes]
-
-
-def _filter_indexed_by_publication_time(
-    items: list[tuple[int, dict[str, Any]]],
-    publication_filter: PublicationTimeFilter | None,
-) -> list[tuple[int, dict[str, Any]]]:
-    if publication_filter is None:
-        return items
-    return [
-        (index, item)
-        for index, item in items
-        if (timestamp := _candidate_publication_time(item)) is None or publication_filter.matches(timestamp)
-    ]
 
 
 _EXPECTED_UGC_CHILD_ERRORS = (
@@ -259,7 +235,6 @@ async def _resolve_ugc_videos(
     scope: Scope,
 ) -> tuple[tuple[UgcVideo, ...], tuple[MediaResolveFailure, ...]]:
     page_scope = Scope({"selection.expression": "~"}, parent=scope)
-    publication_filter = _publication_time_filter(scope)
 
     async def resolve_one(index: int, avid: AvId) -> UgcVideo | MediaResolveFailure | None:
         try:
@@ -269,7 +244,7 @@ async def _resolve_ugc_videos(
 
         if not isinstance(result.media, UgcVideo):
             raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
-        if publication_filter is not None and not publication_filter.matches(result.media.metadata.premiered):
+        if not _publication_time_matches(result.media.metadata.premiered, scope):
             emit_download_report(
                 f"因为发布时间为 {result.media.metadata.premiered}，跳过 {result.media.metadata.title}",
                 ReportLevel.DEBUG,
@@ -295,9 +270,19 @@ async def _resolve_ugc_videos(
     )
 
 
-def _ugc_candidates(items: list[dict[str, Any]], scope: Scope) -> list[tuple[int, dict[str, Any]]]:
+def _ugc_candidates(
+    items: list[dict[str, Any]],
+    scope: Scope,
+    *,
+    publication_field: str,
+) -> list[tuple[int, dict[str, Any]]]:
     indexed = list(enumerate(items, start=1))
-    indexed = _filter_indexed_by_publication_time(indexed, _publication_time_filter(scope))
+    indexed = [
+        (index, item)
+        for index, item in indexed
+        if item.get(publication_field) is None
+        or _publication_time_matches(int(item[publication_field]), scope)
+    ]
     expression = scope.selection.expression
     selection = parse_selection(expression) if expression is not None else None
     return _select_items(indexed, selection)
@@ -310,7 +295,7 @@ class UgcCollectionSource(MediaSource):
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
         title, archives = await get_collection(execution, self.id, self.owner_id)
-        selected_archives = _ugc_candidates(archives, scope)
+        selected_archives = _ugc_candidates(archives, scope, publication_field="pubdate")
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
         )
@@ -332,7 +317,7 @@ class UgcFavSource(MediaSource):
             get_favourite_info(execution, self.id),
             get_favourite_medias(execution, self.id),
         )
-        selected_medias = _ugc_candidates(medias, scope)
+        selected_medias = _ugc_candidates(medias, scope, publication_field="pubtime")
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], scope
         )
@@ -416,7 +401,7 @@ class UgcSeriesSource(MediaSource):
         meta = info.get("meta", {})
         mid = MId(str(meta["mid"]))
         archives = await get_series_archives(execution, self.id, mid)
-        selected_archives = _ugc_candidates(archives, scope)
+        selected_archives = _ugc_candidates(archives, scope, publication_field="pubdate")
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
         )
@@ -438,13 +423,12 @@ class UgcSpaceSource(MediaSource):
     id: MId
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        publication_filter = _publication_time_filter(scope)
         profile, archives = await get_space_profile_and_archives(
             execution,
             self.id,
-            stop_before_timestamp=publication_filter.start_timestamp if publication_filter is not None else None,
+            stop_before_timestamp=scope.selection.published_since,
         )
-        selected_archives = _ugc_candidates(archives, scope)
+        selected_archives = _ugc_candidates(archives, scope, publication_field="created")
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
         )
@@ -467,7 +451,7 @@ class UgcSpaceSource(MediaSource):
 class UgcWatchLaterSource(MediaSource):
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
         entries = await get_watch_later_entries(execution)
-        selected_entries = _ugc_candidates(entries, scope)
+        selected_entries = _ugc_candidates(entries, scope, publication_field="pubdate")
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], scope
         )
@@ -582,7 +566,12 @@ class BangumiEpisodeSource(MediaSource):
         )
         if scope.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-        episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
+        episode_items = [
+            (index, item)
+            for index, item in episode_items
+            if item.get("pub_time") is None
+            or _publication_time_matches(int(item["pub_time"]), scope)
+        ]
         episode_items = _select_items(episode_items, selection)
         return MediaResolveResult(
             media=BangumiSeason(
@@ -605,7 +594,12 @@ class BangumiSeasonSource(MediaSource):
         )
         if scope.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-        episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
+        episode_items = [
+            (index, item)
+            for index, item in episode_items
+            if item.get("pub_time") is None
+            or _publication_time_matches(int(item["pub_time"]), scope)
+        ]
         expression = scope.selection.expression
         selection = parse_selection(expression) if expression is not None else None
         episode_items = _select_items(episode_items, selection)
@@ -638,8 +632,12 @@ def _parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
 
 
 def _cheese_episode_items(result: dict[str, Any], scope: Scope) -> list[tuple[int, dict[str, Any]]]:
-    items = list(enumerate(result["episodes"], start=1))
-    items = _filter_indexed_by_publication_time(items, _publication_time_filter(scope))
+    items = [
+        (index, item)
+        for index, item in enumerate(result["episodes"], start=1)
+        if item.get("release_date") is None
+        or _publication_time_matches(int(item["release_date"]), scope)
+    ]
     expression = scope.selection.expression
     selection = parse_selection(expression) if expression is not None else None
     return _select_items(items, selection)

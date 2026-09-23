@@ -7,6 +7,7 @@ from yutto.__version__ import VERSION as yutto_version
 from yutto.cli.compat import DeprecatedExtraEpisodesAction
 from yutto.cli.input import alias_parser, path_from_cli
 from yutto.stream import audio_quality_priority_default, video_quality_priority_default
+from yutto.utils.time import parse_local_timestamp
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -352,11 +353,13 @@ def _add_batch_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--batch-filter-start-time",
         dest="publication_start_time",
+        type=parse_local_timestamp,
         help="只下载该时间之后（包含临界值）发布的稿件",
     )
     group.add_argument(
         "--batch-filter-end-time",
         dest="publication_end_time",
+        type=parse_local_timestamp,
         help="只下载该时间之前（不包含临界值）发布的稿件",
     )
 

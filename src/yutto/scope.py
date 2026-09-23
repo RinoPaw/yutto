@@ -44,10 +44,10 @@ class SelectionSpec:
     with_extra_episodes: ScopeBool = MISSING
     # 是否跳过预告片。
     skip_preview: ScopeBool = MISSING
-    # 只选择该时间及之后发布的内容。
-    published_since: ScopeText = MISSING
-    # 只选择该时间之前发布的内容。
-    published_before: ScopeText = MISSING
+    # 只选择该 Unix 时间戳及之后发布的内容。
+    published_since: ScopeInt = MISSING
+    # 只选择该 Unix 时间戳之前发布的内容。
+    published_before: ScopeInt = MISSING
 
 
 @dataclass(frozen=True, slots=True)
