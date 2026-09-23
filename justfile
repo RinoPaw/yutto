@@ -27,7 +27,7 @@ build:
 
 release:
   @echo 'Tagging v{{VERSION}}...'
-  git tag "v{{VERSION}}..."
+  git tag "v{{VERSION}}"
   @echo 'Push to GitHub to trigger publish process...'
   git push --tags
 
@@ -95,10 +95,10 @@ docker-run *ARGS:
   docker run --rm -it -v `pwd`:/app {{DOCKER_NAME}} {{ARGS}}
 
 docker-build:
-  docker build --no-cache -t "siguremo/yutto:{{VERSION}}" -t "siguremo/yutto:latest" .
+  docker build --no-cache -t "{{DOCKER_NAME}}:{{VERSION}}" -t "{{DOCKER_NAME}}:latest" .
 
 docker-publish:
-  docker buildx build --no-cache --platform=linux/amd64,linux/arm64 -t "siguremo/yutto:{{VERSION}}" -t "siguremo/yutto:latest" . --push
+  docker buildx build --no-cache --platform=linux/amd64,linux/arm64 -t "{{DOCKER_NAME}}:{{VERSION}}" -t "{{DOCKER_NAME}}:latest" . --push
 
 # docs specific
 docs-setup:
