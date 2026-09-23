@@ -39,8 +39,8 @@ class StreamSelection:
 
 def select_video(
     videos: Sequence[VideoUrlMeta],
-    video_quality: VideoQuality = 127,
-    video_codec: VideoCodec = "hevc",
+    video_quality: VideoQuality,
+    video_codec: VideoCodec,
     video_download_codec_priority: Sequence[VideoCodec] | None = None,
 ) -> VideoUrlMeta | None:
     video_quality_priority = gen_video_quality_priority(video_quality)
@@ -64,8 +64,8 @@ def select_video(
 
 def select_audio(
     audios: Sequence[AudioUrlMeta],
-    audio_quality: AudioQuality = 30280,
-    audio_codec: AudioCodec = "mp4a",
+    audio_quality: AudioQuality,
+    audio_codec: AudioCodec,
 ) -> AudioUrlMeta | None:
     if audios and all(is_encrypted_audio_quality(audio["quality"]) for audio in audios):
         raise CryptoError("yutto 目前不支持加密音频哦～")
