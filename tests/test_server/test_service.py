@@ -11,8 +11,8 @@ from pydantic import BaseModel
 
 import yutto.core.execution as execution_module
 from yutto.auth import load_auth
+from yutto.cli.settings import YuttoConfig
 from yutto.core.execution import RequestExecutionScopeFactory
-from yutto.core.request import DownloadRequest
 from yutto.core.result import (
     Artifact,
     ArtifactKind,
@@ -23,12 +23,14 @@ from yutto.core.result import (
 )
 from yutto.media import UgcPage, UgcVideo
 from yutto.runtime import EventReplay, TaskError, TaskEvent, TaskSnapshot, TaskState
+from yutto.scope import Scope
 from yutto.server.service import (
     ServerPolicy,
     ServerPolicyError,
     ServerPolicyOptions,
     event_to_json,
     replay_to_json,
+    scope_parser_from_settings,
     snapshot_summary_to_json,
     snapshot_to_json,
 )
@@ -37,6 +39,8 @@ from yutto.utils.functional import as_sync
 from yutto.utils.metadata import ItemMetaData
 
 pytestmark = pytest.mark.processor
+
+_PARSE_SCOPE = scope_parser_from_settings(YuttoConfig())
 
 
 def make_policy(
@@ -56,33 +60,33 @@ def make_policy(
     )
 
 
-def make_request(**overrides: object) -> DownloadRequest:
+def make_scope(**overrides: object) -> Scope:
     payload: dict[str, object] = {"source": {"url": "BV1server"}}
     payload.update(overrides)
-    return DownloadRequest.model_validate(payload)
+    return _PARSE_SCOPE(payload)
 
 
-def test_prepare_request_resolves_output_paths_under_server_roots(tmp_path: Path):
+def test_prepare_scope_resolves_output_paths_under_server_roots(tmp_path: Path):
     policy = make_policy(tmp_path)
-    request = make_request(
+    scope = make_scope(
         output={
             "directory": "shows/season-1",
             "temporary_directory": "segments/task-1",
         }
     )
 
-    prepared = policy.prepare_request(request)
+    prepared = policy.prepare_scope(scope)
 
     assert prepared.output.directory == (tmp_path / "downloads/shows/season-1").resolve()
     assert prepared.output.temporary_directory == (tmp_path / "temporary/segments/task-1").resolve()
-    assert request.output.directory == Path("shows/season-1")
-    assert request.output.temporary_directory == Path("segments/task-1")
+    assert scope.output.directory == Path("shows/season-1")
+    assert scope.output.temporary_directory == Path("segments/task-1")
 
 
-def test_prepare_request_uses_configured_roots_for_default_paths(tmp_path: Path):
+def test_prepare_scope_uses_configured_roots_for_default_paths(tmp_path: Path):
     policy = make_policy(tmp_path)
 
-    prepared = policy.prepare_request(make_request())
+    prepared = policy.prepare_scope(make_scope())
 
     assert prepared.output.directory == (tmp_path / "downloads").resolve()
     assert prepared.output.temporary_directory == (tmp_path / "temporary").resolve()
@@ -97,14 +101,14 @@ def test_prepare_request_uses_configured_roots_for_default_paths(tmp_path: Path)
         ({"temporary_directory": "safe/../../outside"}, "output.temporary_directory must not contain"),
     ],
 )
-def test_prepare_request_rejects_absolute_and_parent_paths(tmp_path: Path, output: object, message: str):
+def test_prepare_scope_rejects_absolute_and_parent_paths(tmp_path: Path, output: object, message: str):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match=message):
-        policy.prepare_request(make_request(output=output))
+        policy.prepare_scope(make_scope(output=output))
 
 
-def test_prepare_request_rejects_existing_symlink_escape(tmp_path: Path):
+def test_prepare_scope_rejects_existing_symlink_escape(tmp_path: Path):
     policy = make_policy(tmp_path)
     policy.options.download_root.mkdir()
     outside = tmp_path / "outside"
@@ -112,34 +116,34 @@ def test_prepare_request_rejects_existing_symlink_escape(tmp_path: Path):
     (policy.options.download_root / "linked").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(ServerPolicyError, match="escapes its configured root"):
-        policy.prepare_request(make_request(output={"directory": "linked/result"}))
+        policy.prepare_scope(make_scope(output={"directory": "linked/result"}))
 
 
 @pytest.mark.parametrize("template", ["../outside/{title}", "safe/../../outside", "/outside/{title}"])
-def test_prepare_request_rejects_subpath_template_escape(tmp_path: Path, template: str):
+def test_prepare_scope_rejects_subpath_template_escape(tmp_path: Path, template: str):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="subpath_template"):
-        policy.prepare_request(make_request(output={"subpath_template": template}))
+        policy.prepare_scope(make_scope(output={"subpath_template": template}))
 
 
 @pytest.mark.parametrize("template", ["{id:/>10}", "{title:.^2.0}/outside", "{title!x}", "{id:0>1000}"])
-def test_prepare_request_rejects_advanced_format_template_escape(tmp_path: Path, template: str):
+def test_prepare_scope_rejects_advanced_format_template_escape(tmp_path: Path, template: str):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="subpath_template"):
-        policy.prepare_request(make_request(output={"subpath_template": template}))
+        policy.prepare_scope(make_scope(output={"subpath_template": template}))
 
 
-def test_prepare_request_marks_final_output_path_for_boundary_enforcement(tmp_path: Path):
+@as_sync
+async def test_scope_factory_enforces_final_output_boundary(tmp_path: Path):
     policy = make_policy(tmp_path)
-
-    prepared = policy.prepare_request(
-        make_request(output={"subpath_template": "series/{pubdate@%Y-%m-%d %H:%M:%S}/{id:0>3}{title}"})
+    prepared = policy.prepare_scope(
+        make_scope(output={"subpath_template": "series/{pubdate@%Y-%m-%d %H:%M:%S}/{id:0>3}{title}"})
     )
 
-    assert prepared.output.enforce_directory_boundary is True
-    assert "enforce_directory_boundary" not in prepared.model_dump(mode="json")["output"]
+    async with policy.build_scope_factory().open(prepared) as execution:
+        assert execution.enforce_output_boundary is True
 
 
 @pytest.mark.parametrize(
@@ -153,14 +157,14 @@ def test_policy_rejects_worker_counts_outside_configured_limits(tmp_path: Path, 
     policy = make_policy(tmp_path, max_fetch_workers=4, max_download_workers=6)
 
     with pytest.raises(ServerPolicyError, match="must be between 1 and"):
-        policy.prepare_request(make_request(network=network))
+        policy.prepare_scope(make_scope(network=network))
 
 
-def test_prepare_request_rejects_invalid_auth_profile(tmp_path: Path):
+def test_prepare_scope_rejects_invalid_auth_profile(tmp_path: Path):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="auth profile 名称不合法"):
-        policy.prepare_request(make_request(access={"auth_profile": "bad profile"}))
+        policy.prepare_scope(make_scope(access={"auth_profile": "bad profile"}))
 
 
 @pytest.mark.parametrize("block_size", [0, -1, 64 * 1024 - 1, 64 * 1024 * 1024 + 1])
@@ -168,7 +172,7 @@ def test_policy_rejects_unsafe_block_sizes(tmp_path: Path, block_size: int):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="block_size_bytes"):
-        policy.prepare_request(make_request(network={"block_size_bytes": block_size}))
+        policy.prepare_scope(make_scope(network={"block_size_bytes": block_size}))
 
 
 def test_policy_rejects_ffmpeg_save_codecs_outside_server_capabilities(tmp_path: Path):
@@ -183,9 +187,9 @@ def test_policy_rejects_ffmpeg_save_codecs_outside_server_capabilities(tmp_path:
     )
 
     with pytest.raises(ServerPolicyError, match="video save codec"):
-        policy.prepare_request(make_request(stream={"video_save_codec": "av1"}))
+        policy.prepare_scope(make_scope(stream={"video_save_codec": "av1"}))
     with pytest.raises(ServerPolicyError, match="audio save codec"):
-        policy.prepare_request(make_request(stream={"audio_save_codec": "flac"}))
+        policy.prepare_scope(make_scope(stream={"audio_save_codec": "flac"}))
 
 
 @pytest.mark.parametrize("field", ["max_fetch_workers", "max_download_workers"])
@@ -202,7 +206,7 @@ def test_options_reject_non_positive_worker_limits(tmp_path: Path, field: str):
 
 
 @as_sync
-async def test_scope_factory_applies_request_network_and_selected_auth_profile(
+async def test_scope_factory_applies_scope_network_and_selected_auth_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -218,7 +222,7 @@ bili_jct = "csrf-value"
 """.strip(),
         encoding="utf-8",
     )
-    request = make_request(
+    scope = make_scope(
         access={"auth_profile": "work"},
         network={"proxy": "no", "fetch_workers": 3},
     )
@@ -233,15 +237,15 @@ bili_jct = "csrf-value"
 
     monkeypatch.setattr(execution_module, "create_client", capture_client)
 
-    async with policy.build_scope_factory().open(request) as scope:
+    async with policy.build_scope_factory().open(scope) as execution:
         assert captured["trust_env"] is False
-        assert scope.fetch_limiter._value == 3
-        assert scope.session.cookie("SESSDATA") == "session%2Cvalue"
-        assert scope.session.cookie("bili_jct") == "csrf-value"
+        assert execution.fetch_limiter._value == 3
+        assert execution.session.cookie("SESSDATA") == "session%2Cvalue"
+        assert execution.session.cookie("bili_jct") == "csrf-value"
 
 
 @as_sync
-async def test_cli_and_server_scope_factories_interpret_same_request_equivalently(tmp_path: Path):
+async def test_cli_and_server_scope_factories_interpret_same_scope_equivalently(tmp_path: Path):
     policy = make_policy(tmp_path)
     policy.options.auth_file.write_text(
         """
@@ -251,7 +255,7 @@ bili_jct = "csrf-value"
 """.strip(),
         encoding="utf-8",
     )
-    request = make_request(
+    scope = make_scope(
         access={"auth_profile": "work"},
         network={
             "proxy": "no",
@@ -260,15 +264,15 @@ bili_jct = "csrf-value"
         },
     )
     cli_factory = RequestExecutionScopeFactory(
-        lambda active_request: load_auth(
+        lambda active_scope: load_auth(
             policy.options.auth_file,
-            active_request.access.auth_profile,
+            cast("str", active_scope.auth.profile),
         )
     )
 
     async with (
-        cli_factory.open(request) as cli_scope,
-        policy.build_scope_factory().open(request) as server_scope,
+        cli_factory.open(scope) as cli_scope,
+        policy.build_scope_factory().open(scope) as server_scope,
     ):
         assert (
             cli_scope.fetch_limiter._value,
@@ -287,7 +291,7 @@ def test_scope_factory_rejects_invalid_auth_profile_without_exposing_auth_file(t
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="auth profile"):
-        policy.resolve_credentials(make_request(access={"auth_profile": "bad profile"}))
+        policy.resolve_credentials(make_scope(access={"auth_profile": "bad profile"}))
 
 
 class CredentialPayload(BaseModel):
@@ -341,12 +345,12 @@ def test_snapshot_serialization_is_json_compatible_and_removes_credentials():
     }
 
 
-def test_request_snapshot_removes_proxy_userinfo():
+def test_scope_snapshot_removes_proxy_userinfo():
     created_at = datetime(2026, 7, 12, 10, 11, 12, tzinfo=UTC)
-    snapshot = TaskSnapshot[DownloadRequest, None](
+    snapshot = TaskSnapshot[Scope, None](
         task_id="task-proxy",
         state=TaskState.QUEUED,
-        payload=make_request(network={"proxy": "http://proxy-user:proxy-password@example.test:8080"}),
+        payload=make_scope(network={"proxy": "http://proxy-user:proxy-password@example.test:8080"}),
         result=None,
         error=None,
         created_at=created_at,
@@ -373,10 +377,10 @@ def test_download_result_serializes_paths_enums_and_tuples():
             ),
         )
     )
-    snapshot = TaskSnapshot[DownloadRequest, DownloadResult](
+    snapshot = TaskSnapshot[Scope, DownloadResult](
         task_id="task-result",
         state=TaskState.COMPLETED,
-        payload=make_request(),
+        payload=make_scope(),
         result=result,
         error=None,
         created_at=created_at,
@@ -404,19 +408,19 @@ def test_resolve_result_serializes_media_tree():
     aid = AId("808982399")
     page = UgcPage(
         aid=aid,
-        page=2,
+        index=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2", duration=1559),
     )
     video = UgcVideo(
         aid=aid,
         metadata=ItemMetaData(title="标题", owner="某UP主", tag=["标签A", "标签B"]),
-        items=[page],
+        items=(page,),
     )
-    snapshot = TaskSnapshot[DownloadRequest, ResolveResult](
+    snapshot = TaskSnapshot[Scope, ResolveResult](
         task_id="task-listing",
         state=TaskState.COMPLETED,
-        payload=make_request(),
+        payload=make_scope(),
         result=ResolveResult(items=(video,)),
         error=None,
         created_at=created_at,
@@ -440,7 +444,7 @@ def test_resolve_result_serializes_media_tree():
     assert video_metadata["tag"] == ["标签A", "标签B"]
     assert page_wire["type"] == "UgcPage"
     assert page_wire["aid"] == "808982399"
-    assert page_wire["page"] == 2
+    assert page_wire["index"] == 2
     assert page_wire["cid"] == "10"
     assert page_metadata["title"] == "P2"
     assert page_metadata["duration"] == 1559
