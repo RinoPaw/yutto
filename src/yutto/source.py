@@ -76,10 +76,21 @@ TMedia_co = TypeVar("TMedia_co", bound=Media, covariant=True)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class MediaResolveFailure:
+class MediaResolveStep:
     index: int
     source: BilibiliId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MediaResolveFailure:
+    path: tuple[MediaResolveStep, ...]
     error: YuttoBaseException
+
+    def with_parent(self, *, index: int, source: BilibiliId) -> MediaResolveFailure:
+        return MediaResolveFailure(
+            path=(MediaResolveStep(index=index, source=source), *self.path),
+            error=self.error,
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -88,10 +99,7 @@ class MediaResolveResult(Generic[TMedia_co]):
     failures: tuple[MediaResolveFailure, ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
 class MediaSource(ABC):
-    id: BilibiliId
-
     @abstractmethod
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[Media]:
         raise NotImplementedError
@@ -232,12 +240,15 @@ async def _resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_avids: list[tuple[int, AvId]],
     video_scope: Scope,
-) -> tuple[tuple[UgcVideo, ...], tuple[MediaResolveFailure, ...]]:
-    async def resolve_one(index: int, avid: AvId) -> UgcVideo | MediaResolveFailure | None:
+) -> tuple[tuple[tuple[int, UgcVideo], ...], tuple[MediaResolveFailure, ...]]:
+    async def resolve_one(index: int, avid: AvId) -> tuple[int, UgcVideo] | MediaResolveFailure | None:
         try:
             result = await UgcVideoSource(id=avid).resolve(execution, video_scope)
         except _EXPECTED_UGC_CHILD_ERRORS as error:
-            return MediaResolveFailure(index=index, source=avid, error=error)
+            return MediaResolveFailure(
+                path=(MediaResolveStep(index=index, source=avid),),
+                error=error,
+            )
 
         if not _publication_time_matches(result.media.metadata.published_at, video_scope):
             emit_download_report(
@@ -246,10 +257,9 @@ async def _resolve_ugc_videos(
             )
             return None
 
-        result.media.index = index
-        return result.media
+        return index, result.media
 
-    tasks: list[asyncio.Task[UgcVideo | MediaResolveFailure | None]] = []
+    tasks: list[asyncio.Task[tuple[int, UgcVideo] | MediaResolveFailure | None]] = []
     try:
         async with asyncio.TaskGroup() as task_group:
             tasks = [task_group.create_task(resolve_one(index, avid)) for index, avid in indexed_avids]
@@ -258,11 +268,15 @@ async def _resolve_ugc_videos(
             raise error_group.exceptions[0] from None
         raise
 
-    results = [task.result() for task in tasks]
-    return (
-        tuple(result for result in results if isinstance(result, UgcVideo)),
-        tuple(result for result in results if isinstance(result, MediaResolveFailure)),
-    )
+    resolved: list[tuple[int, UgcVideo]] = []
+    failures: list[MediaResolveFailure] = []
+    for task in tasks:
+        result = task.result()
+        if isinstance(result, MediaResolveFailure):
+            failures.append(result)
+        elif result is not None:
+            resolved.append(result)
+    return tuple(resolved), tuple(failures)
 
 
 def _ugc_candidates(
@@ -299,12 +313,13 @@ class UgcCollectionSource(MediaSource):
             media=UgcCollection(
                 collection_id=self.id,
                 metadata=ItemMetaData(title=title, mid=self.owner_id),
-                items=resolved,
+                items=tuple(video for _, video in resolved),
             ),
             failures=failures,
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class UgcFavSource(MediaSource):
     id: FId
 
@@ -320,10 +335,8 @@ class UgcFavSource(MediaSource):
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], video_scope
         )
-        for video in resolved:
-            if video.index is None:
-                raise RuntimeError("resolved UGC video has no index")
-            favourite = medias[video.index - 1]
+        for index, video in resolved:
+            favourite = medias[index - 1]
             favourite_title = str(favourite.get("title") or video.metadata.title)
             video.metadata.title = favourite_title
             if len(video.items) == 1:
@@ -342,12 +355,13 @@ class UgcFavSource(MediaSource):
                     mid=MId(str(upper_mid)) if upper_mid is not None else None,
                     owner=str(upper.get("name", "")),
                 ),
-                items=resolved,
+                items=tuple(video for _, video in resolved),
             ),
             failures=failures,
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class UgcAllFavouritesSource(MediaSource):
     id: MId
 
@@ -367,11 +381,15 @@ class UgcAllFavouritesSource(MediaSource):
             try:
                 result = await UgcFavSource(id=fid).resolve(execution, child_scope)
             except _EXPECTED_UGC_CHILD_ERRORS as error:
-                failures.append(MediaResolveFailure(index=index, source=fid, error=error))
+                failures.append(
+                    MediaResolveFailure(
+                        path=(MediaResolveStep(index=index, source=fid),),
+                        error=error,
+                    )
+                )
                 continue
-            result.media.index = index
             favourites.append(result.media)
-            failures.extend(result.failures)
+            failures.extend(failure.with_parent(index=index, source=fid) for failure in result.failures)
 
         owner = next((favourite.metadata.owner for favourite in favourites if favourite.metadata.owner), "")
         return MediaResolveResult(
@@ -388,6 +406,7 @@ class UgcAllFavouritesSource(MediaSource):
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class UgcSeriesSource(MediaSource):
     id: SeriesId
 
@@ -411,12 +430,13 @@ class UgcSeriesSource(MediaSource):
                     mid=mid,
                     plot=str(meta.get("description", "")),
                 ),
-                items=resolved,
+                items=tuple(video for _, video in resolved),
             ),
             failures=failures,
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class UgcSpaceSource(MediaSource):
     id: MId
 
@@ -443,12 +463,13 @@ class UgcSpaceSource(MediaSource):
                     mid=self.id,
                     owner=str(profile.get("name", "")),
                 ),
-                items=resolved,
+                items=tuple(video for _, video in resolved),
             ),
             failures=failures,
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class UgcWatchLaterSource(MediaSource):
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
         entries = await get_watch_later_entries(execution)
@@ -460,7 +481,10 @@ class UgcWatchLaterSource(MediaSource):
             execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], video_scope
         )
         return MediaResolveResult(
-            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=resolved),
+            media=UgcWatchLater(
+                metadata=ItemMetaData(title="稍后再看"),
+                items=tuple(video for _, video in resolved),
+            ),
             failures=failures,
         )
 
@@ -542,6 +566,7 @@ def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: Item
         episode.metadata.actors = list(metadata.actors)
 
 
+@dataclass(slots=True, kw_only=True)
 class BangumiEpisodeSource(MediaSource):
     id: EpisodeId
 
@@ -585,6 +610,7 @@ class BangumiEpisodeSource(MediaSource):
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class BangumiSeasonSource(MediaSource):
     id: SeasonId | MediaId
 
@@ -646,6 +672,7 @@ def _cheese_episode_items(
     return _select_items(items, selection)
 
 
+@dataclass(slots=True, kw_only=True)
 class CheeseEpisodeSource(MediaSource):
     id: EpisodeId
 
@@ -674,6 +701,7 @@ class CheeseEpisodeSource(MediaSource):
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class CheeseSeasonSource(MediaSource):
     id: SeasonId
 
@@ -721,6 +749,7 @@ async def _resolve_bangumi_or_cheese(
     raise NotFoundError("未找到对应的番剧或课程内容")
 
 
+@dataclass(slots=True, kw_only=True)
 class AmbiguousEpisodeSource(MediaSource):
     id: EpisodeId
 
@@ -733,6 +762,7 @@ class AmbiguousEpisodeSource(MediaSource):
         )
 
 
+@dataclass(slots=True, kw_only=True)
 class AmbiguousSeasonSource(MediaSource):
     id: SeasonId
 
@@ -754,6 +784,7 @@ __all__ = [
     "CheeseSeasonSource",
     "MediaResolveFailure",
     "MediaResolveResult",
+    "MediaResolveStep",
     "MediaSource",
     "UgcAllFavouritesSource",
     "UgcCollectionSource",

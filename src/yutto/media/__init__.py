@@ -11,12 +11,11 @@ if TYPE_CHECKING:
 @dataclass(slots=True, kw_only=True)
 class Media:
     metadata: ItemMetaData
-    index: int | None = None
 
 
 @dataclass(slots=True, kw_only=True)
 class MediaItem(Media):
-    pass
+    index: int
 
 
 @dataclass(slots=True, kw_only=True)

@@ -155,9 +155,6 @@ def _resolve_media_path(
     item: MediaItem,
     subpath_template: str,
 ) -> Path:
-    if item.index is None:
-        raise ValueError(f"{type(item).__name__} has no index")
-
     if isinstance(item, UgcPage):
         video, auto_path, name, title, username, series_title = _ugc_context(ancestry, item)
         variables = _path_variables(

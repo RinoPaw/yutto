@@ -61,13 +61,19 @@ class DownloadResult(_ResultModel):
     items: tuple[ItemResult, ...] = Field(default_factory=tuple)
 
 
+class ResolveFailureStep(_ResultModel):
+    index: int
+    source: str
+
+
 class ResolveFailure(_ResultModel):
     """一次预期内的解析失败（视频不存在 / 无访问权限 / 请求重试耗尽等）。
 
-    ``type`` / ``message`` / ``code`` 与任务级错误（TaskError）同构，
-    ``code`` 来自 yutto 的稳定错误码表。
+    ``path`` 保留从外层容器到失败 source 的解析路径；``type`` / ``message`` /
+    ``code`` 与任务级错误（TaskError）同构，``code`` 来自 yutto 的稳定错误码表。
     """
 
+    path: tuple[ResolveFailureStep, ...] = Field(default_factory=tuple)
     type: str
     message: str
     code: int | str

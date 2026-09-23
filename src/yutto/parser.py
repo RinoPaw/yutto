@@ -22,7 +22,6 @@ from yutto.source import (
 )
 from yutto.types import (
     AId,
-    BilibiliId,
     BvId,
     CollectionId,
     EpisodeId,
@@ -154,7 +153,7 @@ def parse(value: str) -> MediaSource | None:
     if match := _BANGUMI_MD_URL.fullmatch(value):
         return BangumiSeasonSource(id=MediaId(match.group("media_id")))
     if _WATCH_LATER_URL.fullmatch(value):
-        return UgcWatchLaterSource(id=BilibiliId("watchlater"))
+        return UgcWatchLaterSource()
 
     if _PLAYLIST_URL.fullmatch(value):
         sid = _query_value(_query(value), "sid")

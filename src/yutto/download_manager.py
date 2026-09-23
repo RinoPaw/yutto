@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from yutto.auth import validate_user_info
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
-from yutto.core.result import DownloadResult, ItemResult, ResolveFailure, ResolveResult
+from yutto.core.result import DownloadResult, ItemResult, ResolveFailure, ResolveFailureStep, ResolveResult
 from yutto.downloader.downloader import process_download
 from yutto.downloader.path_leases import DownloadPathLeasePool
 from yutto.downloader.planner import resolve_output_directories
@@ -72,8 +72,9 @@ def _has_media_items(media: Media) -> bool:
 
 def _report_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
     for failure in failures:
+        path = " → ".join(f"第 {step.index} 项 {step.source}" for step in failure.path)
         emit_download_report(
-            f"第 {failure.index} 项 {failure.source}：{failure.error.message}",
+            f"{path}：{failure.error.message}",
             ReportLevel.ERROR,
         )
 
@@ -148,6 +149,10 @@ class DownloadManager:
 
         resolved_failures = tuple(
             ResolveFailure(
+                path=tuple(
+                    ResolveFailureStep(index=step.index, source=str(step.source))
+                    for step in failure.path
+                ),
                 type=type(failure.error).__name__,
                 message=failure.error.message,
                 code=failure.error.code.value,
