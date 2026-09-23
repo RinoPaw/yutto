@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, cast
 
 from yutto.downloader.selector import select_streams
 from yutto.resource import should_save_cover, wants_audio, wants_metadata, wants_video
-from yutto.scope import Scope
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import TIME_FULL_FMT
 
 if TYPE_CHECKING:
     from yutto.resource import ResourceManifest
+    from yutto.scope import Scope
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
