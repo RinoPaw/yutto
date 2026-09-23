@@ -35,21 +35,21 @@ def test_resolve_result_keeps_media_tree_without_flat_projection():
     aid = AId("808982399")
     page = UgcPage(
         aid=aid,
-        page=2,
+        index=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2"),
     )
     video = UgcVideo(
         aid=aid,
         metadata=ItemMetaData(title="标题"),
-        items=[page],
+        items=(page,),
     )
     result = ResolveResult(items=(video,))
 
     assert result.items == (video,)
     root = result.items[0]
     assert isinstance(root, UgcVideo)
-    assert root.items == [page]
+    assert root.items == (page,)
     assert root is video
 
     with pytest.raises(FrozenInstanceError):
