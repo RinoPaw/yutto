@@ -65,7 +65,7 @@ class DownloadExecutor:
                 "DanmakuData",
                 {
                     "source_type": manifest.danmaku_source_type,
-                    "save_type": manifest.danmaku_save_type,
+                    "save_type": plan.resources.danmaku_save_type,
                     "data": [],
                 },
             )

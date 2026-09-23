@@ -36,7 +36,6 @@ class ResourceManifest:
     audios: tuple[AudioUrlMeta, ...] = ()
     subtitles: tuple[SubtitleResource, ...] = ()
     danmaku_source_type: DanmakuSourceType | None = None
-    danmaku_save_type: DanmakuSaveType | None = None
     danmaku_urls: tuple[str, ...] = ()
     cover_url: str | None = None
     chapter_info_url: str | None = None
@@ -291,7 +290,6 @@ async def resolve_resource_manifest(
         audios=audios,
         subtitles=subtitles,
         danmaku_source_type=danmaku_source_type,
-        danmaku_save_type=danmaku_format if danmaku_urls else None,
         danmaku_urls=danmaku_urls,
         cover_url=item.metadata.thumb if cover and item.metadata.thumb else None,
         chapter_info_url=chapter_info_url,

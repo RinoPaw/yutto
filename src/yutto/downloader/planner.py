@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from yutto.downloader.selector import select_streams
-from yutto.resource import should_save_cover, wants_audio, wants_metadata, wants_video
+from yutto.resource import resolve_danmaku_format, should_save_cover, wants_audio, wants_metadata, wants_video
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import TIME_FULL_FMT
 
@@ -139,7 +139,7 @@ class DownloadPlanner:
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
-            danmaku_save_type=resources.danmaku_save_type,
+            danmaku_save_type=resolve_danmaku_format(scope) if resources.danmaku_urls else None,
             has_metadata=wants_metadata(scope),
             has_cover=resources.cover_url is not None,
             has_chapter_info=resources.chapter_info_url is not None,
