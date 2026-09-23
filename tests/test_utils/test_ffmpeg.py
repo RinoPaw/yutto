@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 import yutto.utils.ffmpeg as ffmpeg_module
-from yutto.core.request import DownloadRequest
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner, should_attach_hvc1_tag
 from yutto.exceptions import PostprocessingError, WrongArgumentError
 from yutto.resource import ResourceManifest
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 from yutto.utils.functional import Singleton, as_sync
 
@@ -92,29 +92,23 @@ def make_audio_plan(
 ) -> DownloadPlan:
     path = Path("output")
     resources = ResourceManifest(audios=(make_audio(),))
-    request = DownloadRequest.model_validate(
+    scope = Scope(
         {
-            "source": {"url": "BV1muxer"},
-            "resources": {
-                "video": False,
-                "audio": True,
-                "danmaku": False,
-                "subtitle": False,
-                "metadata": False,
-                "cover": False,
-                "chapter_info": False,
-            },
-            "stream": {
-                "audio_download_codec": "mp4a",
-                "audio_save_codec": audio_save_codec,
-            },
-            "output": {
-                "directory": tmp_path,
-                "temporary_directory": tmp_path,
-            },
-        }
+            "source.value": "BV1muxer",
+            "resource.video": False,
+            "resource.audio": True,
+            "resource.danmaku": False,
+            "resource.subtitle": False,
+            "resource.metadata": False,
+            "resource.cover": False,
+            "resource.chapter_info": False,
+            "stream.audio_codec": f"mp4a:{audio_save_codec}",
+            "output.directory": tmp_path,
+            "output.temporary_directory": tmp_path,
+        },
+        parent=ROOT_SCOPE,
     )
-    return DownloadPlanner().plan(resources, path, request)
+    return DownloadPlanner().plan(resources, path, scope)
 
 
 def make_audio_input(tmp_path: Path) -> Path:
