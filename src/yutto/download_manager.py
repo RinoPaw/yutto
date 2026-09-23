@@ -85,12 +85,9 @@ def _raise_all_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> No
 
 
 def _int_value(value: object, name: str) -> int:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{name} must be an integer")
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{name} must be an integer") from None
+    return value
 
 
 class DownloadManager:

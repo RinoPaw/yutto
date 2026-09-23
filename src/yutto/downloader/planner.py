@@ -194,9 +194,9 @@ def resolve_output_directories(scope: Scope) -> tuple[Path, Path]:
 
 def resolve_block_size_bytes(scope: Scope) -> int:
     value = scope.network.block_size
-    if value is None or isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("block_size must be a positive number")
-    size = int(float(value) * MEBIBYTE)
+    size = int(value * MEBIBYTE)
     if size < 1:
         raise ValueError("block_size must be a positive number")
     return size
@@ -315,7 +315,7 @@ def _optional_text(value: object) -> str | None:
 
 
 def _float(value: object) -> float:
-    if value is None or isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("expected a numeric Scope value")
     return float(value)
 
@@ -323,9 +323,9 @@ def _float(value: object) -> float:
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("expected an integer Scope value")
-    return int(value)
+    return value
 
 
 def _patterns(value: object) -> tuple[str, ...]:

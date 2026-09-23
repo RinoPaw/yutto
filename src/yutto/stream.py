@@ -66,14 +66,14 @@ def resolve_video_codecs(scope: Scope) -> tuple[VideoCodec, str]:
     download_codec, save_codec = _split_codec_pair(scope.stream.video_codec, "vcodec")
     if download_codec not in video_codec_priority_default:
         raise ValueError(f"unsupported video download codec: {download_codec}")
-    return cast("VideoCodec", download_codec), save_codec
+    return download_codec, save_codec
 
 
 def resolve_audio_codecs(scope: Scope) -> tuple[AudioCodec, str]:
     download_codec, save_codec = _split_codec_pair(scope.stream.audio_codec, "acodec")
     if download_codec not in audio_codec_priority_default:
         raise ValueError(f"unsupported audio download codec: {download_codec}")
-    return cast("AudioCodec", download_codec), save_codec
+    return download_codec, save_codec
 
 
 def resolve_video_codec_priority(scope: Scope) -> Sequence[VideoCodec] | None:

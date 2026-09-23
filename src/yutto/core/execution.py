@@ -73,15 +73,9 @@ def resolve_download_workers(scope: Scope) -> int:
 
 
 def _resolve_worker_count(value: object, name: str) -> int:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{name} must be at least 1")
-    try:
-        workers = int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{name} must be at least 1") from None
-    if workers < 1:
-        raise ValueError(f"{name} must be at least 1")
-    return workers
+    return value
 
 
 class ExecutionScopeFactory(Protocol):

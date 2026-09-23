@@ -211,7 +211,7 @@ def _make_listing_entry(
             selection=selection,
             parent_key=id(parent),
             parent_title=parent.metadata.title,
-            page=item.page,
+            page=item.index,
         )
     return FormatListingEntry(index=index, title=item.metadata.title, manifest=manifest, selection=selection)
 
