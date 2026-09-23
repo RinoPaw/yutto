@@ -113,7 +113,11 @@ def _candidate_publication_time(item: dict[str, Any]) -> int | None:
     return None
 
 
-def _resolve_selection_indexes(selection: Selection, total: int) -> tuple[int, ...]:
+def _select_items(items: list[tuple[int, T]], selection: Selection | None) -> list[tuple[int, T]]:
+    if selection is None:
+        return items
+
+    total = len(items)
     result = selection.evaluate(total)
     if result.out_of_range:
         emit_download_report(
@@ -122,14 +126,7 @@ def _resolve_selection_indexes(selection: Selection, total: int) -> tuple[int, .
         )
     if not result.indexes:
         emit_download_report("没有可供选择的项目" if total == 0 else "没有选中任何项目", ReportLevel.WARNING)
-    return result.indexes
-
-
-def _apply_selection(items: list[tuple[int, T]], selection: Selection | None) -> list[tuple[int, T]]:
-    if selection is None:
-        return items
-    indexes = _resolve_selection_indexes(selection, len(items))
-    return [items[index - 1] for index in indexes]
+    return [items[index - 1] for index in result.indexes]
 
 
 def _filter_indexed_by_publication_time(
@@ -167,7 +164,19 @@ class UgcVideoSource(MediaSource):
         expression = scope.selection.expression
         selection = parse_selection(expression) if expression is not None else None
         if selection is not None:
-            indexes = _resolve_selection_indexes(selection, len(page_items))
+            total = len(page_items)
+            result = selection.evaluate(total)
+            if result.out_of_range:
+                emit_download_report(
+                    "序号 {} 超出范围（1~{}），已忽略".format(",".join(map(str, result.out_of_range)), total),
+                    ReportLevel.WARNING,
+                )
+            if not result.indexes:
+                emit_download_report(
+                    "没有可供选择的项目" if total == 0 else "没有选中任何项目",
+                    ReportLevel.WARNING,
+                )
+            indexes = result.indexes
         else:
             page = self.page if self.page is not None else 1
             if page > len(page_items):
@@ -291,7 +300,7 @@ def _ugc_candidates(items: list[dict[str, Any]], scope: Scope) -> list[tuple[int
     indexed = _filter_indexed_by_publication_time(indexed, _publication_time_filter(scope))
     expression = scope.selection.expression
     selection = parse_selection(expression) if expression is not None else None
-    return _apply_selection(indexed, selection)
+    return _select_items(indexed, selection)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -366,7 +375,7 @@ class UgcAllFavouritesSource(MediaSource):
         ]
         expression = scope.selection.expression
         selection = parse_selection(expression) if expression is not None else None
-        selected_folders = _apply_selection(list(enumerate(folders, start=1)), selection)
+        selected_folders = _select_items(list(enumerate(folders, start=1)), selection)
         child_scope = Scope({"selection.expression": "~"}, parent=scope)
         favourites: list[UgcFav] = []
         failures: list[MediaResolveFailure] = []
@@ -574,7 +583,7 @@ class BangumiEpisodeSource(MediaSource):
         if scope.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
         episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
-        episode_items = _apply_selection(episode_items, selection)
+        episode_items = _select_items(episode_items, selection)
         return MediaResolveResult(
             media=BangumiSeason(
                 season_id=SeasonId(str(result["season_id"])),
@@ -599,7 +608,7 @@ class BangumiSeasonSource(MediaSource):
         episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
         expression = scope.selection.expression
         selection = parse_selection(expression) if expression is not None else None
-        episode_items = _apply_selection(episode_items, selection)
+        episode_items = _select_items(episode_items, selection)
         return MediaResolveResult(
             media=BangumiSeason(
                 season_id=season_id,
@@ -633,7 +642,7 @@ def _cheese_episode_items(result: dict[str, Any], scope: Scope) -> list[tuple[in
     items = _filter_indexed_by_publication_time(items, _publication_time_filter(scope))
     expression = scope.selection.expression
     selection = parse_selection(expression) if expression is not None else None
-    return _apply_selection(items, selection)
+    return _select_items(items, selection)
 
 
 class CheeseEpisodeSource(MediaSource):
