@@ -130,8 +130,9 @@ class UgcVideoSource(MediaSource):
     page: int | None = None
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        resolved_aid, video_info = await get_ugc_video_info(execution, self.id)
-        tags = await get_ugc_video_tags(execution, resolved_aid) if scope.resource.metadata else []
+        video_info = await get_ugc_video_info(execution, self.id)
+        aid = AId(video_info["aid"])
+        tags = await get_ugc_video_tags(execution, aid) if scope.resource.metadata else []
         dateadded = get_time_stamp_by_now()
         page_items: list[dict[str, Any]] = list(video_info["pages"])
         expression = scope.selection.expression
@@ -204,7 +205,7 @@ class UgcVideoSource(MediaSource):
         pages = [
             UgcPage(
                 index=index,
-                aid=resolved_aid,
+                aid=aid,
                 cid=CId(page_items[index - 1]["cid"]),
                 metadata=make_metadata(
                     title=str(page_items[index - 1].get("part", video_info["title"])),
@@ -215,7 +216,7 @@ class UgcVideoSource(MediaSource):
         ]
         return MediaResolveResult(
             media=UgcVideo(
-                aid=resolved_aid,
+                aid=aid,
                 page_count=len(page_items),
                 metadata=make_metadata(
                     title=str(video_info["title"]),

@@ -31,7 +31,7 @@ def _dict_list(value: object, description: str) -> list[dict[str, Any]]:
     return value
 
 
-async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AId, dict[str, Any]]:
+async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> dict[str, Any]:
     api = f"https://api.bilibili.com/x/web-interface/view?{_query(avid)}"
     result = await Fetcher.fetch_json(scope, api)
     if isinstance(result, Failure):
@@ -56,10 +56,9 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> tuple[AId, di
         emit_download_report(f"视频 {avid} 撞车了哦！正在跳转到原视频 {forward_aid}～")
         return await get_ugc_video_info(scope, forward_aid)
 
-    aid = data.get("aid")
-    if aid is None:
+    if data.get("aid") is None:
         raise NotFoundError(f"无法获取该视频 {avid} 信息，原因：API 响应缺少 aid")
-    return AId(aid), data
+    return data
 
 
 async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> list[str]:
