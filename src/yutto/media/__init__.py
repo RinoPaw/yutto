@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ class MediaItem(Media):
 
 @dataclass(slots=True, kw_only=True)
 class MediaContainer(Media):
-    items: list[Media]
+    items: tuple[Media, ...]
 
 
 @dataclass(slots=True, kw_only=True)
@@ -39,7 +39,7 @@ class BangumiSeason(MediaContainer):
     """番剧的一季，拥有多个剧集。"""
 
     season_id: SeasonId
-    items: list[BangumiEpisode] = field(default_factory=list)
+    items: tuple[BangumiEpisode, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -56,7 +56,7 @@ class CheeseSeason(MediaContainer):
     """课程（季），拥有多个课程剧集。"""
 
     season_id: SeasonId
-    items: list[CheeseEpisode] = field(default_factory=list)
+    items: tuple[CheeseEpisode, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -73,7 +73,7 @@ class UgcVideo(MediaContainer):
 
     aid: AId
     page_count: int = 1
-    items: list[UgcPage] = field(default_factory=list)
+    items: tuple[UgcPage, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -81,7 +81,7 @@ class UgcCollection(MediaContainer):
     """UP 主创建的视频合集（season）。"""
 
     collection_id: CollectionId
-    items: list[UgcVideo] = field(default_factory=list)
+    items: tuple[UgcVideo, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -89,7 +89,7 @@ class UgcSeries(MediaContainer):
     """UP 主创建的视频系列（series）。"""
 
     series_id: SeriesId
-    items: list[UgcVideo] = field(default_factory=list)
+    items: tuple[UgcVideo, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -97,7 +97,7 @@ class UgcFav(MediaContainer):
     """收藏夹。"""
 
     fid: FId
-    items: list[UgcVideo] = field(default_factory=list)
+    items: tuple[UgcVideo, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -105,14 +105,14 @@ class UgcAllFavourites(MediaContainer):
     """用户创建的全部收藏夹。"""
 
     mid: MId
-    items: list[UgcFav] = field(default_factory=list)
+    items: tuple[UgcFav, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
 class UgcWatchLater(MediaContainer):
     """稍后再看列表。"""
 
-    items: list[UgcVideo] = field(default_factory=list)
+    items: tuple[UgcVideo, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -120,7 +120,7 @@ class UgcSpace(MediaContainer):
     """UP 主空间中的投稿列表。"""
 
     mid: MId
-    items: list[UgcVideo] = field(default_factory=list)
+    items: tuple[UgcVideo, ...] = ()
 
 
 __all__ = [

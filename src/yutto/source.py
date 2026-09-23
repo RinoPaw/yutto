@@ -202,7 +202,7 @@ class UgcVideoSource(MediaSource):
                 website=BvId(video_data["bvid"]).to_url(),
             )
 
-        pages = [
+        pages = tuple(
             UgcPage(
                 index=index,
                 aid=aid,
@@ -213,7 +213,7 @@ class UgcVideoSource(MediaSource):
                 ),
             )
             for index in indexes
-        ]
+        )
         return MediaResolveResult(
             media=UgcVideo(
                 aid=aid,
@@ -302,7 +302,7 @@ class UgcCollectionSource(MediaSource):
             media=UgcCollection(
                 collection_id=self.id,
                 metadata=ItemMetaData(title=title, mid=self.owner_id),
-                items=list(resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -344,7 +344,7 @@ class UgcFavSource(MediaSource):
                     mid=MId(str(upper_mid)) if upper_mid is not None else None,
                     owner=str(upper.get("name", "")),
                 ),
-                items=list(resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -388,7 +388,7 @@ class UgcAllFavouritesSource(MediaSource):
                     mid=self.id,
                     owner=owner,
                 ),
-                items=favourites,
+                items=tuple(favourites),
             ),
             failures=tuple(failures),
         )
@@ -416,7 +416,7 @@ class UgcSeriesSource(MediaSource):
                     mid=mid,
                     plot=str(meta.get("description", "")),
                 ),
-                items=list(resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -447,7 +447,7 @@ class UgcSpaceSource(MediaSource):
                     mid=self.id,
                     owner=str(profile.get("name", "")),
                 ),
-                items=list(resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -463,7 +463,7 @@ class UgcWatchLaterSource(MediaSource):
             execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], scope
         )
         return MediaResolveResult(
-            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=list(resolved)),
+            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=resolved),
             failures=failures,
         )
 
@@ -584,7 +584,7 @@ class BangumiEpisodeSource(MediaSource):
             media=BangumiSeason(
                 season_id=SeasonId(str(result["season_id"])),
                 metadata=season_metadata,
-                items=[_parse_bangumi_episode(index, item) for index, item in episode_items],
+                items=tuple(_parse_bangumi_episode(index, item) for index, item in episode_items),
             )
         )
 
@@ -614,7 +614,7 @@ class BangumiSeasonSource(MediaSource):
             media=BangumiSeason(
                 season_id=season_id,
                 metadata=_make_bangumi_season_metadata(result),
-                items=[_parse_bangumi_episode(index, item) for index, item in episode_items],
+                items=tuple(_parse_bangumi_episode(index, item) for index, item in episode_items),
             )
         )
 
@@ -675,7 +675,7 @@ class CheeseEpisodeSource(MediaSource):
             media=CheeseSeason(
                 season_id=SeasonId(str(season_id)),
                 metadata=ItemMetaData(title=str(result.get("title", ""))),
-                items=[_parse_cheese_episode(index, item) for index, item in episode_items],
+                items=tuple(_parse_cheese_episode(index, item) for index, item in episode_items),
             )
         )
 
@@ -692,7 +692,7 @@ class CheeseSeasonSource(MediaSource):
             media=CheeseSeason(
                 season_id=self.id,
                 metadata=ItemMetaData(title=str(result.get("title", ""))),
-                items=[_parse_cheese_episode(index, item) for index, item in episode_items],
+                items=tuple(_parse_cheese_episode(index, item) for index, item in episode_items),
             )
         )
 
