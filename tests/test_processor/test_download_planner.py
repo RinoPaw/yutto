@@ -6,14 +6,15 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 
-from tests.test_processor.test_download_result import make_audio, make_request, make_resource_only_entry
+from tests.test_processor.test_download_result import make_audio, make_resource_only_entry, make_scope
 from yutto.core.events import DownloadMediaSelected, SelectedAudioStream, SelectedVideoStream
 from yutto.core.operation import bind_download_event_sink
 from yutto.downloader.executor import emit_streams_selected
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner
+from yutto.scope import Scope
+from yutto.stream import resolve_audio_codecs
 
 if TYPE_CHECKING:
-    from yutto.core.request import DownloadRequest
     from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, VideoCodec
     from yutto.types import VideoUrlMeta
@@ -44,27 +45,30 @@ def make_plan(
     audio_only_format: AudioOnlyFormat = "infer",
     path: Path = Path("series/episode"),
     use_output_as_temporary: bool = False,
-) -> tuple[ResourceManifest, DownloadRequest, DownloadPlan]:
+) -> tuple[ResourceManifest, Scope, DownloadPlan]:
     manifest = replace(
         make_resource_only_entry(),
         videos=(make_video(video_codec),) if video_codec is not None else (),
         audios=(make_audio(audio_codec),) if audio_codec is not None else (),
     )
-    request = make_request(
+    base_scope = make_scope(
         tmp_path,
         video=video_codec is not None,
         audio=audio_codec is not None,
     )
+    overrides: dict[str, object] = {
+        "output.format": output_format,
+        "output.audio_only_format": audio_only_format,
+        "danmaku.block_keyword_patterns": ["original-pattern"],
+    }
     if video_codec is not None:
-        request.stream.video_download_codec = video_codec
+        overrides["stream.video_codec"] = f"{video_codec}:copy"
     if audio_codec is not None:
-        request.stream.audio_download_codec = audio_codec
-    request.output.format = output_format
-    request.output.audio_only_format = audio_only_format
+        overrides["stream.audio_codec"] = f"{audio_codec}:copy"
     if use_output_as_temporary:
-        request.output.temporary_directory = None
-    request.danmaku.block_keyword_patterns = ["original-pattern"]
-    return manifest, request, DownloadPlanner().plan(manifest, path, request)
+        overrides["output.temporary_directory"] = None
+    scope = Scope(overrides, parent=base_scope)
+    return manifest, scope, DownloadPlanner().plan(manifest, path, scope)
 
 
 @pytest.mark.parametrize(
@@ -99,8 +103,10 @@ def test_planner_resolves_output_without_io(
 
 
 def test_plan_selects_manifest_entries_without_copying_resource_urls(tmp_path: Path):
-    manifest, request, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
-    request.danmaku.block_keyword_patterns.append("later-pattern")
+    manifest, scope, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
+    patterns = scope.danmaku.block_keyword_patterns
+    assert isinstance(patterns, list)
+    patterns.append("later-pattern")
 
     assert plan.video is not None and plan.video.index == 0
     assert plan.audio is not None and plan.audio.index == 0
@@ -141,7 +147,7 @@ def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_pa
 
 
 def test_planner_resolves_nested_temporary_paths_and_forced_transcode(tmp_path: Path):
-    _, request, plan = make_plan(
+    _, scope, plan = make_plan(
         tmp_path,
         audio_codec="mp4a",
         audio_only_format="mp3",
@@ -155,4 +161,4 @@ def test_planner_resolves_nested_temporary_paths_and_forced_transcode(tmp_path: 
     assert plan.paths.saved_cover == tmp_path / "output/nested/series/episode-poster.jpg"
     assert plan.audio_save_codec == "mp3"
     assert plan.requires_audio_transcode_notice is True
-    assert request.stream.audio_save_codec == "copy"
+    assert resolve_audio_codecs(scope)[1] == "copy"
