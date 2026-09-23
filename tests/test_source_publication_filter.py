@@ -12,6 +12,7 @@ from yutto.types import MId, SeriesId
 
 if TYPE_CHECKING:
     import pytest
+
     from yutto.core.execution import ExecutionScope
 
 _EXECUTION = cast("ExecutionScope", None)
