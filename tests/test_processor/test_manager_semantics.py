@@ -8,10 +8,10 @@ import pytest
 
 from yutto.core.execution import ExecutionScope, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
-from yutto.core.request import DownloadRequest
 from yutto.core.result import DownloadResult, ItemResult, ItemState
 from yutto.download_manager import DownloadManager, ensure_output_path_is_scoped, show_batch_episode_title
 from yutto.exceptions import WrongArgumentError
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
@@ -20,22 +20,30 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.processor
 
 
+def make_scope(url: str, **values: object) -> Scope:
+    return Scope({"source.value": url, **values}, parent=ROOT_SCOPE)
+
+
 @as_sync
 async def test_execute_uses_request_scopes_and_keeps_path_resolver_order():
-    requests = [
-        DownloadRequest.model_validate(
-            {
-                "source": {"url": "BV1first"},
-                "access": {"auth_profile": "first"},
-                "network": {"proxy": "no", "fetch_workers": 2, "download_workers": 3},
-            }
+    scopes = [
+        make_scope(
+            "BV1first",
+            **{
+                "auth.profile": "first",
+                "network.proxy": "no",
+                "network.fetch_workers": 2,
+                "network.download_workers": 3,
+            },
         ),
-        DownloadRequest.model_validate(
-            {
-                "source": {"url": "BV1second"},
-                "access": {"auth_profile": "second"},
-                "network": {"proxy": "auto", "fetch_workers": 5, "download_workers": 7},
-            }
+        make_scope(
+            "BV1second",
+            **{
+                "auth.profile": "second",
+                "network.proxy": "auto",
+                "network.fetch_workers": 5,
+                "network.download_workers": 7,
+            },
         ),
     ]
 
@@ -44,40 +52,40 @@ async def test_execute_uses_request_scopes_and_keeps_path_resolver_order():
             super().__init__()
             self.calls: list[tuple[ExecutionScope, str, str]] = []
 
-        async def process_request(
+        async def process_scope(
             self,
-            scope: ExecutionScope,
-            request: DownloadRequest,
+            execution: ExecutionScope,
+            scope: Scope,
         ) -> tuple[ItemResult, ...]:
             path = self.unique_path("same/video.mp4")
-            self.calls.append((scope, request.source.url, path))
+            self.calls.append((execution, str(scope.source.value), path))
             return (ItemResult(state=ItemState.DONE, output_path=Path(path)),)
 
-    def resolve_credentials(request: DownloadRequest) -> AuthInfo:
+    def resolve_credentials(scope: Scope) -> AuthInfo:
         return cast(
             "AuthInfo",
-            {"SESSDATA": f"{request.access.auth_profile},session", "bili_jct": None},
+            {"SESSDATA": f"{scope.auth.profile},session", "bili_jct": None},
         )
 
     manager = RecordingManager()
-    result = await manager.execute(RequestExecutionScopeFactory(resolve_credentials), requests)
+    result = await manager.execute(RequestExecutionScopeFactory(resolve_credentials), scopes)
 
     assert [url for _, url, _ in manager.calls] == ["BV1first", "BV1second"]
     assert [Path(path) for _, _, path in manager.calls] == [
         Path("same/video.mp4"),
         Path("same/video (1).mp4"),
     ]
-    first_scope, second_scope = (scope for scope, _, _ in manager.calls)
-    assert first_scope is not second_scope
-    assert first_scope.session is not second_scope.session
-    assert first_scope.session.is_closed and second_scope.session.is_closed
-    assert first_scope.fetch_limiter._value == 2
-    assert first_scope.download_workers == 3
-    assert second_scope.fetch_limiter._value == 5
-    assert second_scope.download_workers == 7
-    assert first_scope.fetch_limiter is not second_scope.fetch_limiter
-    assert first_scope.session.cookie("SESSDATA") == "first%2Csession"
-    assert second_scope.session.cookie("SESSDATA") == "second%2Csession"
+    first_execution, second_execution = (execution for execution, _, _ in manager.calls)
+    assert first_execution is not second_execution
+    assert first_execution.session is not second_execution.session
+    assert first_execution.session.is_closed and second_execution.session.is_closed
+    assert first_execution.fetch_limiter._value == 2
+    assert first_execution.download_workers == 3
+    assert second_execution.fetch_limiter._value == 5
+    assert second_execution.download_workers == 7
+    assert first_execution.fetch_limiter is not second_execution.fetch_limiter
+    assert first_execution.session.cookie("SESSDATA") == "first%2Csession"
+    assert second_execution.session.cookie("SESSDATA") == "second%2Csession"
     assert result == DownloadResult(
         items=(
             ItemResult(state=ItemState.DONE, output_path=Path("same/video.mp4")),
@@ -87,12 +95,8 @@ async def test_execute_uses_request_scopes_and_keeps_path_resolver_order():
 
 
 @as_sync
-async def test_execute_runs_requests_concurrently_and_preserves_result_order():
-    requests = [
-        DownloadRequest.model_validate({"source": {"url": "BV1first"}}),
-        DownloadRequest.model_validate({"source": {"url": "BV1second"}}),
-        DownloadRequest.model_validate({"source": {"url": "BV1third"}}),
-    ]
+async def test_execute_runs_scopes_concurrently_and_preserves_result_order():
+    scopes = [make_scope("BV1first"), make_scope("BV1second"), make_scope("BV1third")]
     both_started = asyncio.Event()
     release = asyncio.Event()
     active = 0
@@ -102,10 +106,10 @@ async def test_execute_runs_requests_concurrently_and_preserves_result_order():
         def __init__(self) -> None:
             super().__init__(jobs=2)
 
-        async def process_request(
+        async def process_scope(
             self,
-            scope: ExecutionScope,
-            request: DownloadRequest,
+            execution: ExecutionScope,
+            scope: Scope,
         ) -> tuple[ItemResult, ...]:
             nonlocal active, max_active
             active += 1
@@ -114,12 +118,12 @@ async def test_execute_runs_requests_concurrently_and_preserves_result_order():
                 both_started.set()
             try:
                 await release.wait()
-                return (ItemResult(state=ItemState.DONE, output_path=Path(request.source.url)),)
+                return (ItemResult(state=ItemState.DONE, output_path=Path(str(scope.source.value))),)
             finally:
                 active -= 1
 
     manager = ConcurrentManager()
-    execution = asyncio.create_task(manager.execute(RequestExecutionScopeFactory(), requests))
+    execution = asyncio.create_task(manager.execute(RequestExecutionScopeFactory(), scopes))
     await asyncio.wait_for(both_started.wait(), timeout=1)
     release.set()
 
@@ -135,11 +139,7 @@ async def test_execute_runs_requests_concurrently_and_preserves_result_order():
 
 @as_sync
 async def test_concurrent_execute_preserves_original_error_and_cancels_siblings():
-    requests = [
-        DownloadRequest.model_validate({"source": {"url": "BV1fail"}}),
-        DownloadRequest.model_validate({"source": {"url": "BV1blocked"}}),
-        DownloadRequest.model_validate({"source": {"url": "BV1must-not-start"}}),
-    ]
+    scopes = [make_scope("BV1fail"), make_scope("BV1blocked"), make_scope("BV1must-not-start")]
     both_started = asyncio.Event()
     sibling_cancelled = asyncio.Event()
     started = 0
@@ -149,18 +149,19 @@ async def test_concurrent_execute_preserves_original_error_and_cancels_siblings(
         def __init__(self) -> None:
             super().__init__(jobs=2)
 
-        async def process_request(
+        async def process_scope(
             self,
-            scope: ExecutionScope,
-            request: DownloadRequest,
+            execution: ExecutionScope,
+            scope: Scope,
         ) -> tuple[ItemResult, ...]:
             nonlocal started
-            calls.append(request.source.url)
+            source = str(scope.source.value)
+            calls.append(source)
             started += 1
             if started == 2:
                 both_started.set()
             await both_started.wait()
-            if request.source.url == "BV1fail":
+            if source == "BV1fail":
                 raise WrongArgumentError("request failed")
             try:
                 await asyncio.Event().wait()
@@ -169,7 +170,7 @@ async def test_concurrent_execute_preserves_original_error_and_cancels_siblings(
             return ()
 
     with pytest.raises(WrongArgumentError, match="request failed"):
-        await FailingConcurrentManager().execute(RequestExecutionScopeFactory(), requests)
+        await FailingConcurrentManager().execute(RequestExecutionScopeFactory(), scopes)
 
     assert sibling_cancelled.is_set()
     assert calls == ["BV1fail", "BV1blocked"]
@@ -177,10 +178,7 @@ async def test_concurrent_execute_preserves_original_error_and_cancels_siblings(
 
 @as_sync
 async def test_execute_stops_on_failure_and_closes_session():
-    requests = [
-        DownloadRequest.model_validate({"source": {"url": "BV1first"}}),
-        DownloadRequest.model_validate({"source": {"url": "BV1second"}}),
-    ]
+    scopes = [make_scope("BV1first"), make_scope("BV1second")]
 
     class FailingManager(DownloadManager):
         def __init__(self) -> None:
@@ -188,18 +186,18 @@ async def test_execute_stops_on_failure_and_closes_session():
             self.calls: list[str] = []
             self.session: Any = None
 
-        async def process_request(
+        async def process_scope(
             self,
-            scope: ExecutionScope,
-            request: DownloadRequest,
+            execution: ExecutionScope,
+            scope: Scope,
         ) -> tuple[ItemResult, ...]:
-            self.session = scope.session
-            self.calls.append(request.source.url)
+            self.session = execution.session
+            self.calls.append(str(scope.source.value))
             raise WrongArgumentError("request failed")
 
     manager = FailingManager()
     with pytest.raises(WrongArgumentError, match="request failed"):
-        await manager.execute(RequestExecutionScopeFactory(), requests)
+        await manager.execute(RequestExecutionScopeFactory(), scopes)
 
     assert manager.calls == ["BV1first"]
     assert manager.session is not None and manager.session.is_closed
@@ -209,25 +207,25 @@ async def test_execute_stops_on_failure_and_closes_session():
 async def test_execute_cancellation_closes_session():
     started = asyncio.Event()
     release = asyncio.Event()
-    request = DownloadRequest.model_validate({"source": {"url": "BV1cancel"}})
+    scope = make_scope("BV1cancel")
 
     class BlockingManager(DownloadManager):
         def __init__(self) -> None:
             super().__init__()
             self.session: Any = None
 
-        async def process_request(
+        async def process_scope(
             self,
-            scope: ExecutionScope,
-            request: DownloadRequest,
+            execution: ExecutionScope,
+            scope: Scope,
         ) -> tuple[ItemResult, ...]:
-            self.session = scope.session
+            self.session = execution.session
             started.set()
             await release.wait()
             return ()
 
     manager = BlockingManager()
-    execution = asyncio.create_task(manager.execute(RequestExecutionScopeFactory(), [request]))
+    execution = asyncio.create_task(manager.execute(RequestExecutionScopeFactory(), [scope]))
     await started.wait()
     execution.cancel()
 
