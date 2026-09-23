@@ -112,12 +112,14 @@ def parse(value: str) -> MediaSource | None:
     if not value:
         return None
 
-    # Short IDs stay first: no URL parsing is needed unless the UGC shortcut
-    # actually carries a query string such as ?p=3.
-    if match := _AV_ID.match(value):
-        return UgcVideoSource(id=AId(match.group("aid")), page=_page(_query(value)))
-    if match := _BV_ID.match(value):
-        return UgcVideoSource(id=BvId(match.group("bvid")), page=_page(_query(value)))
+    # Short UGC IDs may carry a query string such as ?p=3, but the ID path
+    # itself must match completely rather than merely sharing a valid prefix.
+    short = urlparse(value)
+    if not short.scheme and not short.netloc:
+        if match := _AV_ID.fullmatch(short.path):
+            return UgcVideoSource(id=AId(match.group("aid")), page=_page(_query(value)))
+        if match := _BV_ID.fullmatch(short.path):
+            return UgcVideoSource(id=BvId(match.group("bvid")), page=_page(_query(value)))
     if match := _MD_ID.fullmatch(value):
         return BangumiSeasonSource(id=MediaId(match.group("media_id")))
     if match := _EP_ID.fullmatch(value):
