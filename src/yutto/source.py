@@ -276,8 +276,7 @@ def _ugc_candidates(
     indexed = [
         (index, item)
         for index, item in indexed
-        if item.get(publication_field) is None
-        or _publication_time_matches(int(item[publication_field]), scope)
+        if item.get(publication_field) is None or _publication_time_matches(int(item[publication_field]), scope)
     ]
     return _select_items(indexed, selection)
 
@@ -353,11 +352,7 @@ class UgcAllFavouritesSource(MediaSource):
     id: MId
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        folders = [
-            folder
-            for folder in await get_all_favourite_folders(execution, self.id)
-            if folder.get("id") is not None
-        ]
+        folders = [folder for folder in await get_all_favourite_folders(execution, self.id) if folder.get("id") is not None]
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_folders = _select_items(list(enumerate(folders, start=1)), selection)
@@ -576,8 +571,7 @@ class BangumiEpisodeSource(MediaSource):
         episode_items = [
             (index, item)
             for index, item in episode_items
-            if item.get("pub_time") is None
-            or _publication_time_matches(int(item["pub_time"]), scope)
+            if item.get("pub_time") is None or _publication_time_matches(int(item["pub_time"]), scope)
         ]
         episode_items = _select_items(episode_items, selection)
         return MediaResolveResult(
@@ -604,8 +598,7 @@ class BangumiSeasonSource(MediaSource):
         episode_items = [
             (index, item)
             for index, item in episode_items
-            if item.get("pub_time") is None
-            or _publication_time_matches(int(item["pub_time"]), scope)
+            if item.get("pub_time") is None or _publication_time_matches(int(item["pub_time"]), scope)
         ]
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
@@ -646,8 +639,7 @@ def _cheese_episode_items(
     items = [
         (index, item)
         for index, item in enumerate(result["episodes"], start=1)
-        if item.get("release_date") is None
-        or _publication_time_matches(int(item["release_date"]), scope)
+        if item.get("release_date") is None or _publication_time_matches(int(item["release_date"]), scope)
     ]
     return _select_items(items, selection)
 
