@@ -629,6 +629,9 @@ def _scope_to_json(scope: Scope) -> dict[str, JsonValue]:
         section_value = result.setdefault(section, {})
         if not isinstance(section_value, dict):
             raise TypeError(f"invalid Scope section: {section}")
+        if field.casefold() == "proxy" and isinstance(value, str):
+            section_value[field] = _sanitize_proxy(value)
+            continue
         section_value[field] = _to_json_value(value)
     return result
 
