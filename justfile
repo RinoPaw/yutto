@@ -27,7 +27,7 @@ build:
 
 release:
   @echo 'Tagging v{{VERSION}}...'
-  git tag "v{{VERSION}}"
+  git tag "v{{VERSION}}..."
   @echo 'Push to GitHub to trigger publish process...'
   git push --tags
 
@@ -85,17 +85,20 @@ ci-test pyversion:
   uv run -p {{pyversion}} pytest tests/test_download_manager_media.py tests/test_listing.py tests/test_resource.py tests/test_selection.py tests/test_source.py tests/test_source_all_favourites.py tests/test_source_publication_filter.py tests/test_source_ugc_containers.py --reruns 3 --reruns-delay 1
 
 ci-e2e-test pyversion:
-  uv run -p {{pyversion}} pytest -m "e2e and not (ci_skip or ignore)"
+  uv run -p {{pyversion}} pytest -m "e2e and not (ci_skip or ignore or live)"
+
+ci-live-e2e-test pyversion:
+  uv run -p {{pyversion}} pytest -m "e2e and live and not (ci_skip or ignore)"
 
 # docker specific
 docker-run *ARGS:
   docker run --rm -it -v `pwd`:/app {{DOCKER_NAME}} {{ARGS}}
 
 docker-build:
-  docker build --no-cache -t "{{DOCKER_NAME}}:{{VERSION}}" -t "{{DOCKER_NAME}}:latest" .
+  docker build --no-cache -t "siguremo/yutto:{{VERSION}}" -t "siguremo/yutto:latest" .
 
 docker-publish:
-  docker buildx build --no-cache --platform=linux/amd64,linux/arm64 -t "{{DOCKER_NAME}}:{{VERSION}}" -t "{{DOCKER_NAME}}:latest" . --push
+  docker buildx build --no-cache --platform=linux/amd64,linux/arm64 -t "siguremo/yutto:{{VERSION}}" -t "siguremo/yutto:latest" . --push
 
 # docs specific
 docs-setup:
