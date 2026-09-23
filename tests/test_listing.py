@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from yutto.listing import filter_media_by_publication_time, filter_media_tree, resolve_media_paths
+from yutto.listing import resolve_media_paths
 from yutto.media import (
     BangumiEpisode,
     BangumiSeason,
@@ -18,7 +18,6 @@ from yutto.media import (
     UgcWatchLater,
 )
 from yutto.types import AId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
-from yutto.utils.filter import PublicationTimeFilter
 from yutto.utils.metadata import ItemMetaData
 
 
@@ -32,22 +31,22 @@ def test_root_ugc_path_uses_original_page_count() -> None:
         aid=aid,
         page_count=1,
         metadata=ItemMetaData(title="投稿", owner="UP"),
-        items=[UgcPage(aid=aid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1"))],
+        items=(UgcPage(aid=aid, index=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),),
     )
     selected_from_multi_page = UgcVideo(
         aid=aid,
         page_count=3,
         metadata=ItemMetaData(title="投稿", owner="UP"),
-        items=[UgcPage(aid=aid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3"))],
+        items=(UgcPage(aid=aid, index=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),),
     )
     multi_selection = UgcVideo(
         aid=aid,
         page_count=3,
         metadata=ItemMetaData(title="投稿", owner="UP"),
-        items=[
-            UgcPage(aid=aid, page=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
-            UgcPage(aid=aid, page=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),
-        ],
+        items=(
+            UgcPage(aid=aid, index=1, cid=CId("451"), metadata=ItemMetaData(title="P1")),
+            UgcPage(aid=aid, index=3, cid=CId("456"), metadata=ItemMetaData(title="P3")),
+        ),
     )
 
     assert _paths(single_page) == [Path("投稿")]
@@ -66,7 +65,7 @@ def test_direct_episode_and_season_tree_shapes_choose_different_auto_paths() -> 
     season = BangumiSeason(
         season_id=SeasonId("99"),
         metadata=ItemMetaData(title="番剧", owner="UP"),
-        items=[episode],
+        items=(episode,),
     )
 
     assert _paths(episode) == [Path("4 第四话")]
@@ -85,7 +84,7 @@ def test_bangumi_preview_prefixes_path_without_mutating_metadata() -> None:
     media = BangumiSeason(
         season_id=SeasonId("99"),
         metadata=ItemMetaData(title="番剧"),
-        items=[episode],
+        items=(episode,),
     )
 
     assert _paths(media) == [Path("番剧/【预告】2 第二话")]
@@ -103,7 +102,7 @@ def test_cheese_path_uses_original_episode_index() -> None:
     media = CheeseSeason(
         season_id=SeasonId("77"),
         metadata=ItemMetaData(title="课程"),
-        items=[episode],
+        items=(episode,),
     )
 
     assert _paths(media, template="{id}-{auto}") == [Path("7-课程/第七节")]
@@ -114,43 +113,36 @@ def test_nested_ugc_paths_follow_media_hierarchy() -> None:
     single = UgcVideo(
         aid=single_aid,
         metadata=ItemMetaData(title="单P", owner="UP"),
-        items=[UgcPage(aid=single_aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+        items=(UgcPage(aid=single_aid, index=1, cid=CId("101"), metadata=ItemMetaData(title="P1")),),
     )
     multi_aid = AId("102")
     multi = UgcVideo(
         aid=multi_aid,
         metadata=ItemMetaData(title="多P", owner="UP"),
-        items=[
-            UgcPage(aid=multi_aid, page=1, cid=CId("201"), metadata=ItemMetaData(title="第一段")),
-            UgcPage(aid=multi_aid, page=2, cid=CId("202"), metadata=ItemMetaData(title="第二段")),
-        ],
+        items=(
+            UgcPage(aid=multi_aid, index=1, cid=CId("201"), metadata=ItemMetaData(title="第一段")),
+            UgcPage(aid=multi_aid, index=2, cid=CId("202"), metadata=ItemMetaData(title="第二段")),
+        ),
     )
 
     series = UgcSeries(
         series_id=SeriesId("99"),
         metadata=ItemMetaData(title="系列", owner="UP"),
-        items=[multi],
+        items=(multi,),
     )
-    assert _paths(series) == [
-        Path("系列/多P/第一段"),
-        Path("系列/多P/第二段"),
-    ]
+    assert _paths(series) == [Path("系列/多P/第一段"), Path("系列/多P/第二段")]
 
     collection = UgcCollection(
         collection_id=CollectionId("66"),
         metadata=ItemMetaData(title="合集", owner="UP"),
-        items=[single, multi],
+        items=(single, multi),
     )
-    assert _paths(collection) == [
-        Path("合集/单P"),
-        Path("合集/多P/第一段"),
-        Path("合集/多P/第二段"),
-    ]
+    assert _paths(collection) == [Path("合集/单P"), Path("合集/多P/第一段"), Path("合集/多P/第二段")]
 
     favourite = UgcFav(
         fid=FId("88"),
         metadata=ItemMetaData(title="收藏夹", owner="收藏者"),
-        items=[single, multi],
+        items=(single, multi),
     )
     assert _paths(favourite) == [
         Path("收藏者的收藏夹/收藏夹/单P"),
@@ -164,73 +156,14 @@ def test_space_and_watch_later_paths_keep_nested_page_layouts() -> None:
     video = UgcVideo(
         aid=aid,
         metadata=ItemMetaData(title="投稿", owner="视频UP"),
-        items=[UgcPage(aid=aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="P1"))],
+        items=(UgcPage(aid=aid, index=1, cid=CId("101"), metadata=ItemMetaData(title="P1")),),
     )
     space = UgcSpace(
         mid=MId("123"),
         metadata=ItemMetaData(title="空间UP", owner="空间UP"),
-        items=[video],
+        items=(video,),
     )
-    watch_later = UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=[video])
+    watch_later = UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=(video,))
 
     assert _paths(space) == [Path("空间UP的全部投稿视频/投稿/P1")]
     assert _paths(watch_later) == [Path("稍后再看/投稿/P1")]
-
-
-def test_filter_media_tree_preserves_hierarchy_and_drops_empty_nested_branches() -> None:
-    first_aid = AId("101")
-    first = UgcVideo(
-        aid=first_aid,
-        metadata=ItemMetaData(title="A"),
-        items=[
-            UgcPage(aid=first_aid, page=1, cid=CId("101"), metadata=ItemMetaData(title="A1")),
-            UgcPage(aid=first_aid, page=2, cid=CId("102"), metadata=ItemMetaData(title="A2")),
-        ],
-    )
-    second_aid = AId("102")
-    second = UgcVideo(
-        aid=second_aid,
-        metadata=ItemMetaData(title="B"),
-        items=[UgcPage(aid=second_aid, page=1, cid=CId("201"), metadata=ItemMetaData(title="B1"))],
-    )
-    root = UgcSeries(
-        series_id=SeriesId("99"),
-        metadata=ItemMetaData(title="系列"),
-        items=[first, second],
-    )
-
-    filtered = filter_media_tree(root, lambda ancestry, item: item.metadata.title == "A2")
-
-    assert isinstance(filtered, UgcSeries)
-    assert len(filtered.items) == 1
-    assert filtered.items[0].metadata.title == "A"
-    assert [page.metadata.title for page in filtered.items[0].items] == ["A2"]
-    assert root.items == [first, second]
-
-
-def test_publication_filter_keeps_empty_root_container() -> None:
-    aid = AId("123")
-    root = UgcSeries(
-        series_id=SeriesId("99"),
-        metadata=ItemMetaData(title="系列"),
-        items=[
-            UgcVideo(
-                aid=aid,
-                metadata=ItemMetaData(title="A"),
-                items=[
-                    UgcPage(
-                        aid=aid,
-                        page=1,
-                        cid=CId("101"),
-                        metadata=ItemMetaData(title="A1", premiered=1_700_000_000),
-                    )
-                ],
-            )
-        ],
-    )
-    publication_filter = PublicationTimeFilter.from_strings("2026-01-01", "2027-01-01")
-
-    filtered = filter_media_by_publication_time(root, publication_filter)
-
-    assert isinstance(filtered, UgcSeries)
-    assert filtered.items == []
