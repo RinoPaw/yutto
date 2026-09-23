@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from yutto.api.season import (
     get_bangumi_season,
@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from yutto.exceptions import YuttoBaseException
 
 T = TypeVar("T")
+TMedia_co = TypeVar("TMedia_co", bound=Media, covariant=True)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -82,8 +83,8 @@ class MediaResolveFailure:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class MediaResolveResult:
-    media: Media
+class MediaResolveResult(Generic[TMedia_co]):
+    media: TMedia_co
     failures: tuple[MediaResolveFailure, ...] = ()
 
 
@@ -92,7 +93,7 @@ class MediaSource(ABC):
     id: BilibiliId
 
     @abstractmethod
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[Media]:
         raise NotImplementedError
 
 
@@ -129,7 +130,7 @@ class UgcVideoSource(MediaSource):
     id: AvId
     page: int | None = None
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcVideo]:
         video_data = await get_ugc_video_info(execution, self.id)
         aid = AId(video_data["aid"])
         tags = await get_ugc_video_tags(execution, aid) if scope.resource.metadata else []
@@ -238,8 +239,6 @@ async def _resolve_ugc_videos(
         except _EXPECTED_UGC_CHILD_ERRORS as error:
             return MediaResolveFailure(index=index, source=avid, error=error)
 
-        if not isinstance(result.media, UgcVideo):
-            raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
         if not _publication_time_matches(result.media.metadata.published_at, video_scope):
             emit_download_report(
                 f"因为发布时间为 {result.media.metadata.published_at}，跳过 {result.media.metadata.title}",
@@ -310,7 +309,7 @@ class UgcCollectionSource(MediaSource):
 class UgcFavSource(MediaSource):
     id: FId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcFav]:
         info, medias = await asyncio.gather(
             get_favourite_info(execution, self.id),
             get_favourite_medias(execution, self.id),
@@ -373,8 +372,6 @@ class UgcAllFavouritesSource(MediaSource):
             except _EXPECTED_UGC_CHILD_ERRORS as error:
                 failures.append(MediaResolveFailure(index=index, source=fid, error=error))
                 continue
-            if not isinstance(result.media, UgcFav):
-                raise TypeError("UgcFavSource returned unsupported media")
             result.media.index = index
             favourites.append(result.media)
             failures.extend(result.failures)
