@@ -4,7 +4,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
-from yutto.scope import Scope
 from yutto.utils.fetcher import (
     DEFAULT_FETCH_WORKERS,
     cookies_from_auth,
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
 
     from yutto._native import YuttoSession
     from yutto.auth import AuthInfo
+    from yutto.scope import Scope
 
 
 class ExecutionScope:
