@@ -7,7 +7,6 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.input import expand_download_scopes, scope_values_from_cli
 from yutto.cli.parser import build_parser
-from yutto.cli.request_adapter import resolve_download_request
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import YuttoConfig, scope_from_config
 from yutto.scope import MISSING, Scope
@@ -87,7 +86,7 @@ def test_no_inherit_cuts_parent_cli_scope_but_keeps_config_scope(tmp_path: Path)
     assert second.network.fetch_workers == 5
 
 
-def test_scope_feeds_request_runtime_and_credentials_from_one_chain():
+def test_scope_feeds_runtime_and_credentials_from_one_chain():
     config = YuttoConfig.model_validate(
         {
             "basic": {
@@ -110,12 +109,11 @@ def test_scope_feeds_request_runtime_and_credentials_from_one_chain():
         parent=configured,
     )
 
-    request = resolve_download_request(cli)
     runtime = resolve_runtime_options(cli)
     credentials = resolve_credential_options([cli])[0]
 
-    assert request.network.proxy == "no"
-    assert request.stream.video_download_codec_priority is None
+    assert cli.network.proxy == "no"
+    assert cli.stream.video_codec_priority is None
     assert runtime.jobs == 5
     assert runtime.ffmpeg_path == "/config/ffmpeg"
     assert credentials.auth_profile == "cli-profile"
@@ -151,14 +149,13 @@ def test_auth_command_uses_the_same_scope_chain():
     assert options.timeout == 180
 
 
-def test_empty_scope_leaves_owned_defaults_to_lower_layers():
+def test_empty_scope_inherits_root_defaults():
     configured = scope_from_config(YuttoConfig())
     cli = Scope({"source.value": "BV1xx411c7mD"}, parent=configured)
 
-    request = resolve_download_request(cli)
     runtime = resolve_runtime_options(cli)
 
-    assert request.network.download_workers == 8
-    assert request.stream.video_quality == 127
-    assert runtime.jobs is None
+    assert cli.network.download_workers == 8
+    assert cli.stream.video_quality == 127
+    assert runtime.jobs == 1
     assert runtime.ffmpeg_path is None
