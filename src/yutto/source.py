@@ -352,7 +352,9 @@ class UgcAllFavouritesSource(MediaSource):
     id: MId
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        folders = [folder for folder in await get_all_favourite_folders(execution, self.id) if folder.get("id") is not None]
+        folders = [
+            folder for folder in await get_all_favourite_folders(execution, self.id) if folder.get("id") is not None
+        ]
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_folders = _select_items(list(enumerate(folders, start=1)), selection)
