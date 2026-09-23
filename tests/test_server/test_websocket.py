@@ -254,6 +254,7 @@ async def test_server_info_and_exact_origin_allowlist():
             assert (await receive_json(connection))["error"] == {
                 "code": -32602,
                 "message": "Invalid params",
+                "data": {"reason": "unknown resources fields: unknown"},
             }
     finally:
         await server.close()
