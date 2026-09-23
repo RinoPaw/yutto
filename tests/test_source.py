@@ -290,7 +290,7 @@ def test_episode_selection_targets_whole_season(
     monkeypatch: pytest.MonkeyPatch,
     source: BangumiEpisodeSource | CheeseEpisodeSource,
     response_key: str,
-    expected_type: type[BangumiSeason] | type[CheeseSeason],
+    expected_type: type[BangumiSeason | CheeseSeason],
 ) -> None:
     response = (
         _bangumi_season_response("101", "102", "103")
