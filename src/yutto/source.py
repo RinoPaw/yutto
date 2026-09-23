@@ -230,19 +230,17 @@ class UgcVideoSource(MediaSource):
 async def _resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_avids: list[tuple[int, AvId]],
-    scope: Scope,
+    video_scope: Scope,
 ) -> tuple[tuple[UgcVideo, ...], tuple[MediaResolveFailure, ...]]:
-    page_scope = Scope({"selection.expression": "~"}, parent=scope)
-
     async def resolve_one(index: int, avid: AvId) -> UgcVideo | MediaResolveFailure | None:
         try:
-            result = await UgcVideoSource(id=avid).resolve(execution, page_scope)
+            result = await UgcVideoSource(id=avid).resolve(execution, video_scope)
         except _EXPECTED_UGC_CHILD_ERRORS as error:
             return MediaResolveFailure(index=index, source=avid, error=error)
 
         if not isinstance(result.media, UgcVideo):
             raise TypeError(f"UgcVideoSource returned unsupported media: {type(result.media).__name__}")
-        if not _publication_time_matches(result.media.metadata.published_at, scope):
+        if not _publication_time_matches(result.media.metadata.published_at, video_scope):
             emit_download_report(
                 f"因为发布时间为 {result.media.metadata.published_at}，跳过 {result.media.metadata.title}",
                 ReportLevel.DEBUG,
@@ -295,8 +293,9 @@ class UgcCollectionSource(MediaSource):
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_archives = _ugc_candidates(archives, scope, selection, publication_field="pubdate")
+        video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
+            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], video_scope
         )
         return MediaResolveResult(
             media=UgcCollection(
@@ -319,8 +318,9 @@ class UgcFavSource(MediaSource):
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_medias = _ugc_candidates(medias, scope, selection, publication_field="pubtime")
+        video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], scope
+            execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], video_scope
         )
         for video in resolved:
             if video.index is None:
@@ -405,8 +405,9 @@ class UgcSeriesSource(MediaSource):
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_archives = _ugc_candidates(archives, scope, selection, publication_field="pubdate")
+        video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
+            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], video_scope
         )
         return MediaResolveResult(
             media=UgcSeries(
@@ -434,8 +435,9 @@ class UgcSpaceSource(MediaSource):
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_archives = _ugc_candidates(archives, scope, selection, publication_field="created")
+        video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], scope
+            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], video_scope
         )
         return MediaResolveResult(
             media=UgcSpace(
@@ -459,8 +461,9 @@ class UgcWatchLaterSource(MediaSource):
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_entries = _ugc_candidates(entries, scope, selection, publication_field="pubdate")
+        video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], scope
+            execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], video_scope
         )
         return MediaResolveResult(
             media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=resolved),
