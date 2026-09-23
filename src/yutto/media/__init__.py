@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 @dataclass(slots=True, kw_only=True)
 class Media:
     metadata: ItemMetaData
+    index: int | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -27,7 +28,6 @@ class MediaContainer(Media):
 class BangumiEpisode(MediaItem):
     """番剧中的一个剧集。"""
 
-    index: int
     episode_id: EpisodeId
     aid: AId
     cid: CId
@@ -46,7 +46,6 @@ class BangumiSeason(MediaContainer):
 class CheeseEpisode(MediaItem):
     """课程中的一个剧集。"""
 
-    index: int
     episode_id: EpisodeId
     aid: AId
     cid: CId
@@ -65,7 +64,6 @@ class UgcPage(MediaItem):
     """UGC 投稿中的一个分 P。"""
 
     aid: AId
-    page: int
     cid: CId
 
 

@@ -218,13 +218,16 @@ def _resolve_media_path(
     item: MediaItem,
     subpath_template: str,
 ) -> Path:
+    if item.index is None:
+        raise ValueError(f"{type(item).__name__} has no index")
+
     if isinstance(item, UgcPage):
         video, auto_path, name, title, username, series_title = _ugc_context(ancestry, item)
         variables = _path_variables(
             video,
             item,
             video.aid,
-            index=item.page,
+            index=item.index,
             name=name,
             title=title,
             username=username,
@@ -237,17 +240,15 @@ def _resolve_media_path(
         if parent is not None and not isinstance(parent, BangumiSeason):
             raise TypeError("BangumiEpisode parent must be BangumiSeason")
         aid = item.aid
-        index = item.index
     elif isinstance(item, CheeseEpisode):
         parent = ancestry[-1] if ancestry else None
         if parent is not None and not isinstance(parent, CheeseSeason):
             raise TypeError("CheeseEpisode parent must be CheeseSeason")
         aid = item.aid
-        index = item.index
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
-    variables = _path_variables(parent, item, aid, index=index, name=_episode_name(item))
+    variables = _path_variables(parent, item, aid, index=item.index, name=_episode_name(item))
     auto_path = "{name}" if parent is None else "{title}/{name}"
     return Path(resolve_path_template(subpath_template, auto_path, variables))
 

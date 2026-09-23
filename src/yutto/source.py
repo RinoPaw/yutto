@@ -188,13 +188,6 @@ _EXPECTED_UGC_RESOLVE_ERRORS = (
 
 
 @dataclass(frozen=True, slots=True)
-class _ResolvedUgcVideo:
-    index: int
-    source: AvId
-    media: UgcVideo
-
-
-@dataclass(frozen=True, slots=True)
 class _FilteredUgcVideo:
     index: int
     source: AvId
@@ -231,8 +224,8 @@ class UgcVideoSource(MediaSource):
             indexes = (page,)
         pages = [
             UgcPage(
+                index=index,
                 aid=resolved_aid,
-                page=index,
                 cid=CId(page_items[index - 1]["cid"]),
                 metadata=self._make_ugc_metadata(
                     video_info,
@@ -295,10 +288,10 @@ async def resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_avids: list[tuple[int, AvId]],
     scope: Scope,
-) -> tuple[tuple[_ResolvedUgcVideo, ...], tuple[MediaResolveFailure, ...]]:
+) -> tuple[tuple[UgcVideo, ...], tuple[MediaResolveFailure, ...]]:
     page_scope = _all_items_scope(scope)
     publication_filter = _publication_time_filter(scope)
-    results: list[_ResolvedUgcVideo | _FilteredUgcVideo | MediaResolveFailure | None] = [None] * len(indexed_avids)
+    results: list[UgcVideo | _FilteredUgcVideo | MediaResolveFailure | None] = [None] * len(indexed_avids)
 
     async def resolve_one(order: int, index: int, avid: AvId) -> None:
         try:
@@ -320,7 +313,8 @@ async def resolve_ugc_videos(
             )
             results[order] = _FilteredUgcVideo(index=index, source=avid)
             return
-        results[order] = _ResolvedUgcVideo(index=index, source=avid, media=result.media)
+        result.media.index = index
+        results[order] = result.media
 
     try:
         async with asyncio.TaskGroup() as task_group:
@@ -335,7 +329,7 @@ async def resolve_ugc_videos(
     if len(completed) != len(indexed_avids):
         raise RuntimeError("UGC batch resolve completed without a result for every child")
     return (
-        tuple(result for result in completed if isinstance(result, _ResolvedUgcVideo)),
+        tuple(result for result in completed if isinstance(result, UgcVideo)),
         tuple(result for result in completed if isinstance(result, MediaResolveFailure)),
     )
 
@@ -363,7 +357,7 @@ class UgcCollectionSource(MediaSource):
             media=UgcCollection(
                 collection_id=self.id,
                 metadata=ItemMetaData(title=title, mid=self.owner_id),
-                items=[item.media for item in resolved],
+                items=list(resolved),
             ),
             failures=failures,
         )
@@ -378,9 +372,10 @@ class UgcFavSource(MediaSource):
         resolved, failures = await resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], scope
         )
-        for resolved_video in resolved:
-            favourite = medias[resolved_video.index - 1]
-            video = resolved_video.media
+        for video in resolved:
+            if video.index is None:
+                raise RuntimeError("resolved UGC video has no index")
+            favourite = medias[video.index - 1]
             favourite_title = str(favourite.get("title") or video.metadata.title)
             video.metadata.title = favourite_title
             if len(video.items) == 1:
@@ -398,7 +393,7 @@ class UgcFavSource(MediaSource):
                     mid=MId(str(upper_mid)) if upper_mid is not None else None,
                     owner=str(upper.get("name", "")),
                 ),
-                items=[item.media for item in resolved],
+                items=list(resolved),
             ),
             failures=failures,
         )
@@ -412,13 +407,14 @@ class UgcAllFavouritesSource(MediaSource):
         all_items_scope = _all_items_scope(scope)
         favourites: list[UgcFav] = []
         failures: list[MediaResolveFailure] = []
-        for folder in folders:
+        for index, folder in enumerate(folders, start=1):
             fid = folder.get("id")
             if fid is None:
                 continue
             result = await UgcFavSource(id=FId(str(fid))).resolve(execution, all_items_scope)
             if not isinstance(result.media, UgcFav):
                 raise TypeError("UgcFavSource returned unsupported media")
+            result.media.index = index
             favourites.append(result.media)
             failures.extend(result.failures)
         owner = next((favourite.metadata.owner for favourite in favourites if favourite.metadata.owner), "")
@@ -456,7 +452,7 @@ class UgcSeriesSource(MediaSource):
                     mid=mid,
                     plot=str(meta.get("description", "")),
                 ),
-                items=[item.media for item in resolved],
+                items=list(resolved),
             ),
             failures=failures,
         )
@@ -493,7 +489,7 @@ class UgcSpaceSource(MediaSource):
                     mid=self.id,
                     owner=str(profile.get("name", "")),
                 ),
-                items=[item.media for item in resolved],
+                items=list(resolved),
             ),
             failures=failures,
         )
@@ -510,7 +506,7 @@ class UgcWatchLaterSource(MediaSource):
             execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], scope
         )
         return MediaResolveResult(
-            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=[item.media for item in resolved]),
+            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=list(resolved)),
             failures=failures,
         )
 
