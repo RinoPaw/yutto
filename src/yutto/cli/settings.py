@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from yutto.media.quality import AudioQuality, VideoQuality
-from yutto.scope import Scope
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 from yutto.utils.time import parse_local_timestamp
@@ -105,8 +105,8 @@ class YuttoAuthConfig(_ConfigModel):
 class YuttoConfig(_ConfigModel):
     """Values explicitly supplied by persistent configuration.
 
-    Application defaults live in their owning core or frontend models. An empty
-    config object therefore contributes no overrides.
+    Application defaults live in ``ROOT_SCOPE``. An empty config object therefore
+    contributes no local overrides while still inheriting those defaults.
     """
 
     basic: YuttoBasicConfig = Field(default_factory=YuttoBasicConfig)
@@ -210,7 +210,7 @@ def scope_from_config(config: YuttoConfig) -> Scope:
         if value is not None:
             values[path] = Path(value).expanduser()
 
-    return Scope(values)
+    return Scope(values, parent=ROOT_SCOPE)
 
 
 def _copy_explicit(target: dict[str, Any], model: BaseModel, paths: Mapping[str, str]) -> None:
@@ -230,7 +230,7 @@ def search_for_settings_file() -> Path | None:
     if not settings_file.exists():
         Logger.debug(f"Settings file not found in user config home ({settings_file}).")
         return None
-    Logger.debug(f"Settings file found at {settings_file}.")
+    Logger.debug(f"Settings file found in user config home ({settings_file}).")
     return settings_file
 
 
