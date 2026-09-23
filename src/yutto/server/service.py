@@ -194,7 +194,10 @@ class ServerPolicy:
             raise ServerPolicyError(str(error)) from error
 
     def _validate_block_size(self, scope: Scope) -> None:
-        value = resolve_block_size_bytes(scope)
+        try:
+            value = resolve_block_size_bytes(scope)
+        except ValueError as error:
+            raise ServerPolicyError(f"network.block_size_bytes is invalid: {error}") from error
         if not self.options.min_block_size_bytes <= value <= self.options.max_block_size_bytes:
             raise ServerPolicyError(
                 "network.block_size_bytes must be between "
