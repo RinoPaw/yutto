@@ -22,9 +22,7 @@ class BilibiliId(NamedTuple):
         return self.__str__()
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, BilibiliId):
-            return False
-        return self.value == other.value
+        return type(self) is type(other) and self.value == other.value
 
     def to_dict(self) -> dict[str, str]:
         raise NotImplementedError("请不要直接使用 BilibiliId")
