@@ -160,10 +160,10 @@ class DownloadExecutor:
             sources: list[tuple[str, tuple[str, ...]]] = []
             if plan.video is not None:
                 video_resource = manifest.videos[plan.video.index]
-                sources.append((video_resource["url"], tuple(video_resource["mirrors"])))
+                sources.append((video_resource.url, video_resource.mirrors))
             if plan.audio is not None:
                 audio_resource = manifest.audios[plan.audio.index]
-                sources.append((audio_resource["url"], tuple(audio_resource["mirrors"])))
+                sources.append((audio_resource.url, audio_resource.mirrors))
 
             emit_download_event(DownloadStageChanged(name=DownloadStage.DOWNLOADING, item=plan.item))
             emit_download_report("开始下载……")

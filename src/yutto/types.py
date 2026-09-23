@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 if TYPE_CHECKING:
@@ -162,18 +163,20 @@ class CollectionId(BilibiliId):
         return {"season_id": self.value}
 
 
-class VideoUrlMeta(TypedDict):
+@dataclass(frozen=True, slots=True)
+class VideoUrlMeta:
     url: str
-    mirrors: list[str]
+    mirrors: tuple[str, ...]
     codec: VideoCodec
     width: int
     height: int
     quality: VideoQuality
 
 
-class AudioUrlMeta(TypedDict):
+@dataclass(frozen=True, slots=True)
+class AudioUrlMeta:
     url: str
-    mirrors: list[str]
+    mirrors: tuple[str, ...]
     codec: AudioCodec
     width: int
     height: int

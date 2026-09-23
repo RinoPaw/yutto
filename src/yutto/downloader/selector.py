@@ -57,7 +57,7 @@ def select_video(
 
     for vqn, vcodec in video_combined_priority:
         for video in videos:
-            if video["quality"] == vqn and video["codec"] == vcodec:
+            if video.quality == vqn and video.codec == vcodec:
                 return video
     return None
 
@@ -67,7 +67,7 @@ def select_audio(
     audio_quality: AudioQuality,
     audio_codec: AudioCodec,
 ) -> AudioUrlMeta | None:
-    if audios and all(is_encrypted_audio_quality(audio["quality"]) for audio in audios):
+    if audios and all(is_encrypted_audio_quality(audio.quality) for audio in audios):
         raise CryptoError("yutto 目前不支持加密音频哦～")
     audio_quality_priority = gen_audio_quality_priority(audio_quality)
     audio_codec_priority = gen_acodec_priority(audio_codec)
@@ -80,7 +80,7 @@ def select_audio(
 
     for aqn, acodec in audio_combined_priority:
         for audio in audios:
-            if audio["quality"] == aqn and audio["codec"] == acodec:
+            if audio.quality == aqn and audio.codec == acodec:
                 return audio
     return None
 

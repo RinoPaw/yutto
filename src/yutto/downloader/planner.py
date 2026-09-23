@@ -125,12 +125,12 @@ class DownloadPlanner:
 
         _, video_save_codec = resolve_video_codecs(scope)
         attach_hvc1_tag = should_attach_hvc1_tag(video_meta, video_save_codec)
-        if video_meta is not None and video_meta["codec"] == video_save_codec:
+        if video_meta is not None and video_meta.codec == video_save_codec:
             video_save_codec = "copy"
 
         _, requested_audio_save_codec = resolve_audio_codecs(scope)
         audio_save_codec = (
-            resolve_audio_save_codec(audio_meta["codec"], requested_audio_save_codec, suffix)
+            resolve_audio_save_codec(audio_meta.codec, requested_audio_save_codec, suffix)
             if audio_meta is not None
             else requested_audio_save_codec
         )
@@ -144,8 +144,8 @@ class DownloadPlanner:
             has_cover=resources.cover_url is not None,
             has_chapter_info=resources.chapter_info_url is not None,
             save_cover=should_save_cover(scope),
-            danmaku_width=video_meta["width"] if video_meta is not None else 1920,
-            danmaku_height=video_meta["height"] if video_meta is not None else 1080,
+            danmaku_width=video_meta.width if video_meta is not None else 1920,
+            danmaku_height=video_meta.height if video_meta is not None else 1080,
             metadata=MetadataPlan(
                 published_at=_text(scope.output.metadata_premiered_format),
                 added_at=TIME_FULL_FMT,
@@ -236,15 +236,15 @@ def resolve_output_suffix(
     if video is None:
         if audio_only_format != "infer":
             return f".{audio_only_format}"
-        if audio is not None and audio["codec"] == "flac" and audio_save_codec in {"copy", "flac"}:
+        if audio is not None and audio.codec == "flac" and audio_save_codec in {"copy", "flac"}:
             return ".flac"
-        if audio is not None and audio["codec"] == "eac3" and audio_save_codec in {"copy", "eac3"}:
+        if audio is not None and audio.codec == "eac3" and audio_save_codec in {"copy", "eac3"}:
             return ".mkv"
         return ".m4a"
 
     if output_format != "infer":
         return f".{output_format}"
-    if audio is not None and audio["codec"] == "flac":
+    if audio is not None and audio.codec == "flac":
         return ".mkv"
     return ".mp4"
 
@@ -255,10 +255,10 @@ def freeze_video_stream(video: VideoUrlMeta | None, index: int | None) -> VideoS
     assert index is not None
     return VideoStream(
         index=index,
-        codec=video["codec"],
-        width=video["width"],
-        height=video["height"],
-        quality=video["quality"],
+        codec=video.codec,
+        width=video.width,
+        height=video.height,
+        quality=video.quality,
     )
 
 
@@ -268,8 +268,8 @@ def freeze_audio_stream(audio: AudioUrlMeta | None, index: int | None) -> AudioS
     assert index is not None
     return AudioStream(
         index=index,
-        codec=audio["codec"],
-        quality=audio["quality"],
+        codec=audio.codec,
+        quality=audio.quality,
     )
 
 
@@ -277,8 +277,8 @@ def should_attach_hvc1_tag(video: VideoUrlMeta | None, video_save_codec: str) ->
     """Whether the output needs the Apple-compatible hvc1 tag."""
     return (
         video is not None
-        and video["quality"] != 126
-        and (video_save_codec == "hevc" or (video_save_codec == "copy" and video["codec"] == "hevc"))
+        and video.quality != 126
+        and (video_save_codec == "hevc" or (video_save_codec == "copy" and video.codec == "hevc"))
     )
 
 

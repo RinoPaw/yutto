@@ -100,7 +100,7 @@ def _video_streams(items: list[dict[str, Any]]) -> list[VideoUrlMeta]:
     return [
         VideoUrlMeta(
             url=item["base_url"],
-            mirrors=item["backup_url"] if item["backup_url"] is not None else [],
+            mirrors=tuple(item["backup_url"] or ()),
             codec=video_codec_map[item["codecid"]],
             width=item["width"],
             height=item["height"],
@@ -114,7 +114,7 @@ def _audio_streams(items: list[dict[str, Any]]) -> list[AudioUrlMeta]:
     return [
         AudioUrlMeta(
             url=item["base_url"],
-            mirrors=item["backup_url"] if item["backup_url"] is not None else [],
+            mirrors=tuple(item["backup_url"] or ()),
             codec=audio_codec_map[item["codecid"]],
             width=0,
             height=0,
@@ -131,7 +131,7 @@ def _append_dolby_audio(audios: list[AudioUrlMeta], dash: dict[str, Any]) -> Non
     audios.extend(
         AudioUrlMeta(
             url=item["base_url"],
-            mirrors=item["backup_url"] if item["backup_url"] is not None else [],
+            mirrors=tuple(item["backup_url"] or ()),
             codec="eac3",
             width=0,
             height=0,
@@ -149,7 +149,7 @@ def _append_flac_audio(audios: list[AudioUrlMeta], dash: dict[str, Any]) -> None
     audios.append(
         AudioUrlMeta(
             url=item["base_url"],
-            mirrors=item["backup_url"] if item["backup_url"] is not None else [],
+            mirrors=tuple(item["backup_url"] or ()),
             codec="flac",
             width=0,
             height=0,
