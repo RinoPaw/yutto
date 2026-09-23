@@ -9,7 +9,7 @@ from returns.result import Success
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
 from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeason, UgcVideo
 from yutto.parser import parse
-from yutto.scope import Scope
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.source import (
     AmbiguousEpisodeSource,
     AmbiguousSeasonSource,
@@ -30,8 +30,12 @@ if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
 
 _NOT_FOUND = {"code": -404, "message": "啥都木有"}
-_DEFAULT_SCOPE = Scope()
+_DEFAULT_SCOPE = Scope(parent=ROOT_SCOPE)
 _EXECUTION = cast("ExecutionScope", None)
+
+
+def _scope(values: dict[str, object]) -> Scope:
+    return Scope(values, parent=ROOT_SCOPE)
 
 
 def _parse(value: str) -> Any:
@@ -230,7 +234,7 @@ def test_bangumi_filters_extra_preview_and_then_selects(monkeypatch: pytest.Monk
         }
     ]
     _install_fetcher_stub(monkeypatch, {"pgc/view/web/season": response})
-    scope = Scope(
+    scope = _scope(
         {
             "selection.expression": "1~-1",
             "selection.with_extra_episodes": True,
@@ -268,11 +272,11 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
     assert isinstance(source, UgcVideoSource)
     result = asyncio.run(source.resolve(_EXECUTION, _DEFAULT_SCOPE))
     assert isinstance(result.media, UgcVideo)
-    assert [page.page for page in result.media.items] == [2]
+    assert [page.index for page in result.media.items] == [2]
 
-    result = asyncio.run(source.resolve(_EXECUTION, Scope({"selection.expression": "3,5,1,3"})))
+    result = asyncio.run(source.resolve(_EXECUTION, _scope({"selection.expression": "3,5,1,3"})))
     assert isinstance(result.media, UgcVideo)
-    assert [page.page for page in result.media.items] == [3, 1]
+    assert [page.index for page in result.media.items] == [3, 1]
 
 
 @pytest.mark.parametrize(
@@ -294,7 +298,7 @@ def test_episode_selection_targets_whole_season(
         else _cheese_season_response("101", "102", "103")
     )
     _install_fetcher_stub(monkeypatch, {response_key: response})
-    result = asyncio.run(source.resolve(_EXECUTION, Scope({"selection.expression": "3,1,3"})))
+    result = asyncio.run(source.resolve(_EXECUTION, _scope({"selection.expression": "3,1,3"})))
     assert isinstance(result.media, expected_type)
     assert [item.episode_id for item in result.media.items] == [EpisodeId("103"), EpisodeId("101")]
 
