@@ -66,8 +66,8 @@ def _display_group(ancestry: MediaAncestry) -> str | None:
     return None
 
 
-def _has_media_items(media: Media | None) -> bool:
-    return media is not None and next(iter_media_items(media), None) is not None
+def _has_media_items(media: Media) -> bool:
+    return next(iter_media_items(media), None) is not None
 
 
 def _report_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
@@ -144,8 +144,7 @@ class DownloadManager:
             async with scope_factory.open(parameter_scope) as execution:
                 result = await self.resolve_scope(execution, parameter_scope)
                 failures.extend(result.failures)
-                if result.media is not None:
-                    media.append(result.media)
+                media.append(result.media)
 
         if failures and not any(_has_media_items(item) for item in media):
             _raise_all_resolve_failures(tuple(failures))
@@ -166,8 +165,6 @@ class DownloadManager:
         scope: Scope,
     ) -> tuple[ItemResult, ...]:
         result = await self.resolve_scope(execution, scope)
-        if result.media is None:
-            return ()
 
         subpath_template = str(scope.output.subpath_template)
         path_entries = resolve_media_paths(result.media, subpath_template=subpath_template)
@@ -274,9 +271,6 @@ class DownloadManager:
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
         result = await source.resolve(execution, scope)
-        if result.media is None and not result.failures:
-            raise TypeError(f"{type(source).__name__}.resolve() returned no media")
-
         _report_resolve_failures(result.failures)
         return result
 
