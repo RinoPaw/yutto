@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 _EXECUTION = cast("ExecutionScope", None)
 
 
-def _scope(*, since: str, before: str, expression: str = "~") -> Scope:
+def _scope(*, since: int, before: int, expression: str = "~") -> Scope:
     return Scope(
         {
             "selection.expression": expression,
@@ -69,7 +69,7 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
     result = asyncio.run(
         UgcSeriesSource(id=SeriesId("456")).resolve(
             _EXECUTION,
-            _scope(since="2024-02-01", before="2024-03-01"),
+            _scope(since=1_706_745_600, before=1_709_251_200),
         )
     )
 
@@ -124,7 +124,7 @@ def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: 
     result = asyncio.run(
         UgcSpaceSource(id=MId("123")).resolve(
             _EXECUTION,
-            _scope(since="2024-02-01", before="2024-03-01", expression="2"),
+            _scope(since=1_706_745_600, before=1_709_251_200, expression="2"),
         )
     )
 
