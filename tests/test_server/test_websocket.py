@@ -11,10 +11,11 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin
 
-from yutto.core.request import DownloadRequest
+from yutto.cli.settings import YuttoConfig
 from yutto.core.result import DownloadResult, ResolveResult
 from yutto.runtime import TaskContext, TaskRuntime, TaskSnapshot, TaskState, monotonic_seq_allocator
-from yutto.server.service import ServerPolicy, ServerPolicyOptions
+from yutto.scope import Scope
+from yutto.server.service import ServerPolicy, ServerPolicyOptions, scope_parser_from_settings
 from yutto.server.websocket import (
     REQUEST_REJECTED_ERROR,
     WebSocketServerOptions,
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 class FakeDownloadTaskApi:
     def __init__(self, *, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
-        self.runtime = TaskRuntime[DownloadRequest, DownloadResult](
+        self.runtime = TaskRuntime[Scope, DownloadResult](
             self._run,
             task_id_factory=lambda: "task-1",
             seq_allocator=seq_allocator,
@@ -48,16 +49,16 @@ class FakeDownloadTaskApi:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, DownloadResult]:
-        return await self.runtime.submit(request)
+    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, DownloadResult]:
+        return await self.runtime.submit(scope)
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None:
+    def get(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None:
         return self.runtime.get(task_id)
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, DownloadResult], ...]:
+    def list(self) -> tuple[TaskSnapshot[Scope, DownloadResult], ...]:
         return self.runtime.list()
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None:
+    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None:
         return await self.runtime.cancel(task_id)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
@@ -66,7 +67,7 @@ class FakeDownloadTaskApi:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, request: DownloadRequest, context: TaskContext) -> DownloadResult:
+    async def _run(self, scope: Scope, context: TaskContext) -> DownloadResult:
         await self.release.wait()
         context.emit("progress", {"current": 1, "total": 1})
         return DownloadResult()
@@ -77,7 +78,7 @@ class FakeResolveTaskApi:
         self.release = asyncio.Event()
         self.item_count = item_count
         ids = count(1)
-        self.runtime = TaskRuntime[DownloadRequest, ResolveResult](
+        self.runtime = TaskRuntime[Scope, ResolveResult](
             self._run,
             task_id_factory=lambda: f"resolve-{next(ids)}",
             seq_allocator=seq_allocator,
@@ -89,16 +90,16 @@ class FakeResolveTaskApi:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, ResolveResult]:
-        return await self.runtime.submit(request)
+    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, ResolveResult]:
+        return await self.runtime.submit(scope)
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None:
+    def get(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None:
         return self.runtime.get(task_id)
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, ResolveResult], ...]:
+    def list(self) -> tuple[TaskSnapshot[Scope, ResolveResult], ...]:
         return self.runtime.list()
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None:
+    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None:
         return await self.runtime.cancel(task_id)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
@@ -107,7 +108,7 @@ class FakeResolveTaskApi:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, request: DownloadRequest, context: TaskContext) -> ResolveResult:
+    async def _run(self, scope: Scope, context: TaskContext) -> ResolveResult:
         await self.release.wait()
         for index in range(self.item_count):
             context.emit("item_listed", {"avid": str(index), "url": f"https://example.com/{index}"})
@@ -137,7 +138,7 @@ async def start_server(
     token: str = "test-token",
     service: FakeDownloadTaskApi | None = None,
     resolve_service: FakeResolveTaskApi | None = None,
-    prepare_request: Callable[[DownloadRequest], DownloadRequest] | None = None,
+    prepare_scope: Callable[[Scope], Scope] | None = None,
 ) -> tuple[YuttoWebSocketServer, FakeDownloadTaskApi, str]:
     service = service or FakeDownloadTaskApi()
     server = YuttoWebSocketServer(
@@ -148,7 +149,8 @@ async def start_server(
             port=0,
             allowed_origins=allowed_origins,
         ),
-        prepare_request=prepare_request,
+        prepare_scope=prepare_scope,
+        parse_scope=scope_parser_from_settings(YuttoConfig()),
         resolve_service=resolve_service,
     )
     await server.start()
@@ -244,7 +246,7 @@ async def test_server_info_and_exact_origin_allowlist():
                     {
                         "request": {
                             "source": {"url": "BV1xx"},
-                            "resources": {"cover": False, "save_cover": True},
+                            "resources": {"unknown": True},
                         }
                     },
                 )
@@ -305,7 +307,7 @@ async def test_server_policy_rejects_invalid_requests_before_task_submission(
     server, _, uri = await start_server(
         service=download_service,
         resolve_service=resolve_service,
-        prepare_request=policy.prepare_request,
+        prepare_scope=policy.prepare_scope,
     )
     try:
         async with connect(uri, proxy=None) as connection:
@@ -362,7 +364,7 @@ async def test_download_task_lifecycle_replay_and_live_notifications():
             await connection.send(rpc_request(4, "task.get", {"task_id": "task-1"}))
             completed = (await receive_json(connection))["result"]
             assert completed["state"] == "completed"
-            assert completed["payload"]["source"]["url"].endswith("BV1xx")
+            assert completed["payload"]["source"]["value"].endswith("BV1xx")
             assert completed["result"] == {"items": []}
 
             await connection.send(rpc_request(5, "task.list"))
