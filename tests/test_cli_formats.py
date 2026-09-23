@@ -10,22 +10,26 @@ import yutto.cli.formats as formats_module
 from yutto.cli.compat import normalize_argv
 from yutto.cli.formats import (
     FormatListingEntry,
-    build_format_probe_request,
+    build_format_probe_scope,
     format_grouped_manifest_lines,
     format_index_ranges,
     format_manifest_lines,
 )
 from yutto.cli.parser import build_parser
-from yutto.core.request import DownloadRequest
 from yutto.downloader.selector import select_streams
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest
+from yutto.scope import ROOT_SCOPE, Scope
 from yutto.types import AId, CId
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.types import AudioUrlMeta, VideoUrlMeta
+
+
+def _scope(values: dict[str, object] | None = None) -> Scope:
+    return Scope(values, parent=ROOT_SCOPE)
 
 
 def test_download_parser_accepts_preview_formats():
@@ -42,30 +46,28 @@ def test_download_parser_rejects_removed_list_formats_alias():
     assert exit_info.value.code == 2
 
 
-def test_format_probe_request_fetches_only_stream_resources():
-    request = DownloadRequest.model_validate(
+def test_format_probe_scope_fetches_only_stream_resources():
+    scope = _scope(
         {
-            "source": {"url": "BV1xx411c7mD"},
-            "resources": {
-                "metadata": True,
-                "ai_translation_language": "en",
-            },
+            "source.value": "BV1xx411c7mD",
+            "resource.metadata": True,
+            "resource.ai_translation_language": "en",
         }
     )
 
-    probe = build_format_probe_request(request)
+    probe = build_format_probe_scope(scope)
 
-    assert probe.resources.video is True
-    assert probe.resources.audio is True
-    assert probe.resources.danmaku is False
-    assert probe.resources.subtitle is False
-    assert probe.resources.metadata is False
-    assert probe.resources.cover is False
-    assert probe.resources.chapter_info is False
-    assert probe.resources.save_cover is False
-    assert probe.resources.ai_translation_language == "en"
-    assert request.resources.metadata is True
-    assert request.resources.cover is True
+    assert probe.resource.video is True
+    assert probe.resource.audio is True
+    assert probe.resource.danmaku is False
+    assert probe.resource.subtitle is False
+    assert probe.resource.metadata is False
+    assert probe.resource.cover is False
+    assert probe.resource.chapter_info is False
+    assert probe.resource.save_cover is False
+    assert probe.resource.ai_translation_language == "en"
+    assert scope.resource.metadata is True
+    assert scope.resource.cover is True
 
 
 def test_format_manifest_lines_use_legacy_style_without_urls():
@@ -128,14 +130,15 @@ def test_format_manifest_lines_mark_exact_download_selection():
         "quality": 30280,
     }
     manifest = ResourceManifest(videos=(video_4k, video_1080p), audios=(audio,))
-    request = DownloadRequest.model_validate(
+    scope = _scope(
         {
-            "source": {"url": "BV1xx411c7mD"},
-            "stream": {"video_quality": 80, "video_download_codec": "avc"},
+            "source.value": "BV1xx411c7mD",
+            "stream.video_quality": 80,
+            "stream.video_codec": "avc:copy",
         }
     )
 
-    selection = select_streams(manifest, request)
+    selection = select_streams(manifest, scope)
     rendered = format_manifest_lines(manifest, selection)
 
     selected_lines = [line for line in rendered if line.startswith("*")]
@@ -272,17 +275,12 @@ def test_grouped_format_listing_separates_different_displayed_mirror_counts():
 
 
 def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pytest.MonkeyPatch):
-    request = DownloadRequest.model_validate(
-        {
-            "source": {"url": "BV1xx411c7mD"},
-            "network": {"fetch_workers": 2},
-        }
-    )
+    scope = _scope({"source.value": "BV1xx411c7mD", "network.fetch_workers": 2})
     items = tuple(
         UgcPage(
+            index=index,
             metadata=ItemMetaData(title=f"P{index}"),
             aid=AId("1"),
-            page=index,
             cid=CId(str(index)),
         )
         for index in range(1, 6)
@@ -291,9 +289,9 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
     max_active = 0
 
     async def fake_resolve_resource_manifest(
-        _scope: object,
+        _execution: object,
         _item: UgcPage,
-        _request: DownloadRequest,
+        _scope: Scope,
     ) -> ResourceManifest:
         nonlocal active, max_active
         active += 1
@@ -308,7 +306,7 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
         formats_module.resolve_format_manifests(
             cast("ExecutionScope", object()),
             items,
-            request,
+            scope,
         )
     )
 
@@ -317,7 +315,7 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
 
 
 def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.MonkeyPatch):
-    captured: list[list[DownloadRequest]] = []
+    captured: list[list[Scope]] = []
 
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1xx411c7mD", "--preview-formats"])
     monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
@@ -325,7 +323,7 @@ def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         main_module,
         "run_preview_formats",
-        lambda _scope_factory, requests, _renderer: captured.append(requests),
+        lambda _scope_factory, scopes, _renderer: captured.append(scopes),
     )
     monkeypatch.setattr(
         main_module.FFmpeg,
@@ -341,4 +339,4 @@ def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.Monk
     main_module.main()
 
     assert len(captured) == 1
-    assert [request.source.url for request in captured[0]] == ["BV1xx411c7mD"]
+    assert [scope.source.value for scope in captured[0]] == ["BV1xx411c7mD"]
