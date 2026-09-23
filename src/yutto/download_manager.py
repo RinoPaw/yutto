@@ -7,7 +7,15 @@ from typing import TYPE_CHECKING
 from yutto.auth import validate_user_info
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
-from yutto.core.result import DownloadResult, ItemResult, ResolveFailure, ResolveFailureStep, ResolveResult
+from yutto.core.result import (
+    DownloadResult,
+    ItemFailure,
+    ItemResult,
+    ItemState,
+    ResolveFailure,
+    ResolveFailureStep,
+    ResolveResult,
+)
 from yutto.downloader.downloader import process_download
 from yutto.downloader.path_leases import DownloadPathLeasePool
 from yutto.downloader.planner import resolve_output_directories
@@ -212,6 +220,14 @@ class DownloadManager:
                     manifest = await resolve_resource_manifest(execution, item, scope)
                 except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError) as error:
                     emit_download_report(error.message, ReportLevel.ERROR)
+                    results[index] = ItemResult(
+                        state=ItemState.FAILED,
+                        failure=ItemFailure(
+                            type=type(error).__name__,
+                            message=error.message,
+                            code=error.code.value,
+                        ),
+                    )
                     if index + 1 < len(start_turns):
                         start_turns[index + 1].set()
                     return

@@ -26,6 +26,7 @@ class ArtifactKind(StrEnum):
 class ItemState(StrEnum):
     DONE = "done"
     SKIPPED = "skipped"
+    FAILED = "failed"
 
 
 class ItemSkipReason(StrEnum):
@@ -38,18 +39,42 @@ class Artifact(_ResultModel):
     path: Path
 
 
+class ItemFailure(_ResultModel):
+    type: str
+    message: str
+    code: int | str
+
+
 class ItemResult(_ResultModel):
     state: ItemState
-    output_path: Path
+    output_path: Path | None = None
     skip_reason: ItemSkipReason | None = None
+    failure: ItemFailure | None = None
     artifacts: tuple[Artifact, ...] = Field(default_factory=tuple)
 
     @model_validator(mode="after")
-    def validate_skip_reason(self) -> Self:
-        if self.state is ItemState.DONE and self.skip_reason is not None:
-            raise ValueError("done item must not have a skip reason")
-        if self.state is ItemState.SKIPPED and self.skip_reason is None:
-            raise ValueError("skipped item must have a skip reason")
+    def validate_state(self) -> Self:
+        if self.state is ItemState.DONE:
+            if self.output_path is None:
+                raise ValueError("done item must have an output path")
+            if self.skip_reason is not None:
+                raise ValueError("done item must not have a skip reason")
+            if self.failure is not None:
+                raise ValueError("done item must not have a failure")
+        elif self.state is ItemState.SKIPPED:
+            if self.output_path is None:
+                raise ValueError("skipped item must have an output path")
+            if self.skip_reason is None:
+                raise ValueError("skipped item must have a skip reason")
+            if self.failure is not None:
+                raise ValueError("skipped item must not have a failure")
+        elif self.state is ItemState.FAILED:
+            if self.output_path is not None:
+                raise ValueError("failed item must not have an output path")
+            if self.skip_reason is not None:
+                raise ValueError("failed item must not have a skip reason")
+            if self.failure is None:
+                raise ValueError("failed item must have a failure")
         return self
 
     @property
