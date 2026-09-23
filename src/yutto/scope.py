@@ -17,6 +17,7 @@ class _Missing:
 
 
 MISSING = _Missing()
+_DEFAULT_PARENT = object()
 
 ScopeText: TypeAlias = str | None | _Missing
 ScopeBool: TypeAlias = bool | None | _Missing
@@ -255,8 +256,9 @@ class Scope:
     每个 Scope 只保存当前层显式设置的字段。访问 ``scope.spec.field`` 时只解析这个字段，
     如果当前层是 ``MISSING``，就沿 parent 链继续查找，因此子层只覆盖自己真正设置的字段。
 
-    ``MISSING`` 表示当前层没有定义该字段；``None`` / ``False`` 等显式值会正常遮蔽父作用域。
-    外部来源必须在创建 Scope 前把自己的命名转换成这里的权威路径。
+    未显式指定 parent 的 Scope 自动继承 ROOT_SCOPE。``MISSING`` 只表示当前层没有定义该字段；
+    ``None`` / ``False`` 等显式值会正常遮蔽父作用域。外部来源必须在创建 Scope 前把自己的命名
+    转换成这里的权威路径。
     """
 
     parent: Scope | None
@@ -273,10 +275,13 @@ class Scope:
     def __init__(
         self,
         values: Mapping[str, Any] | None = None,
-        parent: Scope | None = None,
+        parent: Scope | None | object = _DEFAULT_PARENT,
         **overrides: Any,
     ) -> None:
-        object.__setattr__(self, "parent", parent)
+        resolved_parent = ROOT_SCOPE if parent is _DEFAULT_PARENT else parent
+        if resolved_parent is not None and not isinstance(resolved_parent, Scope):
+            raise TypeError("parent must be Scope or None")
+        object.__setattr__(self, "parent", resolved_parent)
 
         supplied = dict(values or {})
         supplied.update(overrides)
@@ -398,3 +403,72 @@ class Scope:
         values = self.parent.flatten(stop_at=stop_at) if self.parent is not None else {}
         values.update(self.values)
         return values
+
+
+# 应用默认值只在这里定义。没有默认值的字段（例如 source.value）继续保持 MISSING。
+ROOT_SCOPE = Scope(
+    {
+        "selection.expression": None,
+        "selection.with_extra_episodes": False,
+        "selection.skip_preview": False,
+        "selection.published_since": None,
+        "selection.published_before": None,
+        "runtime.jobs": 1,
+        "runtime.ffmpeg_path": None,
+        "runtime.preview_formats": False,
+        "runtime.no_color": False,
+        "runtime.no_progress": False,
+        "runtime.debug": False,
+        "auth.cookie": "",
+        "auth.file": None,
+        "auth.profile": "default",
+        "auth.sessdata": "",
+        "auth.login_strict": False,
+        "auth.vip_strict": False,
+        "auth.mode": "terminal",
+        "auth.poll_interval": 2.0,
+        "auth.timeout": 180,
+        "resource.video": True,
+        "resource.audio": True,
+        "resource.danmaku": True,
+        "resource.subtitle": True,
+        "resource.metadata": False,
+        "resource.cover": True,
+        "resource.chapter_info": True,
+        "resource.save_cover": False,
+        "resource.ai_translation_language": None,
+        "stream.video_quality": 127,
+        "stream.audio_quality": 30251,
+        "stream.video_codec": "avc:copy",
+        "stream.audio_codec": "mp4a:copy",
+        "stream.video_codec_priority": None,
+        "output.format": "infer",
+        "output.audio_only_format": "infer",
+        "output.directory": Path(),
+        "output.temporary_directory": None,
+        "output.overwrite": False,
+        "output.subpath_template": "{auto}",
+        "output.metadata_premiered_format": "%Y-%m-%d",
+        "network.proxy": "auto",
+        "network.fetch_workers": 8,
+        "network.download_workers": 8,
+        "network.block_size": 0.5,
+        "network.download_interval": 0,
+        "network.banned_mirrors_pattern": None,
+        "danmaku.format": "ass",
+        "danmaku.font_size": None,
+        "danmaku.font": "SimHei",
+        "danmaku.opacity": 0.8,
+        "danmaku.display_region_ratio": 1.0,
+        "danmaku.speed": 1.0,
+        "danmaku.block_top": False,
+        "danmaku.block_bottom": False,
+        "danmaku.block_scroll": False,
+        "danmaku.block_reverse": False,
+        "danmaku.block_fixed": False,
+        "danmaku.block_special": False,
+        "danmaku.block_colorful": False,
+        "danmaku.block_keyword_patterns": None,
+    },
+    parent=None,
+)

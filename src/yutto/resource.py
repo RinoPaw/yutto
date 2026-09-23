@@ -16,7 +16,7 @@ from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
 from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.media.codec import audio_codec_map, video_codec_map
-from yutto.scope import MISSING, Scope
+from yutto.scope import Scope
 from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.functional import data_has_chained_keys
 
@@ -43,36 +43,36 @@ class ResourceManifest:
 
 
 def wants_video(scope: Scope) -> bool:
-    return _flag(scope.resource.video, True)
+    return bool(scope.resource.video)
 
 
 def wants_audio(scope: Scope) -> bool:
-    return _flag(scope.resource.audio, True)
+    return bool(scope.resource.audio)
 
 
 def wants_danmaku(scope: Scope) -> bool:
-    return _flag(scope.resource.danmaku, True)
+    return bool(scope.resource.danmaku)
 
 
 def wants_subtitle(scope: Scope) -> bool:
-    return _flag(scope.resource.subtitle, True)
+    return bool(scope.resource.subtitle)
 
 
 def wants_metadata(scope: Scope) -> bool:
-    return _flag(scope.resource.metadata, False)
+    return bool(scope.resource.metadata)
 
 
 def wants_cover(scope: Scope) -> bool:
-    return _flag(scope.resource.cover, True)
+    return bool(scope.resource.cover)
 
 
 def wants_chapter_info(scope: Scope) -> bool:
-    return _flag(scope.resource.chapter_info, True)
+    return bool(scope.resource.chapter_info)
 
 
 def should_save_cover(scope: Scope) -> bool:
     cover = wants_cover(scope)
-    save_cover = _flag(scope.resource.save_cover, False)
+    save_cover = bool(scope.resource.save_cover)
     if save_cover and not cover:
         raise ValueError("save_cover requires cover")
     if cover and not any(
@@ -91,15 +91,9 @@ def should_save_cover(scope: Scope) -> bool:
 
 def resolve_danmaku_format(scope: Scope) -> DanmakuSaveType:
     value = scope.danmaku.format
-    if value is MISSING:
-        return cast("DanmakuSaveType", "ass")
     if value not in {"xml", "ass", "protobuf"}:
         raise ValueError(f"unsupported danmaku format: {value}")
     return cast("DanmakuSaveType", value)
-
-
-def _flag(value: object, default: bool) -> bool:
-    return default if value is MISSING else bool(value)
 
 
 def _video_streams(items: list[dict[str, Any]]) -> list[VideoUrlMeta]:
@@ -331,8 +325,8 @@ async def resolve_resource_manifest(
     cover = wants_cover(scope)
     chapter_info = wants_chapter_info(scope)
     ai_translation_language = scope.resource.ai_translation_language
-    if ai_translation_language is MISSING:
-        ai_translation_language = None
+    if ai_translation_language is not None and not isinstance(ai_translation_language, str):
+        raise ValueError("ai_translation_language must be a string or null")
 
     videos: list[VideoUrlMeta] = []
     audios: list[AudioUrlMeta] = []
@@ -346,7 +340,7 @@ async def resolve_resource_manifest(
                 execution,
                 aid,
                 item.cid,
-                cast("str | None", ai_translation_language),
+                ai_translation_language,
             )
         if chapter_info:
             chapter_info_url = get_player_info_url(aid, item.cid, wbi=False)

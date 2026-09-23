@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
-from yutto.scope import MISSING, Scope
+from yutto.scope import Scope
 from yutto.utils.fetcher import (
     DEFAULT_FETCH_WORKERS,
     cookies_from_auth,
@@ -59,8 +59,6 @@ class ExecutionScope:
 
 def resolve_network_proxy(scope: Scope) -> str:
     value = scope.network.proxy
-    if value is MISSING:
-        return "auto"
     if not isinstance(value, str):
         raise ValueError("proxy must be a string")
     return value
@@ -75,8 +73,6 @@ def resolve_download_workers(scope: Scope) -> int:
 
 
 def _resolve_worker_count(value: object, name: str) -> int:
-    if value is MISSING:
-        return DEFAULT_FETCH_WORKERS
     if isinstance(value, bool):
         raise ValueError(f"{name} must be at least 1")
     try:

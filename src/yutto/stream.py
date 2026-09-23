@@ -27,25 +27,29 @@ from yutto.media.quality import (
     video_quality_map,
     video_quality_priority_default,
 )
-from yutto.scope import MISSING
+from yutto.scope import ROOT_SCOPE
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from yutto.scope import Scope
 
-DEFAULT_VIDEO_QUALITY: VideoQuality = 127
-DEFAULT_AUDIO_QUALITY: AudioQuality = 30251
-DEFAULT_VIDEO_DOWNLOAD_CODEC: VideoCodec = "avc"
-DEFAULT_VIDEO_SAVE_CODEC = "copy"
-DEFAULT_AUDIO_DOWNLOAD_CODEC: AudioCodec = "mp4a"
-DEFAULT_AUDIO_SAVE_CODEC = "copy"
+DEFAULT_VIDEO_QUALITY = cast("VideoQuality", ROOT_SCOPE.stream.video_quality)
+DEFAULT_AUDIO_QUALITY = cast("AudioQuality", ROOT_SCOPE.stream.audio_quality)
+
+_default_video_codec = ROOT_SCOPE.stream.video_codec
+assert isinstance(_default_video_codec, str)
+_default_video_download_codec, DEFAULT_VIDEO_SAVE_CODEC = _default_video_codec.split(":", maxsplit=1)
+DEFAULT_VIDEO_DOWNLOAD_CODEC = cast("VideoCodec", _default_video_download_codec)
+
+_default_audio_codec = ROOT_SCOPE.stream.audio_codec
+assert isinstance(_default_audio_codec, str)
+_default_audio_download_codec, DEFAULT_AUDIO_SAVE_CODEC = _default_audio_codec.split(":", maxsplit=1)
+DEFAULT_AUDIO_DOWNLOAD_CODEC = cast("AudioCodec", _default_audio_download_codec)
 
 
 def resolve_video_quality(scope: Scope) -> VideoQuality:
     value = scope.stream.video_quality
-    if value is MISSING:
-        return DEFAULT_VIDEO_QUALITY
     if isinstance(value, bool) or not isinstance(value, int) or value not in video_quality_priority_default:
         raise ValueError(f"unsupported video quality: {value}")
     return cast("VideoQuality", value)
@@ -53,28 +57,20 @@ def resolve_video_quality(scope: Scope) -> VideoQuality:
 
 def resolve_audio_quality(scope: Scope) -> AudioQuality:
     value = scope.stream.audio_quality
-    if value is MISSING:
-        return DEFAULT_AUDIO_QUALITY
     if isinstance(value, bool) or not isinstance(value, int) or value not in audio_quality_priority_default:
         raise ValueError(f"unsupported audio quality: {value}")
     return cast("AudioQuality", value)
 
 
 def resolve_video_codecs(scope: Scope) -> tuple[VideoCodec, str]:
-    value = scope.stream.video_codec
-    if value is MISSING:
-        return DEFAULT_VIDEO_DOWNLOAD_CODEC, DEFAULT_VIDEO_SAVE_CODEC
-    download_codec, save_codec = _split_codec_pair(value, "vcodec")
+    download_codec, save_codec = _split_codec_pair(scope.stream.video_codec, "vcodec")
     if download_codec not in video_codec_priority_default:
         raise ValueError(f"unsupported video download codec: {download_codec}")
     return cast("VideoCodec", download_codec), save_codec
 
 
 def resolve_audio_codecs(scope: Scope) -> tuple[AudioCodec, str]:
-    value = scope.stream.audio_codec
-    if value is MISSING:
-        return DEFAULT_AUDIO_DOWNLOAD_CODEC, DEFAULT_AUDIO_SAVE_CODEC
-    download_codec, save_codec = _split_codec_pair(value, "acodec")
+    download_codec, save_codec = _split_codec_pair(scope.stream.audio_codec, "acodec")
     if download_codec not in audio_codec_priority_default:
         raise ValueError(f"unsupported audio download codec: {download_codec}")
     return cast("AudioCodec", download_codec), save_codec
@@ -82,7 +78,7 @@ def resolve_audio_codecs(scope: Scope) -> tuple[AudioCodec, str]:
 
 def resolve_video_codec_priority(scope: Scope) -> Sequence[VideoCodec] | None:
     value = scope.stream.video_codec_priority
-    if value is MISSING or value is None:
+    if value is None:
         return None
     if not isinstance(value, list) or not value:
         raise ValueError("video codec priority must be a non-empty list")

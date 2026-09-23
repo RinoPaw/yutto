@@ -49,7 +49,7 @@ from yutto.media import (
     UgcVideo,
     UgcWatchLater,
 )
-from yutto.scope import MISSING, Scope
+from yutto.scope import Scope
 from yutto.selection import Selection, parse_selection
 from yutto.types import (
     AId,
@@ -109,26 +109,17 @@ class _FilteredUgcVideo:
     source: AvId
 
 
-def _scope_bool(value: object, default: bool = False) -> bool:
-    return default if value is MISSING else bool(value)
-
-
 def _selection(scope: Scope) -> Selection | None:
     expression = scope.selection.expression
-    if expression is MISSING or expression is None:
-        return None
-    return parse_selection(str(expression))
+    return None if expression is None else parse_selection(str(expression))
 
 
 def _publication_time_filter(scope: Scope) -> PublicationTimeFilter | None:
     since = scope.selection.published_since
     before = scope.selection.published_before
-    if since is MISSING and before is MISSING:
+    if since is None and before is None:
         return None
-    return PublicationTimeFilter.from_strings(
-        None if since is MISSING else since,
-        None if before is MISSING else before,
-    )
+    return PublicationTimeFilter.from_strings(since, before)
 
 
 def _all_items_scope(scope: Scope) -> Scope:
@@ -357,9 +348,9 @@ class BangumiEpisodeSource(MediaSource):
             return MediaResolveResult(media=episode)
 
         episode_items = indexed_bangumi_episode_items(
-            result, with_extra_episodes=_scope_bool(scope.selection.with_extra_episodes)
+            result, with_extra_episodes=bool(scope.selection.with_extra_episodes)
         )
-        if _scope_bool(scope.selection.skip_preview):
+        if scope.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
         episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
         episode_items = _apply_selection(episode_items, selection)
@@ -379,9 +370,9 @@ class BangumiSeasonSource(MediaSource):
         season_id = await get_season_id_by_media(execution, self.id) if isinstance(self.id, MediaId) else self.id
         result = await get_bangumi_season(execution, season_id)
         episode_items = indexed_bangumi_episode_items(
-            result, with_extra_episodes=_scope_bool(scope.selection.with_extra_episodes)
+            result, with_extra_episodes=bool(scope.selection.with_extra_episodes)
         )
-        if _scope_bool(scope.selection.skip_preview):
+        if scope.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
         episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
         episode_items = _apply_selection(episode_items, _selection(scope))
@@ -470,7 +461,7 @@ class UgcVideoSource(MediaSource):
 
     async def _resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
         resolved_aid, video_info = await get_ugc_video_info(execution, self.id)
-        tags = await get_ugc_video_tags(execution, resolved_aid) if _scope_bool(scope.resource.metadata) else []
+        tags = await get_ugc_video_tags(execution, resolved_aid) if scope.resource.metadata else []
         dateadded = get_time_stamp_by_now()
         page_items: list[dict[str, Any]] = list(video_info["pages"])
         selection = _selection(scope)

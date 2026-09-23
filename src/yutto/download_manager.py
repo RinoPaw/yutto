@@ -84,16 +84,13 @@ def _raise_all_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> No
     raise ResolveFailedError(f"解析未得到任何条目：{len(failures)} 个子项解析失败（详见日志）")
 
 
-def _scope_bool(value: object, default: bool = False) -> bool:
-    return default if value is MISSING else bool(value)
-
-
-def _scope_int(value: object, default: int = 0) -> int:
-    if value is MISSING:
-        return default
+def _int_value(value: object, name: str) -> int:
     if isinstance(value, bool):
-        raise ValueError("expected an integer Scope value")
-    return int(value)
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer") from None
 
 
 class DownloadManager:
@@ -172,8 +169,7 @@ class DownloadManager:
         if result.media is None:
             return ()
 
-        template = scope.output.subpath_template
-        subpath_template = "{auto}" if template is MISSING else str(template)
+        subpath_template = str(scope.output.subpath_template)
         path_entries = resolve_media_paths(result.media, subpath_template=subpath_template)
         download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
@@ -183,12 +179,12 @@ class DownloadManager:
             prepared.append((entry.ancestry, entry.item, path, current_display_group))
             current_display_group = _display_group(entry.ancestry)
 
-        download_interval = _scope_int(scope.network.download_interval)
+        download_interval = _int_value(scope.network.download_interval, "download_interval")
         if download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {download_interval} 秒")
 
-        login_strict = _scope_bool(scope.auth.login_strict)
-        vip_strict = _scope_bool(scope.auth.vip_strict)
+        login_strict = bool(scope.auth.login_strict)
+        vip_strict = bool(scope.auth.vip_strict)
         output_directory, temporary_directory = resolve_output_directories(scope)
 
         results: list[ItemResult | None] = [None] * len(prepared)
@@ -271,8 +267,8 @@ class DownloadManager:
         if not await validate_user_info(
             execution,
             {
-                "is_login": _scope_bool(scope.auth.login_strict),
-                "vip_status": _scope_bool(scope.auth.vip_strict),
+                "is_login": bool(scope.auth.login_strict),
+                "vip_status": bool(scope.auth.vip_strict),
             },
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")

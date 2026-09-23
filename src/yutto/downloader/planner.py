@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, cast
 
 from yutto.downloader.selector import select_streams
 from yutto.resource import should_save_cover, wants_audio, wants_metadata, wants_video
-from yutto.scope import MISSING, Scope
+from yutto.scope import Scope
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
-from yutto.utils.time import TIME_DATE_FMT, TIME_FULL_FMT
+from yutto.utils.time import TIME_FULL_FMT
 
 if TYPE_CHECKING:
     from yutto.resource import ResourceManifest
@@ -135,7 +135,7 @@ class DownloadPlanner:
             else requested_audio_save_codec
         )
 
-        fixed = _bool(scope.danmaku.block_fixed, False)
+        fixed = bool(scope.danmaku.block_fixed)
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
@@ -147,21 +147,21 @@ class DownloadPlanner:
             danmaku_width=video_meta["width"] if video_meta is not None else 1920,
             danmaku_height=video_meta["height"] if video_meta is not None else 1080,
             metadata=MetadataPlan(
-                premiered=_text(scope.output.metadata_premiered_format, TIME_DATE_FMT),
+                premiered=_text(scope.output.metadata_premiered_format),
                 dateadded=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
                 font_size=_optional_int(scope.danmaku.font_size),
-                font=_text(scope.danmaku.font, "SimHei"),
-                opacity=_float(scope.danmaku.opacity, 0.8),
-                display_region_ratio=_float(scope.danmaku.display_region_ratio, 1.0),
-                speed=_float(scope.danmaku.speed, 1.0),
-                block_top=_bool(scope.danmaku.block_top, False) or fixed,
-                block_bottom=_bool(scope.danmaku.block_bottom, False) or fixed,
-                block_scroll=_bool(scope.danmaku.block_scroll, False),
-                block_reverse=_bool(scope.danmaku.block_reverse, False),
-                block_special=_bool(scope.danmaku.block_special, False),
-                block_colorful=_bool(scope.danmaku.block_colorful, False),
+                font=_text(scope.danmaku.font),
+                opacity=_float(scope.danmaku.opacity),
+                display_region_ratio=_float(scope.danmaku.display_region_ratio),
+                speed=_float(scope.danmaku.speed),
+                block_top=bool(scope.danmaku.block_top) or fixed,
+                block_bottom=bool(scope.danmaku.block_bottom) or fixed,
+                block_scroll=bool(scope.danmaku.block_scroll),
+                block_reverse=bool(scope.danmaku.block_reverse),
+                block_special=bool(scope.danmaku.block_special),
+                block_colorful=bool(scope.danmaku.block_colorful),
                 block_keyword_patterns=_patterns(scope.danmaku.block_keyword_patterns),
             ),
         )
@@ -177,7 +177,7 @@ class DownloadPlanner:
             requires_audio_transcode_notice=(
                 audio_meta is not None and audio_save_codec not in {requested_audio_save_codec, "copy"}
             ),
-            overwrite=_bool(scope.output.overwrite, False),
+            overwrite=bool(scope.output.overwrite),
             block_size=resolve_block_size_bytes(scope),
             banned_mirrors_pattern=_optional_text(scope.network.banned_mirrors_pattern),
             resources=resource_plan,
@@ -186,16 +186,14 @@ class DownloadPlanner:
 
 def resolve_output_directories(scope: Scope) -> tuple[Path, Path]:
     directory = scope.output.directory
-    output_directory = Path() if directory is MISSING or directory is None else Path(directory)
+    output_directory = Path() if directory is None else Path(directory)
     temporary = scope.output.temporary_directory
-    temporary_directory = output_directory if temporary is MISSING or temporary is None else Path(temporary)
+    temporary_directory = output_directory if temporary is None else Path(temporary)
     return output_directory, temporary_directory
 
 
 def resolve_block_size_bytes(scope: Scope) -> int:
     value = scope.network.block_size
-    if value is MISSING:
-        return 512 * 1024
     if value is None or isinstance(value, bool):
         raise ValueError("block_size must be a positive number")
     size = int(float(value) * MEBIBYTE)
@@ -232,8 +230,8 @@ def resolve_output_suffix(
     audio: AudioUrlMeta | None,
     scope: Scope,
 ) -> str:
-    output_format = _text(scope.output.format, "infer")
-    audio_only_format = _text(scope.output.audio_only_format, "infer")
+    output_format = _text(scope.output.format)
+    audio_only_format = _text(scope.output.audio_only_format)
     _, audio_save_codec = resolve_audio_codecs(scope)
     if video is None:
         if audio_only_format != "infer":
@@ -302,36 +300,28 @@ def resolve_audio_save_codec(audio_codec: str, audio_save_codec: str, container_
     return audio_save_codec
 
 
-def _bool(value: object, default: bool) -> bool:
-    return default if value is MISSING else bool(value)
-
-
-def _text(value: object, default: str) -> str:
-    if value is MISSING:
-        return default
+def _text(value: object) -> str:
     if not isinstance(value, str):
         raise ValueError("expected a string Scope value")
     return value
 
 
 def _optional_text(value: object) -> str | None:
-    if value is MISSING or value is None:
+    if value is None:
         return None
     if not isinstance(value, str):
         raise ValueError("expected a string Scope value")
     return value
 
 
-def _float(value: object, default: float) -> float:
-    if value is MISSING:
-        return default
+def _float(value: object) -> float:
     if value is None or isinstance(value, bool):
         raise ValueError("expected a numeric Scope value")
     return float(value)
 
 
 def _optional_int(value: object) -> int | None:
-    if value is MISSING or value is None:
+    if value is None:
         return None
     if isinstance(value, bool):
         raise ValueError("expected an integer Scope value")
@@ -339,7 +329,7 @@ def _optional_int(value: object) -> int | None:
 
 
 def _patterns(value: object) -> tuple[str, ...]:
-    if value is MISSING or value is None:
+    if value is None:
         return ()
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError("danmaku block keyword patterns must be a list of strings")
