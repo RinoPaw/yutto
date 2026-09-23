@@ -75,13 +75,6 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 
-_EXPECTED_UGC_RESOLVE_ERRORS = (
-    NotFoundError,
-    NoAccessPermissionError,
-    HttpStatusError,
-    UnSupportedTypeError,
-)
-
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MediaResolveFailure:
@@ -94,39 +87,6 @@ class MediaResolveFailure:
 class MediaResolveResult:
     media: Media | None
     failures: tuple[MediaResolveFailure, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedUgcVideo:
-    index: int
-    source: AvId
-    media: UgcVideo
-
-
-@dataclass(frozen=True, slots=True)
-class _FilteredUgcVideo:
-    index: int
-    source: AvId
-
-
-def _publication_time_filter(scope: Scope) -> PublicationTimeFilter | None:
-    since = scope.selection.published_since
-    before = scope.selection.published_before
-    if since is None and before is None:
-        return None
-    return PublicationTimeFilter.from_strings(since, before)
-
-
-def _all_items_scope(scope: Scope) -> Scope:
-    return Scope({"selection.expression": "~"}, parent=scope)
-
-
-def _candidate_publication_time(item: dict[str, Any]) -> int | None:
-    for key in ("pub_time", "release_date", "pubdate", "pubtime", "ctime", "created"):
-        value = item.get(key)
-        if value is not None:
-            return int(value)
-    return None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -171,125 +131,20 @@ class MediaSource(ABC):
         return [genre] if isinstance(genre, str) and genre else []
 
 
-async def _resolve_bangumi_or_cheese(
-    bangumi: MediaSource,
-    cheese: MediaSource,
-    execution: ExecutionScope,
-    scope: Scope,
-) -> MediaResolveResult:
-    results = await asyncio.gather(
-        bangumi.resolve(execution, scope),
-        cheese.resolve(execution, scope),
-        return_exceptions=True,
-    )
-    successes: list[MediaResolveResult] = []
-    failures: list[BaseException] = []
-    for result in results:
-        if isinstance(result, BaseException):
-            failures.append(result)
-        else:
-            successes.append(result)
-
-    if len(successes) > 1:
-        raise WrongArgumentError("该 ID 同时存在于番剧和课程命名空间，无法自动判断")
-    if successes:
-        return successes[0]
-
-    for failure in failures:
-        if not isinstance(failure, NotFoundError):
-            raise failure
-    raise NotFoundError("未找到对应的番剧或课程内容")
+def _publication_time_filter(scope: Scope) -> PublicationTimeFilter | None:
+    since = scope.selection.published_since
+    before = scope.selection.published_before
+    if since is None and before is None:
+        return None
+    return PublicationTimeFilter.from_strings(since, before)
 
 
-class AmbiguousEpisodeSource(MediaSource):
-    id: EpisodeId
-
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        return await _resolve_bangumi_or_cheese(
-            BangumiEpisodeSource(id=self.id), CheeseEpisodeSource(id=self.id), execution, scope
-        )
-
-
-class AmbiguousSeasonSource(MediaSource):
-    id: SeasonId
-
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        return await _resolve_bangumi_or_cheese(
-            BangumiSeasonSource(id=self.id), CheeseSeasonSource(id=self.id), execution, scope
-        )
-
-
-def bangumi_episode_items(result: dict[str, Any]) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = list(result["episodes"])
-    for section in result.get("section", []):
-        if section["type"] != 5:
-            items += section["episodes"]
-    return items
-
-
-def parse_bangumi_episode(index: int, item: dict[str, Any]) -> BangumiEpisode:
-    long_title = item["long_title"]
-    title = f"{item['title']} {long_title}" if long_title else item["title"]
-    aid = AId(item["aid"]) if item.get("aid") is not None else BvId(item["bvid"]).as_aid()
-    return BangumiEpisode(
-        index=index,
-        episode_id=EpisodeId(str(item["id"])),
-        aid=aid,
-        cid=CId(item["cid"]),
-        is_preview=item.get("badge") == "预告",
-        metadata=ItemMetaData(
-            title=title,
-            show_title=item.get("share_copy", title),
-            plot=item.get("share_copy", ""),
-            thumb=item.get("cover", ""),
-            premiered=int(item.get("pub_time", 0)),
-            duration=int(item.get("duration", 0)) // 1000,
-            dateadded=get_time_stamp_by_now(),
-        ),
-    )
-
-
-def make_bangumi_season_metadata(result: dict[str, Any]) -> ItemMetaData:
-    up_info = result.get("up_info") or {}
-    mid_value = up_info.get("mid")
-    mid = MId(str(mid_value)) if mid_value is not None else None
-    owner = str(up_info.get("uname", ""))
-    actors: list[Actor] = []
-    if owner:
-        actors.append(
-            Actor(
-                name=owner,
-                role="UP主",
-                thumb=str(up_info.get("avatar", "")),
-                profile=f"https://space.bilibili.com/{mid}" if mid is not None else "",
-                order=0,
-            )
-        )
-    return ItemMetaData(
-        title=str(result.get("title", "")),
-        plot=str(result.get("evaluate", "")),
-        mid=mid,
-        owner=owner,
-        genre=list(result.get("styles") or []),
-        actors=actors,
-    )
-
-
-def indexed_bangumi_episode_items(result: dict[str, Any], *, with_extra_episodes: bool) -> list[tuple[int, dict[str, Any]]]:
-    all_items = bangumi_episode_items(result)
-    indexed_items = list(enumerate(all_items, start=1))
-    if with_extra_episodes:
-        return indexed_items
-    return indexed_items[: len(result["episodes"])]
-
-
-def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: ItemMetaData) -> None:
-    episode.metadata.mid = episode.metadata.mid or metadata.mid
-    episode.metadata.owner = episode.metadata.owner or metadata.owner
-    if not episode.metadata.genre:
-        episode.metadata.genre = list(metadata.genre)
-    if not episode.metadata.actors:
-        episode.metadata.actors = list(metadata.actors)
+def _candidate_publication_time(item: dict[str, Any]) -> int | None:
+    for key in ("pub_time", "release_date", "pubdate", "pubtime", "ctime", "created"):
+        value = item.get(key)
+        if value is not None:
+            return int(value)
+    return None
 
 
 def _resolve_selection_indexes(selection: Selection, total: int) -> tuple[int, ...]:
@@ -324,128 +179,29 @@ def _filter_indexed_by_publication_time(
     ]
 
 
-class BangumiEpisodeSource(MediaSource):
-    id: EpisodeId
-
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        result = await get_bangumi_season_by_episode(execution, self.id)
-        all_episode_items = list(enumerate(bangumi_episode_items(result), start=1))
-        anchor_item = next(((index, entry) for index, entry in all_episode_items if entry["id"] == int(self.id.value)), None)
-        if anchor_item is None:
-            raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
-
-        season_metadata = make_bangumi_season_metadata(result)
-        expression = scope.selection.expression
-        selection = parse_selection(str(expression)) if expression is not None else None
-        if selection is None:
-            index, item = anchor_item
-            episode = parse_bangumi_episode(index, item)
-            _apply_container_metadata_to_episode(episode, season_metadata)
-            return MediaResolveResult(media=episode)
-
-        episode_items = indexed_bangumi_episode_items(
-            result, with_extra_episodes=bool(scope.selection.with_extra_episodes)
-        )
-        if scope.selection.skip_preview:
-            episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-        episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
-        episode_items = _apply_selection(episode_items, selection)
-        return MediaResolveResult(
-            media=BangumiSeason(
-                season_id=SeasonId(str(result["season_id"])),
-                metadata=season_metadata,
-                items=[parse_bangumi_episode(index, item) for index, item in episode_items],
-            )
-        )
+_EXPECTED_UGC_RESOLVE_ERRORS = (
+    NotFoundError,
+    NoAccessPermissionError,
+    HttpStatusError,
+    UnSupportedTypeError,
+)
 
 
-class BangumiSeasonSource(MediaSource):
-    id: SeasonId | MediaId
-
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        season_id = await get_season_id_by_media(execution, self.id) if isinstance(self.id, MediaId) else self.id
-        result = await get_bangumi_season(execution, season_id)
-        episode_items = indexed_bangumi_episode_items(
-            result, with_extra_episodes=bool(scope.selection.with_extra_episodes)
-        )
-        if scope.selection.skip_preview:
-            episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
-        episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
-        expression = scope.selection.expression
-        selection = parse_selection(str(expression)) if expression is not None else None
-        episode_items = _apply_selection(episode_items, selection)
-        return MediaResolveResult(
-            media=BangumiSeason(
-                season_id=season_id,
-                metadata=make_bangumi_season_metadata(result),
-                items=[parse_bangumi_episode(index, item) for index, item in episode_items],
-            )
-        )
+@dataclass(frozen=True, slots=True)
+class _ResolvedUgcVideo:
+    index: int
+    source: AvId
+    media: UgcVideo
 
 
-def parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
-    title = item["title"]
-    return CheeseEpisode(
-        index=index,
-        episode_id=EpisodeId(str(item["id"])),
-        aid=AId(item["aid"]),
-        cid=CId(item["cid"]),
-        metadata=ItemMetaData(
-            title=title,
-            show_title=title,
-            plot=title,
-            thumb=item.get("cover", ""),
-            premiered=int(item.get("release_date", 0)),
-            duration=int(item.get("duration", 0)),
-            dateadded=get_time_stamp_by_now(),
-        ),
-    )
+@dataclass(frozen=True, slots=True)
+class _FilteredUgcVideo:
+    index: int
+    source: AvId
 
 
-def _cheese_episode_items(result: dict[str, Any], scope: Scope) -> list[tuple[int, dict[str, Any]]]:
-    items = list(enumerate(result["episodes"], start=1))
-    items = _filter_indexed_by_publication_time(items, _publication_time_filter(scope))
-    expression = scope.selection.expression
-    selection = parse_selection(str(expression)) if expression is not None else None
-    return _apply_selection(items, selection)
-
-
-class CheeseEpisodeSource(MediaSource):
-    id: EpisodeId
-
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        result = await get_cheese_season_by_episode(execution, self.id)
-        indexed_items = list(enumerate(result["episodes"], start=1))
-        anchor_item = next(((index, entry) for index, entry in indexed_items if entry["id"] == int(self.id.value)), None)
-        if anchor_item is None:
-            raise NotFoundError(f"无法在课程 {result['title']} 中找到剧集 ep{self.id}")
-        if scope.selection.expression is None:
-            index, item = anchor_item
-            return MediaResolveResult(media=parse_cheese_episode(index, item))
-        episode_items = _cheese_episode_items(result, scope)
-        season_id = result.get("season_id", self.id.value)
-        return MediaResolveResult(
-            media=CheeseSeason(
-                season_id=SeasonId(str(season_id)),
-                metadata=ItemMetaData(title=str(result.get("title", ""))),
-                items=[parse_cheese_episode(index, item) for index, item in episode_items],
-            )
-        )
-
-
-class CheeseSeasonSource(MediaSource):
-    id: SeasonId
-
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        result = await get_cheese_season(execution, self.id)
-        episode_items = _cheese_episode_items(result, scope)
-        return MediaResolveResult(
-            media=CheeseSeason(
-                season_id=self.id,
-                metadata=ItemMetaData(title=str(result.get("title", ""))),
-                items=[parse_cheese_episode(index, item) for index, item in episode_items],
-            )
-        )
+def _all_items_scope(scope: Scope) -> Scope:
+    return Scope({"selection.expression": "~"}, parent=scope)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -756,6 +512,251 @@ class UgcWatchLaterSource(MediaSource):
         return MediaResolveResult(
             media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=[item.media for item in resolved]),
             failures=failures,
+        )
+
+
+def bangumi_episode_items(result: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = list(result["episodes"])
+    for section in result.get("section", []):
+        if section["type"] != 5:
+            items += section["episodes"]
+    return items
+
+
+def parse_bangumi_episode(index: int, item: dict[str, Any]) -> BangumiEpisode:
+    long_title = item["long_title"]
+    title = f"{item['title']} {long_title}" if long_title else item["title"]
+    aid = AId(item["aid"]) if item.get("aid") is not None else BvId(item["bvid"]).as_aid()
+    return BangumiEpisode(
+        index=index,
+        episode_id=EpisodeId(str(item["id"])),
+        aid=aid,
+        cid=CId(item["cid"]),
+        is_preview=item.get("badge") == "预告",
+        metadata=ItemMetaData(
+            title=title,
+            show_title=item.get("share_copy", title),
+            plot=item.get("share_copy", ""),
+            thumb=item.get("cover", ""),
+            premiered=int(item.get("pub_time", 0)),
+            duration=int(item.get("duration", 0)) // 1000,
+            dateadded=get_time_stamp_by_now(),
+        ),
+    )
+
+
+def make_bangumi_season_metadata(result: dict[str, Any]) -> ItemMetaData:
+    up_info = result.get("up_info") or {}
+    mid_value = up_info.get("mid")
+    mid = MId(str(mid_value)) if mid_value is not None else None
+    owner = str(up_info.get("uname", ""))
+    actors: list[Actor] = []
+    if owner:
+        actors.append(
+            Actor(
+                name=owner,
+                role="UP主",
+                thumb=str(up_info.get("avatar", "")),
+                profile=f"https://space.bilibili.com/{mid}" if mid is not None else "",
+                order=0,
+            )
+        )
+    return ItemMetaData(
+        title=str(result.get("title", "")),
+        plot=str(result.get("evaluate", "")),
+        mid=mid,
+        owner=owner,
+        genre=list(result.get("styles") or []),
+        actors=actors,
+    )
+
+
+def indexed_bangumi_episode_items(result: dict[str, Any], *, with_extra_episodes: bool) -> list[tuple[int, dict[str, Any]]]:
+    all_items = bangumi_episode_items(result)
+    indexed_items = list(enumerate(all_items, start=1))
+    if with_extra_episodes:
+        return indexed_items
+    return indexed_items[: len(result["episodes"])]
+
+
+def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: ItemMetaData) -> None:
+    episode.metadata.mid = episode.metadata.mid or metadata.mid
+    episode.metadata.owner = episode.metadata.owner or metadata.owner
+    if not episode.metadata.genre:
+        episode.metadata.genre = list(metadata.genre)
+    if not episode.metadata.actors:
+        episode.metadata.actors = list(metadata.actors)
+
+
+class BangumiEpisodeSource(MediaSource):
+    id: EpisodeId
+
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+        result = await get_bangumi_season_by_episode(execution, self.id)
+        all_episode_items = list(enumerate(bangumi_episode_items(result), start=1))
+        anchor_item = next(((index, entry) for index, entry in all_episode_items if entry["id"] == int(self.id.value)), None)
+        if anchor_item is None:
+            raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
+
+        season_metadata = make_bangumi_season_metadata(result)
+        expression = scope.selection.expression
+        selection = parse_selection(str(expression)) if expression is not None else None
+        if selection is None:
+            index, item = anchor_item
+            episode = parse_bangumi_episode(index, item)
+            _apply_container_metadata_to_episode(episode, season_metadata)
+            return MediaResolveResult(media=episode)
+
+        episode_items = indexed_bangumi_episode_items(
+            result, with_extra_episodes=bool(scope.selection.with_extra_episodes)
+        )
+        if scope.selection.skip_preview:
+            episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
+        episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
+        episode_items = _apply_selection(episode_items, selection)
+        return MediaResolveResult(
+            media=BangumiSeason(
+                season_id=SeasonId(str(result["season_id"])),
+                metadata=season_metadata,
+                items=[parse_bangumi_episode(index, item) for index, item in episode_items],
+            )
+        )
+
+
+class BangumiSeasonSource(MediaSource):
+    id: SeasonId | MediaId
+
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+        season_id = await get_season_id_by_media(execution, self.id) if isinstance(self.id, MediaId) else self.id
+        result = await get_bangumi_season(execution, season_id)
+        episode_items = indexed_bangumi_episode_items(
+            result, with_extra_episodes=bool(scope.selection.with_extra_episodes)
+        )
+        if scope.selection.skip_preview:
+            episode_items = [(index, item) for index, item in episode_items if item.get("badge") != "预告"]
+        episode_items = _filter_indexed_by_publication_time(episode_items, _publication_time_filter(scope))
+        expression = scope.selection.expression
+        selection = parse_selection(str(expression)) if expression is not None else None
+        episode_items = _apply_selection(episode_items, selection)
+        return MediaResolveResult(
+            media=BangumiSeason(
+                season_id=season_id,
+                metadata=make_bangumi_season_metadata(result),
+                items=[parse_bangumi_episode(index, item) for index, item in episode_items],
+            )
+        )
+
+
+def parse_cheese_episode(index: int, item: dict[str, Any]) -> CheeseEpisode:
+    title = item["title"]
+    return CheeseEpisode(
+        index=index,
+        episode_id=EpisodeId(str(item["id"])),
+        aid=AId(item["aid"]),
+        cid=CId(item["cid"]),
+        metadata=ItemMetaData(
+            title=title,
+            show_title=title,
+            plot=title,
+            thumb=item.get("cover", ""),
+            premiered=int(item.get("release_date", 0)),
+            duration=int(item.get("duration", 0)),
+            dateadded=get_time_stamp_by_now(),
+        ),
+    )
+
+
+def _cheese_episode_items(result: dict[str, Any], scope: Scope) -> list[tuple[int, dict[str, Any]]]:
+    items = list(enumerate(result["episodes"], start=1))
+    items = _filter_indexed_by_publication_time(items, _publication_time_filter(scope))
+    expression = scope.selection.expression
+    selection = parse_selection(str(expression)) if expression is not None else None
+    return _apply_selection(items, selection)
+
+
+class CheeseEpisodeSource(MediaSource):
+    id: EpisodeId
+
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+        result = await get_cheese_season_by_episode(execution, self.id)
+        indexed_items = list(enumerate(result["episodes"], start=1))
+        anchor_item = next(((index, entry) for index, entry in indexed_items if entry["id"] == int(self.id.value)), None)
+        if anchor_item is None:
+            raise NotFoundError(f"无法在课程 {result['title']} 中找到剧集 ep{self.id}")
+        if scope.selection.expression is None:
+            index, item = anchor_item
+            return MediaResolveResult(media=parse_cheese_episode(index, item))
+        episode_items = _cheese_episode_items(result, scope)
+        season_id = result.get("season_id", self.id.value)
+        return MediaResolveResult(
+            media=CheeseSeason(
+                season_id=SeasonId(str(season_id)),
+                metadata=ItemMetaData(title=str(result.get("title", ""))),
+                items=[parse_cheese_episode(index, item) for index, item in episode_items],
+            )
+        )
+
+
+class CheeseSeasonSource(MediaSource):
+    id: SeasonId
+
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+        result = await get_cheese_season(execution, self.id)
+        episode_items = _cheese_episode_items(result, scope)
+        return MediaResolveResult(
+            media=CheeseSeason(
+                season_id=self.id,
+                metadata=ItemMetaData(title=str(result.get("title", ""))),
+                items=[parse_cheese_episode(index, item) for index, item in episode_items],
+            )
+        )
+
+
+async def _resolve_bangumi_or_cheese(
+    bangumi: MediaSource,
+    cheese: MediaSource,
+    execution: ExecutionScope,
+    scope: Scope,
+) -> MediaResolveResult:
+    results = await asyncio.gather(
+        bangumi.resolve(execution, scope),
+        cheese.resolve(execution, scope),
+        return_exceptions=True,
+    )
+    successes: list[MediaResolveResult] = []
+    failures: list[BaseException] = []
+    for result in results:
+        if isinstance(result, BaseException):
+            failures.append(result)
+        else:
+            successes.append(result)
+
+    if len(successes) > 1:
+        raise WrongArgumentError("该 ID 同时存在于番剧和课程命名空间，无法自动判断")
+    if successes:
+        return successes[0]
+
+    for failure in failures:
+        if not isinstance(failure, NotFoundError):
+            raise failure
+    raise NotFoundError("未找到对应的番剧或课程内容")
+
+
+class AmbiguousEpisodeSource(MediaSource):
+    id: EpisodeId
+
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+        return await _resolve_bangumi_or_cheese(
+            BangumiEpisodeSource(id=self.id), CheeseEpisodeSource(id=self.id), execution, scope
+        )
+
+
+class AmbiguousSeasonSource(MediaSource):
+    id: SeasonId
+
+    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+        return await _resolve_bangumi_or_cheese(
+            BangumiSeasonSource(id=self.id), CheeseSeasonSource(id=self.id), execution, scope
         )
 
 
