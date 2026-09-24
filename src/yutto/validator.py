@@ -13,10 +13,9 @@ from yutto.core.execution import (
     resolve_network_proxy,
 )
 from yutto.downloader.planner import resolve_block_size_bytes
+from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
 from yutto.resource import resolve_danmaku_format, should_save_cover
-from yutto.scope import MISSING
 from yutto.stream import (
-    audio_codec_priority_default,
     resolve_audio_codecs,
     resolve_audio_quality,
     resolve_video_codec_priority,
@@ -62,9 +61,11 @@ def validate_download_scope(scope: Scope, ffmpeg: FFmpeg) -> None:
     resolve_danmaku_format(scope)
     resolve_video_quality(scope)
     resolve_audio_quality(scope)
+    resolve_output_format(scope.output.format)
+    resolve_audio_only_output_format(scope.output.audio_only_format)
 
     video_download_codec, video_save_codec = resolve_video_codecs(scope)
-    audio_download_codec, audio_save_codec = resolve_audio_codecs(scope)
+    _, audio_save_codec = resolve_audio_codecs(scope)
     priority = resolve_video_codec_priority(scope)
     if priority is not None:
         if len(priority) < len(video_codec_priority_default):
@@ -84,31 +85,9 @@ def validate_download_scope(scope: Scope, ffmpeg: FFmpeg) -> None:
                 video_save_codec, ", ".join(ffmpeg.video_encodecs + ["copy"])
             )
         )
-    if audio_download_codec not in audio_codec_priority_default:
-        raise ValueError(
-            "download_acodec 参数值（{}）不满足要求哦（允许值：{{{}}}）".format(
-                audio_download_codec, ", ".join(audio_codec_priority_default)
-            )
-        )
     if audio_save_codec not in ffmpeg.audio_encodecs + ["copy"]:
         raise ValueError(
             "save_acodec 参数值（{}）不满足要求哦（允许值：{{{}}}）".format(
                 audio_save_codec, ", ".join(ffmpeg.audio_encodecs + ["copy"])
             )
         )
-
-    output_format = scope.output.format
-    if output_format is not MISSING and output_format not in {"infer", "mp4", "mkv", "mov"}:
-        raise ValueError(f"unsupported output format: {output_format}")
-    audio_only_format = scope.output.audio_only_format
-    if audio_only_format is not MISSING and audio_only_format not in {
-        "infer",
-        "m4a",
-        "aac",
-        "mp3",
-        "flac",
-        "mp4",
-        "mkv",
-        "mov",
-    }:
-        raise ValueError(f"unsupported audio-only output format: {audio_only_format}")
