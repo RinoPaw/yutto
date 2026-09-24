@@ -13,7 +13,8 @@ from yutto.core.task_service import DownloadTaskService, ResolveTaskService
 from yutto.download_manager import DownloadManager
 from yutto.downloader.path_leases import DownloadPathLeasePool
 from yutto.runtime import TaskCapacityPool, monotonic_seq_allocator
-from yutto.server.service import ServerPolicy, ServerPolicyOptions, scope_parser_from_settings
+from yutto.server.request import scope_parser_from_settings
+from yutto.server.service import ServerPolicy, ServerPolicyOptions
 from yutto.server.websocket import WebSocketServerOptions, YuttoWebSocketServer
 from yutto.utils.console.logger import Logger
 from yutto.utils.ffmpeg import FFmpeg
