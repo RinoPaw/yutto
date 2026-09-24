@@ -20,6 +20,7 @@ from yutto.utils.functional import Singleton, as_sync
 
 if TYPE_CHECKING:
     from yutto.media.codec import VideoCodec
+    from yutto.media.quality import VideoQuality
 
 
 def make_ffmpeg(path: str) -> FFmpeg:
@@ -71,7 +72,7 @@ def make_audio() -> AudioUrlMeta:
     )
 
 
-def make_video(*, codec: VideoCodec = "hevc", quality: int = 80) -> VideoUrlMeta:
+def make_video(*, codec: VideoCodec = "hevc", quality: VideoQuality = 80) -> VideoUrlMeta:
     return VideoUrlMeta(
         url="https://example.com/video",
         mirrors=(),
