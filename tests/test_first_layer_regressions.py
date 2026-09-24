@@ -11,13 +11,13 @@ from yutto.api.player import get_subtitle_lines
 from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoConfig
 from yutto.exceptions import ApiResponseError, NoAccessPermissionError
-from yutto.media import Media
 from yutto.scope import ROOT_SCOPE, Scope
 from yutto.source import AmbiguousEpisodeSource, BangumiEpisodeSource, CheeseEpisodeSource, MediaResolveResult
 from yutto.types import EpisodeId
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
+    from yutto.media import Media
 
 _EXECUTION = cast("ExecutionScope", None)
 _SCOPE = Scope(parent=ROOT_SCOPE)
