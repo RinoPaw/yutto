@@ -36,8 +36,8 @@ def _paths(media: Media, *, template: str = "{auto}", source_index: int | None =
     ]
 
 
-def _entry(index: int, media: TMedia) -> MediaEntry[TMedia]:
-    return MediaEntry(index=index, media=media)
+def _entry(index: int, media: TMedia, *, display_title: str | None = None) -> MediaEntry[TMedia]:
+    return MediaEntry(index=index, media=media, display_title=display_title)
 
 
 def test_root_ugc_path_uses_original_page_count() -> None:
@@ -161,6 +161,28 @@ def test_nested_ugc_paths_follow_media_hierarchy() -> None:
         Path("收藏者的收藏夹/收藏夹/多P/第一段"),
         Path("收藏者的收藏夹/收藏夹/多P/第二段"),
     ]
+
+
+def test_relation_display_title_controls_container_view_without_mutating_media() -> None:
+    aid = AId("101")
+    page = UgcPage(aid=aid, cid=CId("101"), metadata=ItemMetaData(title="P1"))
+    video = UgcVideo(
+        aid=aid,
+        metadata=ItemMetaData(title="原始标题", owner="UP"),
+        items=(_entry(1, page),),
+    )
+    favourite = UgcFav(
+        fid=FId("88"),
+        metadata=ItemMetaData(title="收藏夹", owner="收藏者"),
+        items=(_entry(1, video, display_title="收藏里的标题"),),
+    )
+
+    resolved = resolve_media_paths(favourite)
+
+    assert [entry.path for entry in resolved] == [Path("收藏者的收藏夹/收藏夹/收藏里的标题")]
+    assert resolved[0].ancestry[-2].entry.display_title == "收藏里的标题"
+    assert video.metadata.title == "原始标题"
+    assert page.metadata.title == "P1"
 
 
 def test_space_and_watch_later_paths_keep_nested_page_layouts() -> None:
