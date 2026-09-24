@@ -716,14 +716,13 @@ async def _resolve_bangumi_or_cheese(
         else:
             successes.append(result)
 
+    for failure in failures:
+        if not isinstance(failure, NotFoundError):
+            raise failure
     if len(successes) > 1:
         raise WrongArgumentError("该 ID 同时存在于番剧和课程命名空间，无法自动判断")
     if successes:
         return successes[0]
-
-    for failure in failures:
-        if not isinstance(failure, NotFoundError):
-            raise failure
     raise NotFoundError("未找到对应的番剧或课程内容")
 
 
