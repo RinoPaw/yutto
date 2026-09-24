@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.media import Media, MediaItem
-    from yutto.source import MediaResolveFailure, MediaResolveResult
+    from yutto.source import MediaResolveDiagnostic, MediaResolveFailure, MediaResolveResult
 
 
 def show_batch_episode_title(
@@ -86,6 +86,23 @@ def _report_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
             f"{path}：{failure.error.message}",
             ReportLevel.ERROR,
         )
+
+
+def _report_resolve_diagnostics(diagnostics: tuple[MediaResolveDiagnostic, ...]) -> None:
+    for diagnostic in diagnostics:
+        if diagnostic.out_of_range:
+            emit_download_report(
+                "序号 {} 超出范围（1~{}），已忽略".format(
+                    ",".join(map(str, diagnostic.out_of_range)),
+                    diagnostic.total,
+                ),
+                ReportLevel.WARNING,
+            )
+        if diagnostic.empty:
+            emit_download_report(
+                "没有可供选择的项目" if diagnostic.total == 0 else "没有选中任何项目",
+                ReportLevel.WARNING,
+            )
 
 
 def _report_resource_manifest(manifest: ResourceManifest, item: MediaItem, scope: Scope) -> None:
@@ -351,6 +368,7 @@ class DownloadManager:
 
         result = await source.resolve(execution, scope)
         _report_resolve_failures(result.failures)
+        _report_resolve_diagnostics(result.diagnostics)
         return result
 
 
