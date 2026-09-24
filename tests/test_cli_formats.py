@@ -20,16 +20,39 @@ from yutto.downloader.selector import select_streams
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest
 from yutto.scope import ROOT_SCOPE, Scope
-from yutto.types import AId, CId
+from yutto.types import AId, AudioUrlMeta, CId, VideoUrlMeta
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.types import AudioUrlMeta, VideoUrlMeta
+    from yutto.media.codec import AudioCodec, VideoCodec
+    from yutto.media.quality import AudioQuality, VideoQuality
 
 
 def _scope(values: dict[str, object] | None = None) -> Scope:
     return Scope(values, parent=ROOT_SCOPE)
+
+
+def _video(
+    url: str,
+    *,
+    codec: VideoCodec = "avc",
+    width: int = 1920,
+    height: int = 1080,
+    quality: VideoQuality = 80,
+    mirrors: tuple[str, ...] = (),
+) -> VideoUrlMeta:
+    return VideoUrlMeta(url=url, mirrors=mirrors, codec=codec, width=width, height=height, quality=quality)
+
+
+def _audio(
+    url: str,
+    *,
+    codec: AudioCodec = "mp4a",
+    quality: AudioQuality = 30280,
+    mirrors: tuple[str, ...] = (),
+) -> AudioUrlMeta:
+    return AudioUrlMeta(url=url, mirrors=mirrors, codec=codec, width=0, height=0, quality=quality)
 
 
 def test_download_parser_accepts_preview_formats():
@@ -71,22 +94,15 @@ def test_format_probe_scope_fetches_only_stream_resources():
 
 
 def test_format_manifest_lines_use_legacy_style_without_urls():
-    video: VideoUrlMeta = {
-        "url": "https://signed.example/video",
-        "mirrors": ["https://mirror.example/video"],
-        "codec": "hevc",
-        "width": 3840,
-        "height": 2160,
-        "quality": 120,
-    }
-    audio: AudioUrlMeta = {
-        "url": "https://signed.example/audio",
-        "mirrors": [],
-        "codec": "mp4a",
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    video = _video(
+        "https://signed.example/video",
+        mirrors=("https://mirror.example/video",),
+        codec="hevc",
+        width=3840,
+        height=2160,
+        quality=120,
+    )
+    audio = _audio("https://signed.example/audio")
 
     rendered = "\n".join(format_manifest_lines(ResourceManifest(videos=(video,), audios=(audio,))))
 
@@ -105,30 +121,15 @@ def test_format_manifest_lines_use_legacy_style_without_urls():
 
 
 def test_format_manifest_lines_mark_exact_download_selection():
-    video_4k: VideoUrlMeta = {
-        "url": "https://signed.example/4k",
-        "mirrors": [],
-        "codec": "hevc",
-        "width": 3840,
-        "height": 2160,
-        "quality": 120,
-    }
-    video_1080p: VideoUrlMeta = {
-        "url": "https://signed.example/1080p",
-        "mirrors": [],
-        "codec": "avc",
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
-    audio: AudioUrlMeta = {
-        "url": "https://signed.example/audio",
-        "mirrors": [],
-        "codec": "mp4a",
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    video_4k = _video(
+        "https://signed.example/4k",
+        codec="hevc",
+        width=3840,
+        height=2160,
+        quality=120,
+    )
+    video_1080p = _video("https://signed.example/1080p")
+    audio = _audio("https://signed.example/audio")
     manifest = ResourceManifest(videos=(video_4k, video_1080p), audios=(audio,))
     scope = _scope(
         {
@@ -159,22 +160,15 @@ def test_format_index_ranges_compacts_contiguous_and_sparse_pages():
 def test_grouped_format_listing_merges_same_formats_even_when_urls_differ():
     manifests = []
     for index in range(1, 101):
-        video: VideoUrlMeta = {
-            "url": f"https://cdn{index}.example/video",
-            "mirrors": [f"https://mirror{index}.example/video"],
-            "codec": "hevc",
-            "width": 3840,
-            "height": 2160,
-            "quality": 120,
-        }
-        audio: AudioUrlMeta = {
-            "url": f"https://cdn{index}.example/audio",
-            "mirrors": [],
-            "codec": "mp4a",
-            "width": 0,
-            "height": 0,
-            "quality": 30280,
-        }
+        video = _video(
+            f"https://cdn{index}.example/video",
+            mirrors=(f"https://mirror{index}.example/video",),
+            codec="hevc",
+            width=3840,
+            height=2160,
+            quality=120,
+        )
+        audio = _audio(f"https://cdn{index}.example/audio")
         manifests.append(ResourceManifest(videos=(video,), audios=(audio,)))
 
     entries = tuple(
@@ -200,22 +194,14 @@ def test_grouped_format_listing_merges_same_formats_even_when_urls_differ():
 
 
 def test_grouped_format_listing_keeps_different_format_sets_separate():
-    video_4k: VideoUrlMeta = {
-        "url": "https://signed.example/4k",
-        "mirrors": [],
-        "codec": "hevc",
-        "width": 3840,
-        "height": 2160,
-        "quality": 120,
-    }
-    video_1080p: VideoUrlMeta = {
-        "url": "https://signed.example/1080p",
-        "mirrors": [],
-        "codec": "avc",
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
+    video_4k = _video(
+        "https://signed.example/4k",
+        codec="hevc",
+        width=3840,
+        height=2160,
+        quality=120,
+    )
+    video_1080p = _video("https://signed.example/1080p")
     entries = (
         FormatListingEntry(
             index=1,
@@ -245,22 +231,11 @@ def test_grouped_format_listing_keeps_different_format_sets_separate():
 
 
 def test_grouped_format_listing_separates_different_displayed_mirror_counts():
-    video_one_url: VideoUrlMeta = {
-        "url": "https://signed.example/one",
-        "mirrors": [],
-        "codec": "avc",
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
-    video_two_urls: VideoUrlMeta = {
-        "url": "https://signed.example/two",
-        "mirrors": ["https://mirror.example/two"],
-        "codec": "avc",
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
+    video_one_url = _video("https://signed.example/one")
+    video_two_urls = _video(
+        "https://signed.example/two",
+        mirrors=("https://mirror.example/two",),
+    )
     entries = (
         FormatListingEntry(index=1, title="P1", manifest=ResourceManifest(videos=(video_one_url,))),
         FormatListingEntry(index=2, title="P2", manifest=ResourceManifest(videos=(video_two_urls,))),
