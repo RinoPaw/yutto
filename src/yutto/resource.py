@@ -20,7 +20,7 @@ from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.scope import Scope
-    from yutto.types import AId, AudioUrlMeta, CId, EpisodeId, VideoUrlMeta
+    from yutto.types import AId, AudioUrlMeta, CId, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
 SubtitleResource: TypeAlias = tuple[str, str]
@@ -30,6 +30,9 @@ SubtitleResource: TypeAlias = tuple[str, str]
 class ResourceManifest:
     """Resolved facts for resources requested from one MediaItem; contains no fetched resource bodies."""
 
+    video_requested: bool = False
+    audio_requested: bool = False
+    subtitle_requested: bool = False
     videos: tuple[VideoUrlMeta, ...] = ()
     audios: tuple[AudioUrlMeta, ...] = ()
     subtitles: tuple[SubtitleResource, ...] = ()
@@ -97,15 +100,6 @@ def resolve_danmaku_format(scope: Scope) -> DanmakuSaveType:
     return cast("DanmakuSaveType", value)
 
 
-async def get_ugc_video_playurl(
-    scope: ExecutionScope,
-    aid: AId,
-    cid: CId,
-    ai_translation_language: str | None = None,
-) -> PlayUrlInfo:
-    return await get_ugc_playurl(scope, aid, cid, ai_translation_language)
-
-
 async def get_bangumi_video_playurl(
     scope: ExecutionScope,
     aid: AId,
@@ -115,15 +109,6 @@ async def get_bangumi_video_playurl(
     if play_url.is_drm:
         raise UnSupportedTypeError(f"该视频（{aid}, cid: {cid}）使用 DRM 保护，当前暂不支持处理 DRM 媒体")
     return play_url
-
-
-async def get_cheese_video_playurl(
-    scope: ExecutionScope,
-    aid: AId,
-    episode_id: EpisodeId,
-    cid: CId,
-) -> PlayUrlInfo:
-    return await get_cheese_playurl(scope, aid, episode_id, cid)
 
 
 async def _resolve_subtitles(
@@ -188,12 +173,7 @@ async def resolve_resource_manifest(
     if isinstance(item, UgcPage):
         aid = item.aid
         if video or audio:
-            play_url = await get_ugc_video_playurl(
-                execution,
-                aid,
-                item.cid,
-                ai_translation_language,
-            )
+            play_url = await get_ugc_playurl(execution, aid, item.cid, ai_translation_language)
             videos = play_url.videos
             audios = play_url.audios
             translation_languages = play_url.translation_languages
@@ -210,7 +190,7 @@ async def resolve_resource_manifest(
     elif isinstance(item, CheeseEpisode):
         aid = item.aid
         if video or audio:
-            play_url = await get_cheese_video_playurl(execution, aid, item.episode_id, item.cid)
+            play_url = await get_cheese_playurl(execution, aid, item.episode_id, item.cid)
             videos = play_url.videos
             audios = play_url.audios
             is_preview = play_url.is_preview
@@ -233,14 +213,12 @@ async def resolve_resource_manifest(
     danmaku_urls: tuple[str, ...] = ()
     if danmaku:
         danmaku_format = resolve_danmaku_format(scope)
-        danmaku_source_type, danmaku_urls = await _resolve_danmaku(
-            execution,
-            aid,
-            item.cid,
-            danmaku_format,
-        )
+        danmaku_source_type, danmaku_urls = await _resolve_danmaku(execution, aid, item.cid, danmaku_format)
 
     return ResourceManifest(
+        video_requested=video,
+        audio_requested=audio,
+        subtitle_requested=subtitle,
         videos=videos,
         audios=audios,
         subtitles=subtitles,

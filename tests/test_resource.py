@@ -25,11 +25,7 @@ def _scope(values: dict[str, object]) -> Scope:
 
 def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) -> None:
     aid = AId("808982399")
-    page = UgcPage(
-        aid=aid,
-        cid=CId(123),
-        metadata=ItemMetaData(title="P1"),
-    )
+    page = UgcPage(aid=aid, cid=CId(123), metadata=ItemMetaData(title="P1"))
     calls: list[tuple[Any, ...]] = []
 
     async def fake_playurl(*args: Any) -> PlayUrlInfo:
@@ -40,7 +36,7 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
         calls.append(args)
         return "xml", ("https://example.test/danmaku.xml",)
 
-    monkeypatch.setattr("yutto.resource.get_ugc_video_playurl", fake_playurl)
+    monkeypatch.setattr("yutto.resource.get_ugc_playurl", fake_playurl)
     monkeypatch.setattr("yutto.resource._resolve_danmaku", fake_danmaku)
 
     scope = _scope(
@@ -59,7 +55,33 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
     assert calls[0][2] == page.cid
     assert calls[1][1] == page.aid
     assert calls[1][2] == page.cid
+    assert manifest.video_requested is True
+    assert manifest.audio_requested is True
+    assert manifest.subtitle_requested is False
     assert manifest.danmaku_urls == ("https://example.test/danmaku.xml",)
+
+
+def test_resource_manifest_distinguishes_unrequested_from_requested_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = UgcPage(aid=AId("808982399"), cid=CId(123), metadata=ItemMetaData(title="P1"))
+
+    async def fake_playurl(*_args: Any) -> PlayUrlInfo:
+        return PlayUrlInfo(videos=(), audios=())
+
+    monkeypatch.setattr("yutto.resource.get_ugc_playurl", fake_playurl)
+    common = {
+        "resource.audio": False,
+        "resource.subtitle": False,
+        "resource.danmaku": False,
+        "resource.cover": False,
+        "resource.chapter_info": False,
+    }
+    requested = asyncio.run(resolve_resource_manifest(_EXECUTION, page, _scope({**common, "resource.video": True})))
+    unrequested = asyncio.run(resolve_resource_manifest(_EXECUTION, page, _scope({**common, "resource.video": False})))
+
+    assert requested.video_requested is True
+    assert requested.videos == ()
+    assert unrequested.video_requested is False
+    assert unrequested.videos == ()
 
 
 def test_resource_manifest_keeps_cover_as_url() -> None:
@@ -85,20 +107,11 @@ def test_resource_manifest_keeps_cover_as_url() -> None:
 
 
 def test_resource_resolution_returns_diagnostics_without_rendering_them(monkeypatch: pytest.MonkeyPatch) -> None:
-    page = UgcPage(
-        aid=AId("808982399"),
-        cid=CId(123),
-        metadata=ItemMetaData(title="P1"),
-    )
+    page = UgcPage(aid=AId("808982399"), cid=CId(123), metadata=ItemMetaData(title="P1"))
     language = TranslationLanguage(code="en", title="English")
 
     async def fake_playurl(*_args: Any) -> PlayUrlInfo:
-        return PlayUrlInfo(
-            videos=(),
-            audios=(),
-            is_preview=True,
-            translation_languages=(language,),
-        )
+        return PlayUrlInfo(videos=(), audios=(), is_preview=True, translation_languages=(language,))
 
     async def fake_subtitle_info(*_args: Any, **_kwargs: Any) -> SubtitleInfo:
         return SubtitleInfo(
@@ -106,7 +119,7 @@ def test_resource_resolution_returns_diagnostics_without_rendering_them(monkeypa
             invalid_languages=("ja-JP",),
         )
 
-    monkeypatch.setattr("yutto.resource.get_ugc_video_playurl", fake_playurl)
+    monkeypatch.setattr("yutto.resource.get_ugc_playurl", fake_playurl)
     monkeypatch.setattr("yutto.resource.get_subtitle_info", fake_subtitle_info)
 
     reports: list[str] = []

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from yutto.downloader.selector import select_streams
 from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
-from yutto.resource import resolve_danmaku_format, should_save_cover, wants_audio, wants_metadata, wants_video
+from yutto.resource import resolve_danmaku_format, should_save_cover, wants_metadata
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import TIME_FULL_FMT
 
@@ -117,12 +117,7 @@ class DownloadPlanner:
         audio_meta = selection.audio
         suffix = resolve_output_suffix(video_meta, audio_meta, scope)
         output_directory, temporary_directory = resolve_output_directories(scope)
-        paths = resolve_paths(
-            output_directory,
-            temporary_directory,
-            path,
-            suffix,
-        )
+        paths = resolve_paths(output_directory, temporary_directory, path, suffix)
 
         _, video_save_codec = resolve_video_codecs(scope)
         attach_hvc1_tag = should_attach_hvc1_tag(video_meta, video_save_codec)
@@ -171,7 +166,7 @@ class DownloadPlanner:
             paths=paths,
             video=freeze_video_stream(video_meta, selection.video_index),
             audio=freeze_audio_stream(audio_meta, selection.audio_index),
-            media_requested=wants_video(scope) or wants_audio(scope),
+            media_requested=resources.video_requested or resources.audio_requested,
             video_save_codec=video_save_codec,
             audio_save_codec=audio_save_codec,
             attach_hvc1_tag=attach_hvc1_tag,
@@ -203,12 +198,7 @@ def resolve_block_size_bytes(scope: Scope) -> int:
     return size
 
 
-def resolve_paths(
-    base_output_dir: Path,
-    base_temporary_dir: Path,
-    path: Path,
-    output_suffix: str,
-) -> DownloadPaths:
+def resolve_paths(base_output_dir: Path, base_temporary_dir: Path, path: Path, output_suffix: str) -> DownloadPaths:
     output_full_path = base_output_dir / path
     output_dir, filename = output_full_path.parent, output_full_path.name
     temporary_full_path = base_temporary_dir / path
@@ -226,11 +216,7 @@ def resolve_paths(
     )
 
 
-def resolve_output_suffix(
-    video: VideoUrlMeta | None,
-    audio: AudioUrlMeta | None,
-    scope: Scope,
-) -> str:
+def resolve_output_suffix(video: VideoUrlMeta | None, audio: AudioUrlMeta | None, scope: Scope) -> str:
     output_format = resolve_output_format(scope.output.format)
     audio_only_format = resolve_audio_only_output_format(scope.output.audio_only_format)
     _, audio_save_codec = resolve_audio_codecs(scope)
@@ -254,24 +240,14 @@ def freeze_video_stream(video: VideoUrlMeta | None, index: int | None) -> VideoS
     if video is None:
         return None
     assert index is not None
-    return VideoStream(
-        index=index,
-        codec=video.codec,
-        width=video.width,
-        height=video.height,
-        quality=video.quality,
-    )
+    return VideoStream(index=index, codec=video.codec, width=video.width, height=video.height, quality=video.quality)
 
 
 def freeze_audio_stream(audio: AudioUrlMeta | None, index: int | None) -> AudioStream | None:
     if audio is None:
         return None
     assert index is not None
-    return AudioStream(
-        index=index,
-        codec=audio.codec,
-        quality=audio.quality,
-    )
+    return AudioStream(index=index, codec=audio.codec, quality=audio.quality)
 
 
 def should_attach_hvc1_tag(video: VideoUrlMeta | None, video_save_codec: str) -> bool:

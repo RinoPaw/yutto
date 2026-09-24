@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from yutto.exceptions import CryptoError
-from yutto.resource import wants_audio, wants_video
 from yutto.stream import (
     gen_acodec_priority,
     gen_audio_quality_priority,
@@ -89,19 +88,21 @@ def select_streams(resources: ResourceManifest, scope: Scope) -> StreamSelection
     """Apply the active Scope's stream policy to one resolved manifest."""
     video_download_codec, _ = resolve_video_codecs(scope)
     audio_download_codec, _ = resolve_audio_codecs(scope)
-    video_candidate = select_video(
-        resources.videos,
-        resolve_video_quality(scope),
-        video_download_codec,
-        resolve_video_codec_priority(scope),
+    video = (
+        select_video(
+            resources.videos,
+            resolve_video_quality(scope),
+            video_download_codec,
+            resolve_video_codec_priority(scope),
+        )
+        if resources.video_requested
+        else None
     )
-    audio_candidate = select_audio(
-        resources.audios,
-        resolve_audio_quality(scope),
-        audio_download_codec,
+    audio = (
+        select_audio(resources.audios, resolve_audio_quality(scope), audio_download_codec)
+        if resources.audio_requested
+        else None
     )
-    video = video_candidate if wants_video(scope) else None
-    audio = audio_candidate if wants_audio(scope) else None
     return StreamSelection(
         video=video,
         audio=audio,
