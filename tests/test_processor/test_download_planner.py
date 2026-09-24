@@ -13,11 +13,11 @@ from yutto.downloader.executor import emit_streams_selected
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner
 from yutto.scope import Scope
 from yutto.stream import resolve_audio_codecs
+from yutto.types import VideoUrlMeta
 
 if TYPE_CHECKING:
     from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, VideoCodec
-    from yutto.types import VideoUrlMeta
 
 pytestmark = pytest.mark.processor
 
@@ -26,14 +26,14 @@ AudioOnlyFormat = Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "m
 
 
 def make_video(codec: VideoCodec = "avc") -> VideoUrlMeta:
-    return {
-        "url": "https://signed.example.test/video?token=video-secret",
-        "mirrors": ["https://mirror.example.test/video?token=mirror-secret"],
-        "codec": codec,
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
+    return VideoUrlMeta(
+        url="https://signed.example.test/video?token=video-secret",
+        mirrors=("https://mirror.example.test/video?token=mirror-secret",),
+        codec=codec,
+        width=1920,
+        height=1080,
+        quality=80,
+    )
 
 
 def make_plan(
@@ -115,7 +115,7 @@ def test_plan_selects_manifest_entries_without_copying_resource_urls(tmp_path: P
     assert plan.resources.danmaku.block_keyword_patterns == ("original-pattern",)
     assert "signed.example.test" not in repr(plan)
     assert "mirror.example.test" not in repr(plan)
-    assert manifest.videos[0]["url"].startswith("https://signed.example.test/")
+    assert manifest.videos[0].url.startswith("https://signed.example.test/")
 
 
 def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_path: Path):

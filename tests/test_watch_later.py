@@ -9,7 +9,6 @@ from returns.result import Success
 from yutto.exceptions import NotLoginError
 from yutto.scope import Scope
 from yutto.source import UgcWatchLaterSource
-from yutto.types import BilibiliId
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -27,7 +26,7 @@ def test_watch_later_not_login_propagates_root_source_failure(
         return Success({"code": code, "message": "账号未登录"})
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
-    source = UgcWatchLaterSource(id=BilibiliId("watchlater"))
+    source = UgcWatchLaterSource()
 
     with pytest.raises(NotLoginError) as raised:
         asyncio.run(source.resolve(_EXECUTION, Scope()))
