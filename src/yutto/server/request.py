@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from yutto.cli.settings import scope_from_config
 from yutto.downloader.planner import MEBIBYTE
@@ -116,11 +116,37 @@ def scope_parser_from_settings(settings: YuttoConfig) -> Callable[[object], Scop
     configured = Scope(configured_values)
 
     def parse(payload: object) -> Scope:
-        request = ScopeRequest.model_validate(payload)
+        try:
+            request = ScopeRequest.model_validate(payload)
+        except ValidationError as error:
+            raise ValueError(_request_validation_reason(error)) from error
         return Scope(_scope_values_from_request(request, configured), parent=configured)
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
+
+
+def _request_validation_reason(error: ValidationError) -> str:
+    """Project Pydantic diagnostics into the stable server wire contract."""
+    errors = error.errors(include_url=False, include_input=False)
+    if errors and all(detail["type"] == "extra_forbidden" for detail in errors):
+        sections: dict[str, list[str]] = {}
+        for detail in errors:
+            location = detail["loc"]
+            field = str(location[-1])
+            section = str(location[-2]) if len(location) > 1 else "request"
+            sections.setdefault(section, []).append(field)
+        if len(sections) == 1:
+            section, fields = next(iter(sections.items()))
+            return f"unknown {section} fields: {', '.join(fields)}"
+
+    if errors:
+        detail = errors[0]
+        location = ".".join(str(part) for part in detail["loc"]) or "request"
+        if detail["type"] == "missing":
+            return f"missing required field: {location}"
+        return f"invalid request field: {location}"
+    return "invalid request"
 
 
 def _scope_values_from_request(request: ScopeRequest, parent: Scope) -> dict[str, Any]:
