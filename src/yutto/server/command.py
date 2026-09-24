@@ -178,12 +178,12 @@ def _build_download_application(
 async def run_server_command(args: argparse.Namespace, settings: YuttoConfig) -> None:
     values = vars(args)
     configured_scope = scope_from_config(settings)
-    configured_jobs = resolve_runtime_options(configured_scope).jobs
+    configured_runtime = resolve_runtime_options(configured_scope)
     configured_fetch_workers = resolve_fetch_workers(configured_scope)
     configured_download_workers = resolve_download_workers(configured_scope)
 
     values.setdefault("request_settings", settings)
-    values.setdefault("ffmpeg_path", "ffmpeg")
+    values.setdefault("ffmpeg_path", configured_runtime.ffmpeg_path or "ffmpeg")
     values.setdefault("host", "127.0.0.1")
     values.setdefault("port", 11223)
     values.setdefault("allow_origin", ())
@@ -203,7 +203,7 @@ async def run_server_command(args: argparse.Namespace, settings: YuttoConfig) ->
     values.setdefault("max_fetch_workers", max(16, configured_fetch_workers))
     values.setdefault("max_download_workers", max(16, configured_download_workers))
     values.setdefault("task_limit", 256)
-    values.setdefault("jobs", configured_jobs)
+    values.setdefault("jobs", configured_runtime.jobs)
 
     args.port = int(args.port)
     args.max_fetch_workers = int(args.max_fetch_workers)
