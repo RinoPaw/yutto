@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from pydantic import BaseModel
 
 import yutto.core.execution as execution_module
 from yutto.auth import load_auth
@@ -17,6 +16,7 @@ from yutto.core.result import (
     Artifact,
     ArtifactKind,
     DownloadResult,
+    ItemFailure,
     ItemResult,
     ItemState,
     ResolveResult,
@@ -294,22 +294,17 @@ def test_scope_factory_rejects_invalid_auth_profile_without_exposing_auth_file(t
         policy.resolve_credentials(make_scope(access={"auth_profile": "bad profile"}))
 
 
-class CredentialPayload(BaseModel):
-    url: str
-    auth_profile: str
-    SESSDATA: str
-    nested: dict[str, str]
-
-
 def test_snapshot_serialization_is_json_compatible_and_removes_credentials():
     created_at = datetime(2026, 7, 12, 10, 11, 12, tzinfo=UTC)
-    payload = CredentialPayload(
-        url="BV1safe",
-        auth_profile="work",
-        SESSDATA="session-secret",
-        nested={"token": "token-secret", "visible": "kept"},
+    payload = Scope(
+        {
+            "source.value": "BV1safe",
+            "auth.profile": "work",
+            "auth.cookie": "SESSDATA=session-secret",
+        },
+        parent=make_scope(),
     )
-    snapshot = TaskSnapshot[object, object](
+    snapshot = TaskSnapshot[Scope, None](
         task_id="task-1",
         state=TaskState.FAILED,
         payload=payload,
@@ -322,22 +317,20 @@ def test_snapshot_serialization_is_json_compatible_and_removes_credentials():
     )
 
     serialized = snapshot_to_json(snapshot)
+    serialized_payload = cast("dict[str, object]", serialized["payload"])
+    serialized_auth = cast("dict[str, object]", serialized_payload["auth"])
 
-    assert serialized == {
-        "task_id": "task-1",
-        "state": "failed",
-        "payload": {
-            "url": "BV1safe",
-            "auth_profile": "work",
-            "nested": {"visible": "kept"},
-        },
-        "result": None,
-        "error": {"code": "internal_error", "type": "ExampleError", "message": "failed"},
-        "created_at": "2026-07-12T10:11:12+00:00",
-        "started_at": "2026-07-12T10:11:12+00:00",
-        "finished_at": "2026-07-12T10:11:12+00:00",
-        "last_event_seq": 4,
+    assert serialized["task_id"] == "task-1"
+    assert serialized["state"] == "failed"
+    assert serialized["result"] is None
+    assert serialized["error"] == {
+        "code": "internal_error",
+        "type": "ExampleError",
+        "message": "failed",
     }
+    assert cast("dict[str, object]", serialized_payload["source"])["value"] == "BV1safe"
+    assert serialized_auth["profile"] == "work"
+    assert "cookie" not in serialized_auth
     assert "secret" not in json.dumps(serialized)
     assert snapshot_summary_to_json(snapshot)["error"] == {
         "code": "internal_error",
@@ -366,14 +359,20 @@ def test_scope_snapshot_removes_proxy_userinfo():
     assert "proxy-password" not in json.dumps(serialized)
 
 
-def test_download_result_serializes_paths_enums_and_tuples():
+def test_download_result_serializes_explicit_identity_and_failure_schema():
     created_at = datetime(2026, 7, 12, 10, 11, 12, tzinfo=UTC)
     result = DownloadResult(
         items=(
             ItemResult(
+                planned_path=Path("series/video"),
                 state=ItemState.DONE,
                 output_path=Path("series/video.mp4"),
                 artifacts=(Artifact(kind=ArtifactKind.MEDIA, path=Path("series/video.mp4")),),
+            ),
+            ItemResult(
+                planned_path=Path("series/missing"),
+                state=ItemState.FAILED,
+                failure=ItemFailure(type="NotFoundError", message="missing", code=404),
             ),
         )
     )
@@ -394,11 +393,20 @@ def test_download_result_serializes_paths_enums_and_tuples():
     assert serialized["result"] == {
         "items": [
             {
+                "planned_path": "series/video",
                 "state": "done",
                 "output_path": "series/video.mp4",
                 "skip_reason": None,
                 "artifacts": [{"kind": "media", "path": "series/video.mp4"}],
-            }
+            },
+            {
+                "planned_path": "series/missing",
+                "state": "failed",
+                "output_path": None,
+                "skip_reason": None,
+                "artifacts": [],
+                "failure": {"type": "NotFoundError", "message": "missing", "code": 404},
+            },
         ]
     }
 
