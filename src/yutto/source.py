@@ -595,8 +595,7 @@ class BangumiEpisodeSource(MediaSource):
                 season_id=result.season_id,
                 metadata=season_metadata,
                 items=tuple(
-                    MediaEntry(index=index, media=_parse_bangumi_episode(item))
-                    for index, item in episode_items
+                    MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items
                 ),
             )
         )
@@ -628,8 +627,7 @@ class BangumiSeasonSource(MediaSource):
                 season_id=season_id,
                 metadata=_make_bangumi_season_metadata(result),
                 items=tuple(
-                    MediaEntry(index=index, media=_parse_bangumi_episode(item))
-                    for index, item in episode_items
+                    MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items
                 ),
             )
         )
@@ -690,8 +688,7 @@ class CheeseEpisodeSource(MediaSource):
                 season_id=season_id,
                 metadata=ItemMetaData(title=result.title),
                 items=tuple(
-                    MediaEntry(index=index, media=_parse_cheese_episode(item))
-                    for index, item in episode_items
+                    MediaEntry(index=index, media=_parse_cheese_episode(item)) for index, item in episode_items
                 ),
             )
         )
@@ -711,8 +708,7 @@ class CheeseSeasonSource(MediaSource):
                 season_id=self.id,
                 metadata=ItemMetaData(title=result.title),
                 items=tuple(
-                    MediaEntry(index=index, media=_parse_cheese_episode(item))
-                    for index, item in episode_items
+                    MediaEntry(index=index, media=_parse_cheese_episode(item)) for index, item in episode_items
                 ),
             )
         )
