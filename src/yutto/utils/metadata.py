@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -9,6 +8,7 @@ from dict2xml import dict2xml
 from yutto.utils.time import get_time_str_by_stamp
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from yutto.types import MId
