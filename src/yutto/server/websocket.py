@@ -38,7 +38,12 @@ class DownloadTaskApi(Protocol):
 
     async def close(self, *, cancel_pending: bool = False) -> None: ...
 
-    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, DownloadResult]: ...
+    async def submit(
+        self,
+        scope: Scope,
+        *,
+        execution_scope: Scope | None = None,
+    ) -> TaskSnapshot[Scope, DownloadResult]: ...
 
     def get(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None: ...
 
@@ -56,7 +61,12 @@ class ResolveTaskApi(Protocol):
 
     async def close(self, *, cancel_pending: bool = False) -> None: ...
 
-    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, ResolveResult]: ...
+    async def submit(
+        self,
+        scope: Scope,
+        *,
+        execution_scope: Scope | None = None,
+    ) -> TaskSnapshot[Scope, ResolveResult]: ...
 
     def get(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None: ...
 
@@ -294,9 +304,12 @@ class YuttoWebSocketServer:
 
         @dispatcher.method("download.start")
         async def download_start(request: dict[str, object]) -> dict[str, object]:
-            prepared = self._parse_and_prepare(request)
+            request_scope, execution_scope = self._parse_and_prepare(request)
             try:
-                snapshot = await self._task_service.submit(prepared)
+                snapshot = await self._task_service.submit(
+                    request_scope,
+                    execution_scope=execution_scope,
+                )
             except TaskCapacityError as error:
                 raise JsonRpcError(SERVER_BUSY_ERROR, "server task capacity reached") from error
             return _snapshot_to_json_with_kind(snapshot, "download")
@@ -306,9 +319,12 @@ class YuttoWebSocketServer:
 
             @dispatcher.method("resolve.start")
             async def resolve_start(request: dict[str, object]) -> dict[str, object]:
-                prepared = self._parse_and_prepare(request)
+                request_scope, execution_scope = self._parse_and_prepare(request)
                 try:
-                    snapshot = await resolve_service.submit(prepared)
+                    snapshot = await resolve_service.submit(
+                        request_scope,
+                        execution_scope=execution_scope,
+                    )
                 except TaskCapacityError as error:
                     raise JsonRpcError(SERVER_BUSY_ERROR, "server task capacity reached") from error
                 return _snapshot_to_json_with_kind(snapshot, "resolve")
@@ -384,19 +400,20 @@ class YuttoWebSocketServer:
 
         return dispatcher
 
-    def _parse_and_prepare(self, request: dict[str, object]) -> Scope:
+    def _parse_and_prepare(self, request: dict[str, object]) -> tuple[Scope, Scope]:
         try:
             parsed = self._parse_scope(request)
         except (TypeError, ValueError) as error:
             raise JsonRpcError(-32602, "Invalid params", {"reason": str(error)}) from error
         try:
-            return self._prepare_scope(parsed)
+            prepared = self._prepare_scope(parsed)
         except ValueError as error:
             raise JsonRpcError(
                 REQUEST_REJECTED_ERROR,
                 "Request rejected",
                 {"reason": str(error)},
             ) from error
+        return parsed, prepared
 
     def _require_task(self, task_id: str) -> tuple[str, _AnyTaskSnapshot]:
         kind = "download"
