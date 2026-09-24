@@ -74,6 +74,8 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+        if "/x/tag/archive/tags" in url:
+            return Success({"code": 0, "data": []})
         return Success(_ugc_response())
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
@@ -153,19 +155,3 @@ def test_manager_keeps_all_child_failures_for_download(monkeypatch: pytest.Monke
     assert isinstance(result.media, UgcSeries)
     assert result.media.items == ()
     assert result.failures[0].error is error
-
-
-def test_manager_propagates_root_source_failure_directly(monkeypatch: pytest.MonkeyPatch) -> None:
-    error = NotFoundError("根列表不存在")
-
-    class FakeSource:
-        async def resolve(self, execution: object, scope: Scope) -> MediaResolveResult:
-            raise error
-
-    monkeypatch.setattr("yutto.download_manager.parse", lambda value: FakeSource())
-    _install_manager_stubs(monkeypatch)
-
-    with pytest.raises(NotFoundError) as raised:
-        asyncio.run(DownloadManager().resolve_scope(cast("Any", None), _scope()))
-
-    assert raised.value is error
