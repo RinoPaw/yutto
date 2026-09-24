@@ -104,10 +104,8 @@ def test_planner_resolves_output_without_io(
 
 def test_plan_selects_manifest_entries_without_copying_resource_urls(tmp_path: Path):
     manifest, scope, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
-    patterns = scope.danmaku.block_keyword_patterns
-    assert isinstance(patterns, list)
-    patterns.append("later-pattern")
 
+    assert scope.danmaku.block_keyword_patterns == ("original-pattern",)
     assert plan.video is not None and plan.video.index == 0
     assert plan.audio is not None and plan.audio.index == 0
     assert not hasattr(plan.video, "url") and not hasattr(plan.video, "mirrors")
