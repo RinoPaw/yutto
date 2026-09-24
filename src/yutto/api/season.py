@@ -73,9 +73,11 @@ def _dict_list(value: object, description: str) -> list[dict[str, Any]]:
 def _optional_int(value: object, description: str) -> int | None:
     if value is None:
         return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise NotFoundError(f"无法解析{description}，原因：API 响应格式异常")
     try:
         return int(value)
-    except (TypeError, ValueError) as error:
+    except ValueError as error:
         raise NotFoundError(f"无法解析{description}，原因：API 响应格式异常") from error
 
 
