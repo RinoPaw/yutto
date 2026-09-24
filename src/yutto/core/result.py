@@ -46,7 +46,9 @@ class ItemFailure(_ResultModel):
 
 
 class ItemResult(_ResultModel):
-    planned_path: Path
+    # Filled by DownloadManager once the item has crossed the path-planning boundary.
+    # Executor-local results may omit it while they are still inside that operation.
+    planned_path: Path | None = None
     state: ItemState
     output_path: Path | None = None
     skip_reason: ItemSkipReason | None = None
@@ -85,6 +87,12 @@ class ItemResult(_ResultModel):
 
 class DownloadResult(_ResultModel):
     items: tuple[ItemResult, ...] = Field(default_factory=tuple)
+
+    @model_validator(mode="after")
+    def validate_item_identity(self) -> Self:
+        if any(item.planned_path is None for item in self.items):
+            raise ValueError("download result items must have a planned path")
+        return self
 
 
 class ResolveFailureStep(_ResultModel):
