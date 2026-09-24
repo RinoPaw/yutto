@@ -46,6 +46,7 @@ class ItemFailure(_ResultModel):
 
 
 class ItemResult(_ResultModel):
+    planned_path: Path
     state: ItemState
     output_path: Path | None = None
     skip_reason: ItemSkipReason | None = None
