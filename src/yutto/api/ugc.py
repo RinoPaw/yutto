@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
@@ -9,14 +10,51 @@ from yutto.api.account import encode_wbi, get_wbi_img
 from yutto.api.common import fetch_payload
 from yutto.core.operation import emit_download_report
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, NotLoginError
-from yutto.types import AId
+from yutto.types import AId, BvId, CId, MId
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.types import AvId, CollectionId, FId, MId, SeriesId
+    from yutto.types import AvId, CollectionId, FId, SeriesId
 
 WATCH_LATER_API = "https://api.bilibili.com/x/v2/history/toview/web"
+
+
+@dataclass(frozen=True, slots=True)
+class UgcOwnerInfo:
+    mid: MId | None
+    name: str
+    face: str
+
+
+@dataclass(frozen=True, slots=True)
+class UgcStaffInfo:
+    mid: MId
+    name: str
+    role: str
+    face: str
+
+
+@dataclass(frozen=True, slots=True)
+class UgcPageInfo:
+    cid: CId
+    title: str
+    duration: int
+
+
+@dataclass(frozen=True, slots=True)
+class UgcVideoInfo:
+    aid: AId
+    bvid: BvId
+    title: str
+    description: str
+    cover: str
+    published_at: int
+    duration: int
+    category: str | None
+    owner: UgcOwnerInfo | None
+    staff: tuple[UgcStaffInfo, ...]
+    pages: tuple[UgcPageInfo, ...]
 
 
 def _query(avid: AvId) -> str:
@@ -31,7 +69,83 @@ def _dict_list(value: object, description: str) -> list[dict[str, Any]]:
     return value
 
 
-async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> dict[str, Any]:
+def _decode_ugc_owner(value: object) -> UgcOwnerInfo | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise NoAccessPermissionError("无法解析视频 UP 主信息，原因：API 响应格式异常")
+    if not value:
+        return None
+    mid_value = value.get("mid")
+    return UgcOwnerInfo(
+        mid=MId(str(mid_value)) if mid_value is not None else None,
+        name=str(value.get("name", "")),
+        face=str(value.get("face", "")),
+    )
+
+
+def _decode_ugc_staff(value: object) -> tuple[UgcStaffInfo, ...]:
+    staff: list[UgcStaffInfo] = []
+    for item in _dict_list(value, "视频合作成员"):
+        mid = item.get("mid")
+        name = item.get("name")
+        role = item.get("title")
+        face = item.get("face")
+        if mid is None or name is None or role is None or face is None:
+            raise NoAccessPermissionError("无法解析视频合作成员，原因：API 响应缺少必要字段")
+        staff.append(
+            UgcStaffInfo(
+                mid=MId(str(mid)),
+                name=str(name),
+                role=str(role),
+                face=str(face),
+            )
+        )
+    return tuple(staff)
+
+
+def _decode_ugc_pages(value: object, *, video_title: str) -> tuple[UgcPageInfo, ...]:
+    pages: list[UgcPageInfo] = []
+    for item in _dict_list(value, "视频分 P"):
+        cid = item.get("cid")
+        if cid is None:
+            raise NoAccessPermissionError("无法解析视频分 P，原因：API 响应缺少 cid")
+        title = item.get("part")
+        pages.append(
+            UgcPageInfo(
+                cid=CId(cid),
+                title=str(title) if title is not None else video_title,
+                duration=int(item.get("duration", 0)),
+            )
+        )
+    return tuple(pages)
+
+
+def _decode_ugc_video_info(data: dict[str, Any]) -> UgcVideoInfo:
+    aid = data.get("aid")
+    bvid = data.get("bvid")
+    title = data.get("title")
+    if aid is None or bvid is None or title is None:
+        raise NoAccessPermissionError("无法解析视频信息，原因：API 响应缺少必要字段")
+
+    video_title = str(title)
+    category = data.get("tname")
+    return UgcVideoInfo(
+        aid=AId(aid),
+        bvid=BvId(str(bvid)),
+        title=video_title,
+        description=str(data.get("desc", "")),
+        cover=str(data.get("pic", "")),
+        published_at=int(data.get("pubdate", 0)),
+        duration=int(data.get("duration", 0)),
+        category=category if isinstance(category, str) and category else None,
+        owner=_decode_ugc_owner(data.get("owner")),
+        staff=_decode_ugc_staff(data.get("staff")),
+        pages=_decode_ugc_pages(data.get("pages"), video_title=video_title),
+    )
+
+
+async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> UgcVideoInfo:
     api = f"https://api.bilibili.com/x/web-interface/view?{_query(avid)}"
     result = await Fetcher.fetch_json(scope, api)
     if isinstance(result, Failure):
@@ -56,9 +170,7 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> dict[str, Any
         emit_download_report(f"视频 {avid} 撞车了哦！正在跳转到原视频 {forward_aid}～")
         return await get_ugc_video_info(scope, forward_aid)
 
-    if data.get("aid") is None:
-        raise NotFoundError(f"无法获取该视频 {avid} 信息，原因：API 响应缺少 aid")
-    return data
+    return _decode_ugc_video_info(data)
 
 
 async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> list[str]:
@@ -284,6 +396,10 @@ async def get_watch_later_entries(scope: ExecutionScope) -> list[dict[str, Any]]
 
 
 __all__ = [
+    "UgcOwnerInfo",
+    "UgcPageInfo",
+    "UgcStaffInfo",
+    "UgcVideoInfo",
     "WATCH_LATER_API",
     "get_all_favourite_folders",
     "get_collection",

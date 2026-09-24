@@ -139,11 +139,11 @@ class UgcVideoSource(MediaSource):
     page: int | None = None
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcVideo]:
-        video_data = await get_ugc_video_info(execution, self.id)
-        aid = AId(video_data["aid"])
+        video_info = await get_ugc_video_info(execution, self.id)
+        aid = video_info.aid
         tags = await get_ugc_video_tags(execution, aid)
         added_at = get_time_stamp_by_now()
-        page_data: list[dict[str, Any]] = list(video_data["pages"])
+        page_data = video_info.pages
         selection_expression = scope.selection.expression
         selection = parse_selection(selection_expression) if selection_expression is not None else None
         if selection is not None:
@@ -167,58 +167,57 @@ class UgcVideoSource(MediaSource):
             indexes = (page,)
 
         actors: list[Actor] = []
-        if staff := video_data.get("staff"):
+        if video_info.staff:
             actors = [
                 Actor(
-                    name=staff_info["name"],
-                    role=staff_info["title"],
-                    thumb=staff_info["face"],
-                    profile=f"https://space.bilibili.com/{staff_info['mid']}",
+                    name=staff_info.name,
+                    role=staff_info.role,
+                    thumb=staff_info.face,
+                    profile=f"https://space.bilibili.com/{staff_info.mid}",
                     order=index,
                 )
-                for index, staff_info in enumerate(staff)
+                for index, staff_info in enumerate(video_info.staff)
             ]
-        elif owner := video_data.get("owner"):
+        elif video_info.owner is not None:
+            owner = video_info.owner
             actors = [
                 Actor(
-                    name=owner["name"],
+                    name=owner.name,
                     role="UP主",
-                    thumb=owner["face"],
-                    profile=f"https://space.bilibili.com/{owner['mid']}",
+                    thumb=owner.face,
+                    profile=f"https://space.bilibili.com/{owner.mid}" if owner.mid is not None else "",
                     order=0,
                 )
             ]
 
-        genre = video_data.get("tname")
-        genres = [genre] if isinstance(genre, str) and genre else []
+        genres = [video_info.category] if video_info.category else []
 
         def make_metadata(*, title: str, duration: int) -> ItemMetaData:
-            owner_info = video_data.get("owner") or {}
-            mid_value = owner_info.get("mid")
+            owner = video_info.owner
             return ItemMetaData(
                 title=title,
-                show_title=str(video_data.get("title", title)),
-                plot=str(video_data.get("desc", "")),
-                thumb=str(video_data.get("pic", "")),
-                published_at=int(video_data.get("pubdate", 0)),
+                show_title=video_info.title,
+                plot=video_info.description,
+                thumb=video_info.cover,
+                published_at=video_info.published_at,
                 duration=duration,
-                mid=MId(str(mid_value)) if mid_value is not None else None,
-                owner=str(owner_info.get("name", "")),
+                mid=owner.mid if owner is not None else None,
+                owner=owner.name if owner is not None else "",
                 added_at=added_at,
                 actors=list(actors),
                 genre=list(genres),
                 tag=list(tags),
-                website=BvId(video_data["bvid"]).to_url(),
+                website=video_info.bvid.to_url(),
             )
 
         pages = tuple(
             UgcPage(
                 index=index,
                 aid=aid,
-                cid=CId(page_data[index - 1]["cid"]),
+                cid=page_data[index - 1].cid,
                 metadata=make_metadata(
-                    title=str(page_data[index - 1].get("part", video_data["title"])),
-                    duration=int(page_data[index - 1].get("duration", 0)),
+                    title=page_data[index - 1].title,
+                    duration=page_data[index - 1].duration,
                 ),
             )
             for index in indexes
@@ -228,8 +227,8 @@ class UgcVideoSource(MediaSource):
                 aid=aid,
                 page_count=len(page_data),
                 metadata=make_metadata(
-                    title=str(video_data["title"]),
-                    duration=int(video_data.get("duration", 0)),
+                    title=video_info.title,
+                    duration=video_info.duration,
                 ),
                 items=pages,
             )
