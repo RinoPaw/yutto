@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from yutto.auth import validate_user_info
 from yutto.core.events import DownloadStage, DownloadStageChanged
-from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
+from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import (
     DownloadResult,
     ItemFailure,
@@ -29,10 +29,10 @@ from yutto.exceptions import (
     WrongArgumentError,
 )
 from yutto.listing import MediaAncestry, iter_media_items, resolve_media_paths
-from yutto.media import UgcFav, UgcVideo
+from yutto.media import BangumiEpisode, CheeseEpisode, UgcFav, UgcPage, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
-from yutto.resource import resolve_resource_manifest
+from yutto.resource import ResourceManifest, resolve_resource_manifest
 from yutto.scope import MISSING, Scope
 from yutto.url_resolver import resolve_redirected_source
 
@@ -84,6 +84,57 @@ def _report_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
         emit_download_report(
             f"{path}：{failure.error.message}",
             ReportLevel.ERROR,
+        )
+
+
+def _report_resource_manifest(manifest: ResourceManifest, item: MediaItem, scope: Scope) -> None:
+    requested_language = scope.resource.ai_translation_language
+    languages = manifest.translation_languages
+    if languages:
+        emit_download_report("该视频已启用的 AI 原声翻译语言列表：")
+        selected_language = False
+        for index, language in enumerate(languages):
+            selected = language.code == requested_language
+            selected_language |= selected
+            message = "{}{:2} {} (code: {})".format(
+                "*" if selected else " ",
+                index,
+                language.title,
+                language.code,
+            )
+            emit_download_report(message, color=ReportColor.GREEN if selected else None)
+
+        if not selected_language:
+            if requested_language:
+                emit_download_report(
+                    f"该视频未为语言 {requested_language} 支持 AI 原声翻译功能哦～",
+                    ReportLevel.WARNING,
+                )
+            else:
+                emit_download_report(
+                    "若想启用 AI 原声翻译功能，可以使用 `--ai-translation-language=<code>` 参数指定目标语言喔～"
+                )
+    elif requested_language:
+        emit_download_report(
+            f"该视频未启用 AI 原声翻译功能, 无法获得 {requested_language} 语言翻译哦～",
+            ReportLevel.WARNING,
+        )
+
+    if manifest.is_preview and isinstance(item, (UgcPage, BangumiEpisode, CheeseEpisode)):
+        emit_download_report(
+            f"视频（{item.aid}, cid: {item.cid}）是预览视频（疑似未登录或非大会员用户）",
+            ReportLevel.WARNING,
+        )
+
+    if manifest.subtitle_unavailable_reason is not None and not isinstance(item, UgcPage):
+        emit_download_report(
+            f"无法获取该视频的字幕（{item.aid}, cid: {item.cid}），原因：{manifest.subtitle_unavailable_reason}",
+            ReportLevel.WARNING,
+        )
+    for language in manifest.invalid_subtitle_languages:
+        emit_download_report(
+            f"跳过无效的字幕URL（{item.aid}, cid: {item.cid}），语言：{language}",
+            ReportLevel.WARNING,
         )
 
 
@@ -232,6 +283,7 @@ class DownloadManager:
                     if index + 1 < len(start_turns):
                         start_turns[index + 1].set()
                     return
+                _report_resource_manifest(manifest, item, scope)
                 if execution.enforce_output_boundary:
                     ensure_output_path_is_scoped(path, output_directory, temporary_directory)
                 if len(download_list) > 1:
