@@ -7,31 +7,31 @@ from yutto.cli.formats import FormatListingEntry, emit_grouped_manifest_report
 from yutto.core.operation import ReportLevel, bind_download_report_sink
 from yutto.resource import ResourceManifest
 from yutto.stream_formats import emit_manifest_formats, format_manifest_lines
+from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 if TYPE_CHECKING:
     import pytest
 
     from yutto.downloader.selector import StreamSelection
-    from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
 def _manifest() -> ResourceManifest:
-    video: VideoUrlMeta = {
-        "url": "https://signed.example/video",
-        "mirrors": [],
-        "codec": "avc",
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
-    audio: AudioUrlMeta = {
-        "url": "https://signed.example/audio",
-        "mirrors": [],
-        "codec": "mp4a",
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    video = VideoUrlMeta(
+        url="https://signed.example/video",
+        mirrors=(),
+        codec="avc",
+        width=1920,
+        height=1080,
+        quality=80,
+    )
+    audio = AudioUrlMeta(
+        url="https://signed.example/audio",
+        mirrors=(),
+        codec="mp4a",
+        width=0,
+        height=0,
+        quality=30280,
+    )
     return ResourceManifest(videos=(video,), audios=(audio,))
 
 
