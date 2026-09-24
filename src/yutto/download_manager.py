@@ -67,10 +67,11 @@ def show_batch_episode_title(
 def _display_group(ancestry: MediaAncestry) -> str | None:
     if len(ancestry) < 2:
         return None
-    root = ancestry[-2]
-    video = ancestry[-1]
+    video_relation = ancestry[-2].entry
+    root = ancestry[-2].parent
+    video = ancestry[-1].parent
     if isinstance(root, UgcFav) and isinstance(video, UgcVideo) and len(video.items) > 1:
-        return video.metadata.title
+        return video_relation.display_title or video.metadata.title
     return None
 
 
