@@ -4,7 +4,7 @@ import asyncio
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,12 +14,12 @@ from yutto.downloader.planner import DownloadPlan, DownloadPlanner, should_attac
 from yutto.exceptions import PostprocessingError, WrongArgumentError
 from yutto.resource import ResourceManifest
 from yutto.scope import ROOT_SCOPE, Scope
+from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 from yutto.utils.functional import Singleton, as_sync
 
 if TYPE_CHECKING:
     from yutto.media.codec import VideoCodec
-    from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 
 def make_ffmpeg(path: str) -> FFmpeg:
@@ -61,27 +61,24 @@ def test_ffmpeg_uses_default_path(reset_ffmpeg_singleton: None):
 
 
 def make_audio() -> AudioUrlMeta:
-    return {
-        "url": "https://example.com/audio",
-        "mirrors": [],
-        "codec": "mp4a",
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    return AudioUrlMeta(
+        url="https://example.com/audio",
+        mirrors=(),
+        codec="mp4a",
+        width=0,
+        height=0,
+        quality=30280,
+    )
 
 
 def make_video(*, codec: VideoCodec = "hevc", quality: int = 80) -> VideoUrlMeta:
-    return cast(
-        "VideoUrlMeta",
-        {
-            "url": "https://example.com/video",
-            "mirrors": [],
-            "codec": codec,
-            "width": 1920,
-            "height": 1080,
-            "quality": quality,
-        },
+    return VideoUrlMeta(
+        url="https://example.com/video",
+        mirrors=(),
+        codec=codec,
+        width=1920,
+        height=1080,
+        quality=quality,
     )
 
 

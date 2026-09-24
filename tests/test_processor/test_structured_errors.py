@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from returns.result import Success
@@ -18,6 +18,10 @@ from yutto.utils.fetcher import Fetcher
 from yutto.utils.functional import as_sync
 
 pytestmark = pytest.mark.processor
+
+
+def _execution_scope(session: Any) -> ExecutionScope:
+    return ExecutionScope(session, fetch_workers=1, download_workers=1)
 
 
 def make_scope(url: str = "BV1structured") -> Scope:
@@ -38,7 +42,7 @@ async def test_manager_raises_login_error(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(download_manager_module, "validate_user_info", reject_login)
     with pytest.raises(NotLoginError) as exc_info:
         await DownloadManager().process_scope(
-            ExecutionScope(cast("Any", object())),
+            _execution_scope(object()),
             make_scope(),
         )
 
@@ -57,7 +61,7 @@ async def test_manager_raises_url_errors_without_network(monkeypatch: pytest.Mon
     monkeypatch.setattr(Fetcher, "get_redirected_url", reject_url)
     with pytest.raises(WrongUrlError) as exc_info:
         await DownloadManager().process_scope(
-            ExecutionScope(cast("Any", object())),
+            _execution_scope(object()),
             make_scope("not-a-url"),
         )
 
@@ -77,7 +81,7 @@ async def test_manager_reports_unmatched_url_as_structured_error(monkeypatch: py
 
     with pytest.raises(WrongUrlError) as exc_info:
         await DownloadManager().process_scope(
-            ExecutionScope(cast("Any", object())),
+            _execution_scope(object()),
             make_scope("https://example.com/unsupported"),
         )
 

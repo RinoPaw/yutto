@@ -33,7 +33,7 @@ ENTRY_PATH = Path("series/episode")
 
 
 def _execution_scope(session: Any) -> ExecutionScope:
-    return ExecutionScope(cast("Any", session), fetch_workers=1, download_workers=1)
+    return ExecutionScope(session, fetch_workers=1, download_workers=1)
 
 
 def make_scope(
@@ -197,7 +197,7 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
         output_path=output_dir / "episode.m4a",
         artifacts=(
             Artifact(kind=ArtifactKind.SUBTITLE, path=output_dir / "episode.zh-CN.srt"),
-            Artifact(kind=ArtifactKind.DANMAKU, path=output_dir / "episode.xml"),
+            Artifact(kind=ArtifactKind.DANMAKU, path=output_dir / "episode.ass"),
             Artifact(kind=ArtifactKind.METADATA, path=output_dir / "episode.nfo"),
             Artifact(kind=ArtifactKind.COVER, path=output_dir / "episode-poster.jpg"),
         ),
