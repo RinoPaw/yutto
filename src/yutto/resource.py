@@ -16,12 +16,11 @@ from yutto.api.player import (
 from yutto.auth import get_user_info
 from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
-from yutto.types import AudioUrlMeta, VideoUrlMeta
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.scope import Scope
-    from yutto.types import AId, CId, EpisodeId
+    from yutto.types import AId, AudioUrlMeta, CId, EpisodeId, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
 SubtitleResource: TypeAlias = tuple[str, str]
