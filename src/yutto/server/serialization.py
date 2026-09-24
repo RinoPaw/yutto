@@ -24,10 +24,10 @@ from yutto.media import (
 )
 from yutto.scope import Scope
 from yutto.types import BilibiliId
-from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
     from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
+    from yutto.utils.metadata import ItemMetaData
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 PayloadT = TypeVar("PayloadT")
