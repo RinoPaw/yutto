@@ -272,9 +272,7 @@ async def _resolve_ugc_videos(
         )
 
     tasks: list[
-        asyncio.Task[
-            tuple[MediaEntry[UgcVideo], tuple[MediaResolveDiagnostic, ...]] | MediaResolveFailure | None
-        ]
+        asyncio.Task[tuple[MediaEntry[UgcVideo], tuple[MediaResolveDiagnostic, ...]] | MediaResolveFailure | None]
     ] = []
     try:
         async with asyncio.TaskGroup() as task_group:
@@ -595,7 +593,9 @@ class BangumiEpisodeSource(MediaSource):
             media=BangumiSeason(
                 season_id=result.season_id,
                 metadata=season_metadata,
-                items=tuple(MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items
+                ),
             ),
             diagnostics=tuple(diagnostics),
         )
@@ -627,7 +627,9 @@ class BangumiSeasonSource(MediaSource):
             media=BangumiSeason(
                 season_id=season_id,
                 metadata=_make_bangumi_season_metadata(result),
-                items=tuple(MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items
+                ),
             ),
             diagnostics=tuple(diagnostics),
         )
@@ -686,7 +688,9 @@ class CheeseEpisodeSource(MediaSource):
             media=CheeseSeason(
                 season_id=season_id,
                 metadata=ItemMetaData(title=result.title),
-                items=tuple(MediaEntry(index=index, media=_parse_cheese_episode(item)) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_cheese_episode(item)) for index, item in episode_items
+                ),
             ),
             diagnostics=tuple(diagnostics),
         )
@@ -706,7 +710,9 @@ class CheeseSeasonSource(MediaSource):
             media=CheeseSeason(
                 season_id=self.id,
                 metadata=ItemMetaData(title=result.title),
-                items=tuple(MediaEntry(index=index, media=_parse_cheese_episode(item)) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_cheese_episode(item)) for index, item in episode_items
+                ),
             ),
             diagnostics=tuple(diagnostics),
         )

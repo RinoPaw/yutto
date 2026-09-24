@@ -50,7 +50,5 @@ def test_source_returns_selection_diagnostics_without_rendering(monkeypatch: pyt
         result = asyncio.run(UgcVideoSource(id=AvId("808982399")).resolve(_EXECUTION, scope))
 
     assert reports == []
-    assert result.diagnostics == (
-        MediaResolveDiagnostic(total=3, out_of_range=(5,), empty=False),
-    )
+    assert result.diagnostics == (MediaResolveDiagnostic(total=3, out_of_range=(5,), empty=False),)
     assert [entry.index for entry in result.media.items] == [3, 1]
