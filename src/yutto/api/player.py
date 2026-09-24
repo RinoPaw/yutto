@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from returns.result import Failure
 
-from yutto.exceptions import NoAccessPermissionError, UnSupportedTypeError
+from yutto.exceptions import ApiResponseError, NoAccessPermissionError, UnSupportedTypeError
 from yutto.media.codec import audio_codec_map, video_codec_map
 from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.fetcher import Fetcher
@@ -155,7 +155,7 @@ def _decode_subtitle_info(response: dict[str, Any]) -> SubtitleInfo:
     invalid_languages: list[str] = []
     for item in raw_subtitles:
         if not isinstance(item, dict):
-            raise NoAccessPermissionError("无法解析字幕信息，原因：API 响应格式异常")
+            raise ApiResponseError("无法解析字幕信息，原因：API 响应格式异常")
         language = str(item.get("lan_doc", "未知"))
         raw_url = item.get("subtitle_url")
         if not isinstance(raw_url, str) or not raw_url.strip():
@@ -183,16 +183,16 @@ def _decode_chapter_info(response: dict[str, Any]) -> ChapterInfo:
     points: list[ChapterPoint] = []
     for item in raw_chapters:
         if not isinstance(item, dict):
-            raise NoAccessPermissionError("无法解析章节信息，原因：API 响应格式异常")
+            raise ApiResponseError("无法解析章节信息，原因：API 响应格式异常")
         content = item.get("content")
         start = item.get("from")
         end = item.get("to")
         if content is None or start is None or end is None:
-            raise NoAccessPermissionError("无法解析章节信息，原因：API 响应缺少必要字段")
+            raise ApiResponseError("无法解析章节信息，原因：API 响应缺少必要字段")
         try:
             points.append(ChapterPoint(content=str(content), start=int(start), end=int(end)))
         except (TypeError, ValueError) as error:
-            raise NoAccessPermissionError("无法解析章节信息，原因：API 响应格式异常") from error
+            raise ApiResponseError("无法解析章节信息，原因：API 响应格式异常") from error
     return ChapterInfo(points=tuple(points))
 
 
@@ -317,21 +317,21 @@ async def get_subtitle_lines(scope: ExecutionScope, url: str) -> tuple[SubtitleL
         return None
     body = response["body"]
     if not isinstance(body, list):
-        raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应格式异常")
+        raise ApiResponseError("无法解析字幕正文，原因：API 响应格式异常")
 
     lines: list[SubtitleLine] = []
     for item in body:
         if not isinstance(item, dict):
-            raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应格式异常")
+            raise ApiResponseError("无法解析字幕正文，原因：API 响应格式异常")
         content = item.get("content")
         start = item.get("from")
         end = item.get("to")
         if content is None or start is None or end is None:
-            raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应缺少必要字段")
+            raise ApiResponseError("无法解析字幕正文，原因：API 响应缺少必要字段")
         try:
             lines.append(SubtitleLine(content=str(content), start=float(start), end=float(end)))
         except (TypeError, ValueError) as error:
-            raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应格式异常") from error
+            raise ApiResponseError("无法解析字幕正文，原因：API 响应格式异常") from error
     return tuple(lines)
 
 
