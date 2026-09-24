@@ -5,7 +5,7 @@ import secrets
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from yutto.auth import default_auth_file
 from yutto.cli.runtime import resolve_runtime_options
@@ -37,6 +37,71 @@ class ServerToken:
     value: str
     generated: bool
     persisted_to: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ServeOptions:
+    """Resolved process-level configuration for one server invocation."""
+
+    request_settings: YuttoConfig
+    ffmpeg_path: str
+    host: str
+    port: int
+    allow_origin: tuple[str, ...]
+    token_file: Path | None
+    download_root: Path
+    tmp_root: Path | None
+    auth_file: Path | None
+    max_fetch_workers: int
+    max_download_workers: int
+    task_limit: int
+    jobs: int
+
+
+def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> ServeOptions:
+    """Resolve sparse CLI overrides and configured Scope into server startup facts."""
+
+    values = vars(args)
+    configured_scope = scope_from_config(settings)
+    configured_runtime = resolve_runtime_options(configured_scope)
+    configured_fetch_workers = resolve_fetch_workers(configured_scope)
+    configured_download_workers = resolve_download_workers(configured_scope)
+
+    configured_download_root = Path(configured_scope.output.directory).expanduser()
+    configured_tmp_root = configured_scope.output.temporary_directory
+    configured_auth_file = configured_scope.auth.file
+
+    options = ServeOptions(
+        request_settings=settings,
+        ffmpeg_path=str(values.get("ffmpeg_path", configured_runtime.ffmpeg_path or "ffmpeg")),
+        host=str(values.get("host", "127.0.0.1")),
+        port=int(values.get("port", 11223)),
+        allow_origin=tuple(values.get("allow_origin", ())),
+        token_file=values.get("token_file"),
+        download_root=Path(values.get("download_root", configured_download_root)).expanduser(),
+        tmp_root=(
+            Path(values["tmp_root"]).expanduser()
+            if "tmp_root" in values
+            else None if configured_tmp_root is None else Path(configured_tmp_root).expanduser()
+        ),
+        auth_file=(
+            Path(values["auth_file"]).expanduser()
+            if "auth_file" in values
+            else None if configured_auth_file is None else Path(configured_auth_file).expanduser()
+        ),
+        max_fetch_workers=int(values.get("max_fetch_workers", max(16, configured_fetch_workers))),
+        max_download_workers=int(values.get("max_download_workers", max(16, configured_download_workers))),
+        task_limit=int(values.get("task_limit", 256)),
+        jobs=int(values.get("jobs", configured_runtime.jobs)),
+    )
+
+    if options.jobs < 1:
+        raise ValueError("jobs 应为不小于 1 的整数")
+    if options.max_fetch_workers < 1 or options.max_download_workers < 1:
+        raise ValueError("server worker 上限应为不小于 1 的整数")
+    if options.task_limit < 1:
+        raise ValueError("task_limit 应为不小于 1 的整数")
+    return options
 
 
 def resolve_server_token(
@@ -97,7 +162,7 @@ def _read_server_token(token_file: Path) -> str:
 
 
 def build_server(
-    options: Any,
+    options: ServeOptions,
     token: str,
     *,
     ffmpeg: FFmpeg | None = None,
@@ -176,53 +241,12 @@ def _build_download_application(
 
 @as_sync
 async def run_server_command(args: argparse.Namespace, settings: YuttoConfig) -> None:
-    values = vars(args)
-    configured_scope = scope_from_config(settings)
-    configured_runtime = resolve_runtime_options(configured_scope)
-    configured_fetch_workers = resolve_fetch_workers(configured_scope)
-    configured_download_workers = resolve_download_workers(configured_scope)
+    options = resolve_serve_options(args, settings)
 
-    values.setdefault("request_settings", settings)
-    values.setdefault("ffmpeg_path", configured_runtime.ffmpeg_path or "ffmpeg")
-    values.setdefault("host", "127.0.0.1")
-    values.setdefault("port", 11223)
-    values.setdefault("allow_origin", ())
-    values.setdefault("token_file", None)
-    values.setdefault(
-        "download_root",
-        Path(settings.basic.dir).expanduser() if settings.basic.dir is not None else Path(),
-    )
-    values.setdefault(
-        "tmp_root",
-        None if settings.basic.tmp_dir is None else Path(settings.basic.tmp_dir).expanduser(),
-    )
-    values.setdefault(
-        "auth_file",
-        None if settings.auth.auth_file is None else Path(settings.auth.auth_file).expanduser(),
-    )
-    values.setdefault("max_fetch_workers", max(16, configured_fetch_workers))
-    values.setdefault("max_download_workers", max(16, configured_download_workers))
-    values.setdefault("task_limit", 256)
-    values.setdefault("jobs", configured_runtime.jobs)
-
-    args.port = int(args.port)
-    args.max_fetch_workers = int(args.max_fetch_workers)
-    args.max_download_workers = int(args.max_download_workers)
-    args.task_limit = int(args.task_limit)
-    args.jobs = int(args.jobs)
-    args.allow_origin = tuple(args.allow_origin)
-
-    if args.jobs < 1:
-        raise ValueError("jobs 应为不小于 1 的整数")
-    if args.max_fetch_workers < 1 or args.max_download_workers < 1:
-        raise ValueError("server worker 上限应为不小于 1 的整数")
-    if args.task_limit < 1:
-        raise ValueError("task_limit 应为不小于 1 的整数")
-
-    FFmpeg.setup_ffmpeg_path(str(args.ffmpeg_path))
+    FFmpeg.setup_ffmpeg_path(options.ffmpeg_path)
     ffmpeg = FFmpeg()
-    token = resolve_server_token(args.token_file)
-    server = build_server(args, token.value, ffmpeg=ffmpeg)
+    token = resolve_server_token(options.token_file)
+    server = build_server(options, token.value, ffmpeg=ffmpeg)
     await server.start()
     for socket in server.sockets:
         address = socket.getsockname()
