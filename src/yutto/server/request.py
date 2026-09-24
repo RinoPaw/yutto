@@ -215,14 +215,18 @@ def _scope_values_from_request(request: ScopeRequest, parent: Scope) -> dict[str
         values["stream.video_codec_priority"] = None if priority is None else tuple(priority)
     if {"video_download_codec", "video_save_codec"} & stream.model_fields_set:
         default_download, default_save = resolve_video_codecs(parent)
-        download = stream.video_download_codec if "video_download_codec" in stream.model_fields_set else default_download
+        download = (
+            stream.video_download_codec if "video_download_codec" in stream.model_fields_set else default_download
+        )
         save = stream.video_save_codec if "video_save_codec" in stream.model_fields_set else default_save
         if download is None or save is None:
             raise ValueError("video codec fields must not be null")
         values["stream.video_codec"] = f"{download}:{save}"
     if {"audio_download_codec", "audio_save_codec"} & stream.model_fields_set:
         default_download, default_save = resolve_audio_codecs(parent)
-        download = stream.audio_download_codec if "audio_download_codec" in stream.model_fields_set else default_download
+        download = (
+            stream.audio_download_codec if "audio_download_codec" in stream.model_fields_set else default_download
+        )
         save = stream.audio_save_codec if "audio_save_codec" in stream.model_fields_set else default_save
         if download is None or save is None:
             raise ValueError("audio codec fields must not be null")
