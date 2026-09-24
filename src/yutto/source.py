@@ -42,7 +42,6 @@ from yutto.media import (
     UgcAllFavourites,
     UgcCollection,
     UgcFav,
-    UgcFavEntry,
     UgcPage,
     UgcSeries,
     UgcSpace,
@@ -336,14 +335,6 @@ class UgcFavSource(MediaSource):
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], video_scope
         )
-        entries = tuple(
-            UgcFavEntry(
-                index=index,
-                metadata=ItemMetaData(title=str(medias[index - 1].get("title") or video.metadata.title)),
-                video=video,
-            )
-            for index, video in resolved
-        )
 
         upper = info.get("upper") or {}
         upper_mid = upper.get("mid")
@@ -357,7 +348,7 @@ class UgcFavSource(MediaSource):
                     mid=MId(str(upper_mid)) if upper_mid is not None else None,
                     owner=str(upper.get("name", "")),
                 ),
-                items=entries,
+                items=tuple(video for _, video in resolved),
             ),
             failures=failures,
         )
