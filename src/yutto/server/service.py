@@ -7,22 +7,22 @@ from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from string import Formatter
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
 from yutto.auth import load_auth, validate_profile
-from yutto.cli.settings import scope_from_config
 from yutto.core.execution import (
     RequestExecutionScopeFactory,
     resolve_download_workers,
     resolve_fetch_workers,
     resolve_network_proxy,
 )
-from yutto.downloader.planner import MEBIBYTE, resolve_block_size_bytes
+from yutto.downloader.planner import resolve_block_size_bytes
 from yutto.media import Media
 from yutto.resource import resolve_danmaku_format, should_save_cover
 from yutto.scope import MISSING, Scope
+from yutto.server.request import scope_parser_from_settings
 from yutto.stream import (
     resolve_audio_codecs,
     resolve_audio_quality,
@@ -32,13 +32,9 @@ from yutto.stream import (
 )
 from yutto.types import BilibiliId
 from yutto.utils.fetcher import resolve_proxy
-from yutto.utils.time import parse_local_timestamp
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from yutto.auth import AuthInfo
-    from yutto.cli.settings import YuttoConfig
     from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -59,21 +55,6 @@ _CREDENTIAL_FIELDS = frozenset(
         "secret",
         "sessdata",
         "token",
-    }
-)
-
-_RPC_TOP_LEVEL_FIELDS = frozenset(
-    {
-        "source",
-        "access",
-        "batch",
-        "with_extra_episodes",
-        "selection",
-        "resources",
-        "stream",
-        "output",
-        "network",
-        "danmaku",
     }
 )
 
@@ -308,245 +289,6 @@ class ServerPolicy:
             raise ServerPolicyError("output.subpath_template format spec contains an unsafe fill")
         if any(int(width) > 256 for width in re.findall(r"\d+", format_spec)):
             raise ServerPolicyError("output.subpath_template format width is too large")
-
-
-def scope_parser_from_settings(settings: YuttoConfig) -> Callable[[object], Scope]:
-    """Build the server wire-format -> Scope adapter with config inheritance."""
-    configured_values = dict(scope_from_config(settings).flatten())
-    configured_values.pop("output.directory", None)
-    configured_values.pop("output.temporary_directory", None)
-    configured = Scope(configured_values)
-
-    def parse(payload: object) -> Scope:
-        return Scope(_scope_values_from_rpc_payload(payload, configured), parent=configured)
-
-    parse({"source": {"url": "yutto-server-default-validation"}})
-    return parse
-
-
-def _scope_values_from_rpc_payload(payload: object, parent: Scope) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        raise TypeError("request must be an object")
-    request = cast("dict[str, Any]", payload)
-    unknown = request.keys() - _RPC_TOP_LEVEL_FIELDS
-    if unknown:
-        raise TypeError(f"unknown request fields: {', '.join(sorted(unknown))}")
-
-    values: dict[str, Any] = {}
-
-    source = _section(request, "source", {"url"}, required=True)
-    source_value = source.get("url")
-    if not isinstance(source_value, str) or not source_value:
-        raise ValueError("source.url must be a non-empty string")
-    values["source.value"] = source_value
-
-    _copy_section(
-        request,
-        "access",
-        {
-            "auth_profile": "auth.profile",
-            "login_strict": "auth.login_strict",
-            "vip_strict": "auth.vip_strict",
-        },
-        values,
-    )
-    selection = _section(
-        request,
-        "selection",
-        {"expression", "skip_preview", "start_time", "end_time"},
-    )
-    for field, path in {
-        "expression": "selection.expression",
-        "skip_preview": "selection.skip_preview",
-    }.items():
-        if field in selection:
-            values[path] = selection[field]
-    for field, path in {
-        "start_time": "selection.published_since",
-        "end_time": "selection.published_before",
-    }.items():
-        if field not in selection:
-            continue
-        value = selection[field]
-        if value is None:
-            values[path] = None
-        elif not isinstance(value, str):
-            raise TypeError(f"selection.{field} must be a string or null")
-        else:
-            values[path] = parse_local_timestamp(value)
-    if "with_extra_episodes" in request:
-        values["selection.with_extra_episodes"] = request["with_extra_episodes"]
-    if request.get("batch") and "expression" not in selection:
-        values["selection.expression"] = "~"
-
-    _copy_section(
-        request,
-        "resources",
-        {
-            "video": "resource.video",
-            "audio": "resource.audio",
-            "danmaku": "resource.danmaku",
-            "subtitle": "resource.subtitle",
-            "metadata": "resource.metadata",
-            "cover": "resource.cover",
-            "chapter_info": "resource.chapter_info",
-            "save_cover": "resource.save_cover",
-            "ai_translation_language": "resource.ai_translation_language",
-        },
-        values,
-    )
-
-    stream = _section(
-        request,
-        "stream",
-        {
-            "video_quality",
-            "audio_quality",
-            "video_download_codec",
-            "video_save_codec",
-            "video_download_codec_priority",
-            "audio_download_codec",
-            "audio_save_codec",
-        },
-    )
-    if "video_quality" in stream:
-        values["stream.video_quality"] = stream["video_quality"]
-    if "audio_quality" in stream:
-        values["stream.audio_quality"] = stream["audio_quality"]
-    if "video_download_codec_priority" in stream:
-        values["stream.video_codec_priority"] = stream["video_download_codec_priority"]
-    if "video_download_codec" in stream or "video_save_codec" in stream:
-        default_download, default_save = resolve_video_codecs(parent)
-        download = stream.get("video_download_codec", default_download)
-        save = stream.get("video_save_codec", default_save)
-        if not isinstance(download, str) or not isinstance(save, str):
-            raise TypeError("video codec fields must be strings")
-        values["stream.video_codec"] = f"{download}:{save}"
-    if "audio_download_codec" in stream or "audio_save_codec" in stream:
-        default_download, default_save = resolve_audio_codecs(parent)
-        download = stream.get("audio_download_codec", default_download)
-        save = stream.get("audio_save_codec", default_save)
-        if not isinstance(download, str) or not isinstance(save, str):
-            raise TypeError("audio codec fields must be strings")
-        values["stream.audio_codec"] = f"{download}:{save}"
-
-    output = _section(
-        request,
-        "output",
-        {
-            "directory",
-            "temporary_directory",
-            "format",
-            "audio_only_format",
-            "overwrite",
-            "subpath_template",
-            "metadata_format_premiered",
-        },
-    )
-    if "directory" in output:
-        values["output.directory"] = _path_value(output["directory"], allow_none=False)
-    if "temporary_directory" in output:
-        values["output.temporary_directory"] = _path_value(output["temporary_directory"], allow_none=True)
-    for wire, canonical in {
-        "format": "output.format",
-        "audio_only_format": "output.audio_only_format",
-        "overwrite": "output.overwrite",
-        "subpath_template": "output.subpath_template",
-        "metadata_format_premiered": "output.metadata_premiered_format",
-    }.items():
-        if wire in output:
-            values[canonical] = output[wire]
-
-    network = _section(
-        request,
-        "network",
-        {
-            "proxy",
-            "fetch_workers",
-            "download_workers",
-            "block_size_bytes",
-            "download_interval",
-            "banned_mirrors_pattern",
-        },
-    )
-    for wire, canonical in {
-        "proxy": "network.proxy",
-        "fetch_workers": "network.fetch_workers",
-        "download_workers": "network.download_workers",
-        "download_interval": "network.download_interval",
-        "banned_mirrors_pattern": "network.banned_mirrors_pattern",
-    }.items():
-        if wire in network:
-            values[canonical] = network[wire]
-    if "block_size_bytes" in network:
-        block_size = network["block_size_bytes"]
-        if isinstance(block_size, bool) or not isinstance(block_size, (int, float)):
-            raise TypeError("network.block_size_bytes must be numeric")
-        values["network.block_size"] = float(block_size) / MEBIBYTE
-
-    _copy_section(
-        request,
-        "danmaku",
-        {
-            "format": "danmaku.format",
-            "font_size": "danmaku.font_size",
-            "font": "danmaku.font",
-            "opacity": "danmaku.opacity",
-            "display_region_ratio": "danmaku.display_region_ratio",
-            "speed": "danmaku.speed",
-            "block_top": "danmaku.block_top",
-            "block_bottom": "danmaku.block_bottom",
-            "block_scroll": "danmaku.block_scroll",
-            "block_reverse": "danmaku.block_reverse",
-            "block_special": "danmaku.block_special",
-            "block_colorful": "danmaku.block_colorful",
-            "block_keyword_patterns": "danmaku.block_keyword_patterns",
-        },
-        values,
-    )
-    return values
-
-
-def _section(
-    request: dict[str, Any],
-    name: str,
-    allowed: set[str],
-    *,
-    required: bool = False,
-) -> dict[str, Any]:
-    if name not in request:
-        if required:
-            raise ValueError(f"{name} is required")
-        return {}
-    value = request[name]
-    if not isinstance(value, dict):
-        raise TypeError(f"{name} must be an object")
-    section = cast("dict[str, Any]", value)
-    unknown = section.keys() - allowed
-    if unknown:
-        raise TypeError(f"unknown {name} fields: {', '.join(sorted(unknown))}")
-    return section
-
-
-def _copy_section(
-    request: dict[str, Any],
-    name: str,
-    paths: dict[str, str],
-    target: dict[str, Any],
-) -> dict[str, Any]:
-    section = _section(request, name, set(paths))
-    for field, path in paths.items():
-        if field in section:
-            target[path] = section[field]
-    return section
-
-
-def _path_value(value: object, *, allow_none: bool) -> Path | None:
-    if value is None and allow_none:
-        return None
-    if not isinstance(value, str):
-        raise TypeError("path fields must be strings")
-    return Path(value)
 
 
 def _auth_profile(scope: Scope) -> str:
