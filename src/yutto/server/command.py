@@ -82,12 +82,16 @@ def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> Se
         tmp_root=(
             Path(values["tmp_root"]).expanduser()
             if "tmp_root" in values
-            else None if configured_tmp_root is None else Path(configured_tmp_root).expanduser()
+            else None
+            if configured_tmp_root is None
+            else Path(configured_tmp_root).expanduser()
         ),
         auth_file=(
             Path(values["auth_file"]).expanduser()
             if "auth_file" in values
-            else None if configured_auth_file is None else Path(configured_auth_file).expanduser()
+            else None
+            if configured_auth_file is None
+            else Path(configured_auth_file).expanduser()
         ),
         max_fetch_workers=int(values.get("max_fetch_workers", max(16, configured_fetch_workers))),
         max_download_workers=int(values.get("max_download_workers", max(16, configured_download_workers))),
