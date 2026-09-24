@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Literal, TypeAlias
 from yutto.__version__ import VERSION as yutto_version
 from yutto.cli.compat import DeprecatedExtraEpisodesAction
 from yutto.cli.input import alias_parser, path_from_cli
+from yutto.output_formats import AUDIO_ONLY_OUTPUT_FORMATS, OUTPUT_FORMATS
 from yutto.stream import audio_quality_priority_default, video_quality_priority_default
 from yutto.utils.time import parse_local_timestamp
 
@@ -140,12 +141,12 @@ def _add_basic_arguments(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument(
         "--output-format",
-        choices=["infer", "mp4", "mkv", "mov"],
+        choices=OUTPUT_FORMATS,
         help="输出格式（infer 为自动推断）",
     )
     group.add_argument(
         "--output-format-audio-only",
-        choices=["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"],
+        choices=AUDIO_ONLY_OUTPUT_FORMATS,
         help="仅包含音频流时所使用的输出格式（infer 为自动推断）",
     )
     group.add_argument(
