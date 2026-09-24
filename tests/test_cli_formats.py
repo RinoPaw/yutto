@@ -278,7 +278,6 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
     scope = _scope({"source.value": "BV1xx411c7mD", "network.fetch_workers": 2})
     items = tuple(
         UgcPage(
-            index=index,
             metadata=ItemMetaData(title=f"P{index}"),
             aid=AId("1"),
             cid=CId(str(index)),

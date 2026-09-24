@@ -30,9 +30,9 @@ def test_media_relation_owns_index_instead_of_leaf() -> None:
     assert video.items[0].media is page
     assert not hasattr(page, "index")
     with pytest.raises(FrozenInstanceError):
-        video.page_count = 4  # type: ignore[misc]
+        video.page_count = 4  # ty: ignore[invalid-assignment]
     with pytest.raises(FrozenInstanceError):
-        page.metadata.title = "changed"  # type: ignore[misc]
+        page.metadata.title = "changed"  # ty: ignore[invalid-assignment]
 
 
 def test_downloaded_resources_are_deeply_immutable() -> None:
@@ -48,12 +48,13 @@ def test_downloaded_resources_are_deeply_immutable() -> None:
 
     assert isinstance(downloaded.subtitles, tuple)
     assert isinstance(downloaded.subtitles[0].lines, tuple)
+    assert downloaded.danmaku is not None
     assert isinstance(downloaded.danmaku.data, tuple)
     assert isinstance(downloaded.chapters, tuple)
     with pytest.raises(FrozenInstanceError):
-        line.content = "changed"  # type: ignore[misc]
+        line.content = "changed"  # ty: ignore[invalid-assignment]
     with pytest.raises(FrozenInstanceError):
-        chapter.content = "changed"  # type: ignore[misc]
+        chapter.content = "changed"  # ty: ignore[invalid-assignment]
 
 
 def test_chapters_are_explicit_writer_input_not_domain_metadata(tmp_path) -> None:

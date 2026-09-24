@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class DownloadedSubtitleLine:
     content: str
-    start: int
-    end: int
+    start: float
+    end: float
 
 
 @dataclass(frozen=True, slots=True)

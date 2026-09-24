@@ -7,8 +7,8 @@ SubtitleLineData = TypedDict(
     "SubtitleLineData",
     {
         "content": str,
-        "from": int,  # This attribute is a keyword in Python, so it can not convert to class syntax
-        "to": int,
+        "from": float,  # This attribute is a keyword in Python, so it can not convert to class syntax
+        "to": float,
     },
 )
 
@@ -26,7 +26,7 @@ class Subtitle:
         self._text += string + "\n"
 
     @staticmethod
-    def time_format(seconds: int):
+    def time_format(seconds: float):
         ms = int(1000 * (seconds - int(seconds)))
         seconds = int(seconds)
         minutes, sec = seconds // 60, seconds % 60

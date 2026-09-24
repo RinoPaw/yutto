@@ -198,6 +198,7 @@ def _format_group_members(group: _FormatGroup, total_items: int) -> str:
 def _make_listing_entry(
     index: int,
     ancestry: MediaAncestry,
+    relation_index: int | None,
     item: MediaItem,
     manifest: ResourceManifest,
     selection: StreamSelection,
@@ -211,7 +212,7 @@ def _make_listing_entry(
             selection=selection,
             parent_key=id(parent),
             parent_title=parent.metadata.title,
-            page=item.index,
+            page=relation_index,
         )
     return FormatListingEntry(index=index, title=item.metadata.title, manifest=manifest, selection=selection)
 
@@ -235,17 +236,17 @@ async def run_preview_formats(
                     if result.media is None:
                         continue
 
-                    resolved_items = tuple(iter_media_items(result.media))
+                    resolved_items = tuple(iter_media_items(result.media, source_index=result.source_index))
                     if not resolved_items:
                         continue
-                    items = tuple(item for _, item in resolved_items)
+                    items = tuple(item for _, _, item in resolved_items)
                     if len(items) > 1:
                         concurrency = min(resolve_fetch_workers(probe_scope), len(items))
                         emit_download_report(f"正在探测 {len(items)} 个条目的可用格式（并发 {concurrency}）…")
 
                     outcomes = await resolve_format_manifests(execution, items, probe_scope)
                     entries: list[FormatListingEntry] = []
-                    for index, ((ancestry, item), outcome) in enumerate(
+                    for index, ((ancestry, relation_index, item), outcome) in enumerate(
                         zip(resolved_items, outcomes, strict=True),
                         start=1,
                     ):
@@ -258,7 +259,9 @@ async def run_preview_formats(
                             raise outcome
 
                         selection = select_streams(outcome, scope)
-                        entries.append(_make_listing_entry(index, ancestry, item, outcome, selection))
+                        entries.append(
+                            _make_listing_entry(index, ancestry, relation_index, item, outcome, selection)
+                        )
                         listed_streams = listed_streams or bool(outcome.videos or outcome.audios)
 
                     emit_grouped_manifest_report(entries, total_items=len(items))

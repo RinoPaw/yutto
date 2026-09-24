@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypeVar
 
 from yutto.listing import resolve_media_paths
 from yutto.media import (
@@ -21,6 +22,8 @@ from yutto.media import (
 from yutto.types import AId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
 from yutto.utils.metadata import ItemMetaData
 
+TMedia = TypeVar("TMedia", bound=Media)
+
 
 def _paths(media: Media, *, template: str = "{auto}", source_index: int | None = None) -> list[Path]:
     return [
@@ -33,7 +36,7 @@ def _paths(media: Media, *, template: str = "{auto}", source_index: int | None =
     ]
 
 
-def _entry(index: int, media: Media) -> MediaEntry[Media]:
+def _entry(index: int, media: TMedia) -> MediaEntry[TMedia]:
     return MediaEntry(index=index, media=media)
 
 

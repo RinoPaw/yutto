@@ -15,7 +15,7 @@ from yutto.core.result import (
     ItemState,
     ResolveResult,
 )
-from yutto.media import UgcPage, UgcVideo
+from yutto.media import MediaEntry, UgcPage, UgcVideo
 from yutto.types import AId, CId
 from yutto.utils.metadata import ItemMetaData
 
@@ -35,21 +35,22 @@ def test_resolve_result_keeps_media_tree_without_flat_projection():
     aid = AId("808982399")
     page = UgcPage(
         aid=aid,
-        index=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2"),
     )
+    entry = MediaEntry(index=2, media=page)
     video = UgcVideo(
         aid=aid,
         metadata=ItemMetaData(title="标题"),
-        items=(page,),
+        items=(entry,),
     )
     result = ResolveResult(items=(video,))
 
     assert result.items == (video,)
     root = result.items[0]
     assert isinstance(root, UgcVideo)
-    assert root.items == (page,)
+    assert root.items == (entry,)
+    assert root.items[0].media is page
     assert root is video
 
     with pytest.raises(FrozenInstanceError):
