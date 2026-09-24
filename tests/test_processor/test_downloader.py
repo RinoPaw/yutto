@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import shutil
 import sys
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from returns.result import Failure, Success
@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 
 pytestmark = pytest.mark.processor
+
+
+def _execution_scope(session: Any, *, download_workers: int = 1) -> ExecutionScope:
+    return ExecutionScope(session, fetch_workers=1, download_workers=download_workers)
 
 
 async def download_one(
@@ -159,7 +163,7 @@ async def test_probe_media_size_preserves_probe_failures(monkeypatch: pytest.Mon
         return Failure(failures[url])
 
     monkeypatch.setattr(Fetcher, "get_size", get_size)
-    scope = ExecutionScope(cast("Any", object()))
+    scope = _execution_scope(object())
     with pytest.raises(MaxRetryError) as single_failure:
         await _probe_media_size(scope, "primary", [])
     with pytest.raises(MaxRetryError) as multiple_failure:
@@ -177,7 +181,7 @@ async def test_probe_media_size_rejects_a_source_without_a_known_length(monkeypa
 
     monkeypatch.setattr(Fetcher, "get_size", get_size)
     with pytest.raises(MaxRetryError, match="未返回长度"):
-        await _probe_media_size(ExecutionScope(cast("Any", object())), "primary", [])
+        await _probe_media_size(_execution_scope(object()), "primary", [])
 
 
 @as_sync
@@ -198,7 +202,7 @@ async def test_download_files_owns_its_temporary_target():
 
     with LocalRangeServer(payload) as server:
         async with create_client(trust_env=False) as session:
-            downloaded = await download_one(ExecutionScope(session), server.url)
+            downloaded = await download_one(_execution_scope(session), server.url)
 
     try:
         assert downloaded.parent.name.startswith("yutto-download-")
@@ -217,7 +221,7 @@ async def test_out_of_order_ranges_commit_an_exact_temporary_file():
     with LocalRangeServer(payload, release_after={first_range: later_range}) as server:
         async with create_client(trust_env=False) as session:
             downloaded = await download_one(
-                ExecutionScope(session),
+                _execution_scope(session),
                 server.url,
                 block_size=page_size,
             )
@@ -255,7 +259,7 @@ async def test_cancelling_transfer_cleans_its_temporary_directory(
         async with create_client(trust_env=False) as session:
             task = asyncio.create_task(
                 download_one(
-                    ExecutionScope(session),
+                    _execution_scope(session),
                     server.url,
                     block_size=page_size,
                 )
@@ -314,7 +318,7 @@ async def test_download_files_reuses_scope_session_and_maps_workers(monkeypatch:
     monkeypatch.setattr(transfer_module, "TransferWorkerLimit", WorkerLimit)
 
     downloaded = await download_one(
-        ExecutionScope(cast("Any", FakeSession()), download_workers=3),
+        _execution_scope(FakeSession(), download_workers=3),
         "https://primary.example/media",
         mirrors=("https://blocked.example/media", "https://mirror.example/media"),
         block_size=64 * 1024,
@@ -382,7 +386,7 @@ async def test_item_transfers_start_together_and_share_one_worker_limit(monkeypa
     monkeypatch.setattr(transfer_module, "TransferWorkerLimit", WorkerLimit)
 
     downloaded = await download_files(
-        ExecutionScope(cast("Any", FakeSession()), download_workers=2),
+        _execution_scope(FakeSession(), download_workers=2),
         (
             ("https://video.example/media", ()),
             ("https://audio.example/media", ()),
@@ -446,7 +450,7 @@ async def test_one_worker_preserves_serial_transfer_setup(monkeypatch: pytest.Mo
     monkeypatch.setattr(transfer_module, "TransferWorkerLimit", WorkerLimit)
 
     downloaded = await download_files(
-        ExecutionScope(cast("Any", FakeSession()), download_workers=1),
+        _execution_scope(FakeSession(), download_workers=1),
         (("video", ()), ("audio", ())),
         block_size=64 * 1024,
         banned_mirrors_pattern=None,
@@ -505,7 +509,7 @@ async def test_rust_backend_reaps_a_started_handle_when_later_setup_fails(
 
     with pytest.raises(RuntimeError, match="second setup failed"):
         await download_files(
-            ExecutionScope(cast("Any", FakeSession()), download_workers=2),
+            _execution_scope(FakeSession(), download_workers=2),
             (
                 ("https://video.example/media", ()),
                 ("https://audio.example/media", ()),
