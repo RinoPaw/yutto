@@ -74,7 +74,7 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
     )
 
     assert isinstance(result.media, UgcSeries)
-    assert [video.metadata.title for video in result.media.items] == ["保留视频"]
+    assert [entry.media.metadata.title for entry in result.media.items] == ["保留视频"]
 
 
 def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,5 +129,5 @@ def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: 
     )
 
     assert isinstance(result.media, UgcSpace)
-    assert [video.metadata.title for video in result.media.items] == ["保留二"]
+    assert [entry.media.metadata.title for entry in result.media.items] == ["保留二"]
     assert sum("/x/space/wbi/arc/search" in url for url, _ in calls) == 1

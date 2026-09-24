@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from biliass import BlockOptions
 
 from yutto.core.result import Artifact, ArtifactKind
 from yutto.utils.danmaku import write_danmaku
-from yutto.utils.metadata import write_chapter_info, write_metadata
-from yutto.utils.subtitle import write_subtitle
+from yutto.utils.metadata import ChapterInfoData, write_chapter_info, write_metadata
+from yutto.utils.subtitle import SubtitleData, write_subtitle
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from yutto.downloader.downloaded import Downloaded
     from yutto.downloader.planner import DownloadPlan
-    from yutto.utils.danmaku import DanmakuOptions
+    from yutto.utils.danmaku import DanmakuData, DanmakuOptions
     from yutto.utils.metadata import ItemMetaData
 
 
@@ -45,20 +45,37 @@ class ArtifactWriter:
 
         if downloaded.subtitles:
             paths = tuple(
-                write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
+                write_subtitle(
+                    cast(
+                        "SubtitleData",
+                        [
+                            {"content": line.content, "from": line.start, "to": line.end}
+                            for line in subtitle.lines
+                        ],
+                    ),
+                    plan.paths.output,
+                    subtitle.lang,
+                )
                 for subtitle in downloaded.subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
                 paths=paths,
-                labels=tuple(subtitle["lang"] for subtitle in downloaded.subtitles),
+                labels=tuple(subtitle.lang for subtitle in downloaded.subtitles),
             )
 
         danmaku = downloaded.danmaku
-        if danmaku is not None and danmaku["data"]:
+        if danmaku is not None and danmaku.data:
             paths = tuple(
                 write_danmaku(
-                    danmaku,
+                    cast(
+                        "DanmakuData",
+                        {
+                            "source_type": danmaku.source_type,
+                            "save_type": danmaku.save_type,
+                            "data": list(danmaku.data),
+                        },
+                    ),
                     plan.paths.output,
                     resources.danmaku_height,
                     resources.danmaku_width,
@@ -68,22 +85,22 @@ class ArtifactWriter:
             yield WrittenResource(
                 kind=ArtifactKind.DANMAKU,
                 paths=paths,
-                labels=(str(danmaku["save_type"]),),
+                labels=(str(danmaku.save_type),),
             )
 
+        chapter_info_data = tuple(
+            ChapterInfoData(start=chapter.start, end=chapter.end, content=chapter.content)
+            for chapter in downloaded.chapters
+        )
         if resources.has_metadata:
-            metadata_for_write = (
-                replace(metadata, chapter_info_data=list(downloaded.chapter_info_data))
-                if downloaded.chapter_info_data
-                else metadata
-            )
             path = write_metadata(
-                metadata_for_write,
+                metadata,
                 plan.paths.output,
                 {
                     "premiered": resources.metadata.published_at,
                     "dateadded": resources.metadata.added_at,
                 },
+                chapter_info_data=chapter_info_data,
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
@@ -91,10 +108,10 @@ class ArtifactWriter:
             shutil.copyfile(downloaded.cover_path, plan.paths.saved_cover)
             yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
-        if downloaded.chapter_info_data:
+        if chapter_info_data:
             write_chapter_info(
                 plan.item,
-                list(downloaded.chapter_info_data),
+                chapter_info_data,
                 plan.paths.chapter_info,
             )
 

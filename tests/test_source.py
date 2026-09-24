@@ -148,6 +148,7 @@ def test_bangumi_episode_source_single_request_resolution(monkeypatch: pytest.Mo
     result = asyncio.run(BangumiEpisodeSource(id=EpisodeId("123")).resolve(_EXECUTION, _DEFAULT_SCOPE))
     assert isinstance(result.media, BangumiEpisode)
     assert result.media.episode_id == EpisodeId("123")
+    assert result.source_index == 1
     assert result.media.metadata.title == "1 第1话"
     assert len(calls) == 1
 
@@ -243,7 +244,7 @@ def test_bangumi_filters_extra_preview_and_then_selects(monkeypatch: pytest.Monk
     )
     result = asyncio.run(BangumiSeasonSource(id=SeasonId("456")).resolve(_EXECUTION, scope))
     assert isinstance(result.media, BangumiSeason)
-    assert [item.episode_id for item in result.media.items] == [EpisodeId("124"), EpisodeId("125")]
+    assert [entry.media.episode_id for entry in result.media.items] == [EpisodeId("124"), EpisodeId("125")]
 
 
 def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -272,11 +273,11 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
     assert isinstance(source, UgcVideoSource)
     result = asyncio.run(source.resolve(_EXECUTION, _DEFAULT_SCOPE))
     assert isinstance(result.media, UgcVideo)
-    assert [page.index for page in result.media.items] == [2]
+    assert [entry.index for entry in result.media.items] == [2]
 
     result = asyncio.run(source.resolve(_EXECUTION, _scope({"selection.expression": "3,5,1,3"})))
     assert isinstance(result.media, UgcVideo)
-    assert [page.index for page in result.media.items] == [3, 1]
+    assert [entry.index for entry in result.media.items] == [3, 1]
 
 
 @pytest.mark.parametrize(
@@ -300,16 +301,16 @@ def test_episode_selection_targets_whole_season(
     _install_fetcher_stub(monkeypatch, {response_key: response})
     result = asyncio.run(source.resolve(_EXECUTION, _scope({"selection.expression": "3,1,3"})))
     assert isinstance(result.media, expected_type)
-    assert [item.episode_id for item in result.media.items] == [EpisodeId("103"), EpisodeId("101")]
+    assert [entry.media.episode_id for entry in result.media.items] == [EpisodeId("103"), EpisodeId("101")]
 
 
 def test_seasons_default_to_all_episodes(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fetcher_stub(monkeypatch, {"pgc/view/web/season": _bangumi_season_response("101", "102", "103")})
     result = asyncio.run(BangumiSeasonSource(id=SeasonId("456")).resolve(_EXECUTION, _DEFAULT_SCOPE))
     assert isinstance(result.media, BangumiSeason)
-    assert [item.index for item in result.media.items] == [1, 2, 3]
+    assert [entry.index for entry in result.media.items] == [1, 2, 3]
 
     _install_fetcher_stub(monkeypatch, {"pugv/view/web/season": _cheese_season_response("101", "102", "103")})
     result = asyncio.run(CheeseSeasonSource(id=SeasonId("456")).resolve(_EXECUTION, _DEFAULT_SCOPE))
     assert isinstance(result.media, CheeseSeason)
-    assert [item.index for item in result.media.items] == [1, 2, 3]
+    assert [entry.index for entry in result.media.items] == [1, 2, 3]

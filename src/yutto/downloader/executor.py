@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from dataclasses import replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from yutto.api.player import get_chapter_info, get_subtitle_lines
 from yutto.core.events import (
@@ -18,22 +18,24 @@ from yutto.core.events import (
 from yutto.core.operation import ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.artifact_writer import ArtifactWriter
-from yutto.downloader.downloaded import Downloaded
+from yutto.downloader.downloaded import (
+    Downloaded,
+    DownloadedChapter,
+    DownloadedDanmaku,
+    DownloadedSubtitle,
+    DownloadedSubtitleLine,
+)
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.selector import StreamSelection
 from yutto.downloader.transfer import download_files
 from yutto.stream_formats import emit_manifest_formats
-from yutto.types import MultiLangSubtitle
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
-from yutto.utils.metadata import ChapterInfoData
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
     from yutto.downloader.planner import DownloadPlan
     from yutto.resource import ResourceManifest
-    from yutto.utils.danmaku import DanmakuData
     from yutto.utils.metadata import ItemMetaData
-    from yutto.utils.subtitle import SubtitleData
 
 
 class DownloadExecutor:
@@ -52,7 +54,7 @@ class DownloadExecutor:
             plan.paths.temporary_dir.mkdir(parents=True, exist_ok=True)
             emit_streams_selected(manifest, plan)
 
-            subtitles: list[MultiLangSubtitle] = []
+            subtitles: list[DownloadedSubtitle] = []
             if manifest.subtitles:
                 subtitle_results = await asyncio.gather(
                     *(get_subtitle_lines(scope, url) for _, url in manifest.subtitles)
@@ -60,26 +62,20 @@ class DownloadExecutor:
                 for (lang, _), lines in zip(manifest.subtitles, subtitle_results, strict=True):
                     if lines is not None:
                         subtitles.append(
-                            MultiLangSubtitle(
+                            DownloadedSubtitle(
                                 lang=lang,
-                                lines=cast(
-                                    "SubtitleData",
-                                    [
-                                        {"content": line.content, "from": line.start, "to": line.end}
-                                        for line in lines
-                                    ],
+                                lines=tuple(
+                                    DownloadedSubtitleLine(
+                                        content=line.content,
+                                        start=line.start,
+                                        end=line.end,
+                                    )
+                                    for line in lines
                                 ),
                             )
                         )
 
-            danmaku = cast(
-                "DanmakuData",
-                {
-                    "source_type": manifest.danmaku_source_type,
-                    "save_type": plan.resources.danmaku_save_type,
-                    "data": [],
-                },
-            )
+            danmaku_values: list[str | bytes] = []
             if manifest.danmaku_urls:
                 if manifest.danmaku_source_type == "xml":
                     values = [
@@ -89,7 +85,12 @@ class DownloadExecutor:
                 else:
                     results = await asyncio.gather(*(Fetcher.fetch_bin(scope, url) for url in manifest.danmaku_urls))
                     values = [unwrap_fetch_result(result) for result in results]
-                danmaku["data"].extend(value for value in values if value is not None)
+                danmaku_values.extend(value for value in values if value is not None)
+            danmaku = DownloadedDanmaku(
+                source_type=manifest.danmaku_source_type,
+                save_type=plan.resources.danmaku_save_type,
+                data=tuple(danmaku_values),
+            )
 
             cover_path = None
             if manifest.cover_url is not None:
@@ -98,12 +99,16 @@ class DownloadExecutor:
                     plan.paths.cover.write_bytes(cover_data)
                     cover_path = plan.paths.cover
 
-            chapter_info_data: tuple[ChapterInfoData, ...] = ()
+            chapters: tuple[DownloadedChapter, ...] = ()
             if manifest.chapter_info_url is not None:
                 chapter_info = await get_chapter_info(scope, manifest.chapter_info_url)
                 if chapter_info is not None and chapter_info.points is not None:
-                    chapter_info_data = tuple(
-                        ChapterInfoData(content=point.content, start=point.start, end=point.end)
+                    chapters = tuple(
+                        DownloadedChapter(
+                            content=point.content,
+                            start=point.start,
+                            end=point.end,
+                        )
                         for point in chapter_info.points
                     )
                 elif chapter_info is not None:
@@ -113,7 +118,7 @@ class DownloadExecutor:
                 subtitles=tuple(subtitles),
                 danmaku=danmaku,
                 cover_path=cover_path,
-                chapter_info_data=chapter_info_data,
+                chapters=chapters,
             )
 
             artifacts: list[Artifact] = []
@@ -205,7 +210,7 @@ class DownloadExecutor:
                     video_path=downloaded.video_path,
                     audio_path=downloaded.audio_path,
                     cover_path=downloaded.cover_path,
-                    has_chapter_info=bool(downloaded.chapter_info_data),
+                    has_chapter_info=bool(downloaded.chapters),
                 )
             finally:
                 if downloaded_paths:

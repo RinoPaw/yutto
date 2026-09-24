@@ -1,29 +1,40 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:
     from yutto.types import AId, CId, CollectionId, EpisodeId, FId, MId, SeasonId, SeriesId
     from yutto.utils.metadata import ItemMetaData
 
 
-@dataclass(slots=True, kw_only=True)
+TMedia_co = TypeVar("TMedia_co", bound="Media", covariant=True)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Media:
     metadata: ItemMetaData
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class MediaItem(Media):
+    pass
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MediaEntry(Generic[TMedia_co]):
+    """One media object's position inside its parent container."""
+
     index: int
+    media: TMedia_co
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class MediaContainer(Media):
-    items: tuple[Media, ...]
+    items: tuple[MediaEntry[Media], ...]
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BangumiEpisode(MediaItem):
     """番剧中的一个剧集。"""
 
@@ -33,15 +44,15 @@ class BangumiEpisode(MediaItem):
     is_preview: bool = False
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BangumiSeason(MediaContainer):
     """番剧的一季，拥有多个剧集。"""
 
     season_id: SeasonId
-    items: tuple[BangumiEpisode, ...] = ()
+    items: tuple[MediaEntry[BangumiEpisode], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CheeseEpisode(MediaItem):
     """课程中的一个剧集。"""
 
@@ -50,15 +61,15 @@ class CheeseEpisode(MediaItem):
     cid: CId
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CheeseSeason(MediaContainer):
     """课程（季），拥有多个课程剧集。"""
 
     season_id: SeasonId
-    items: tuple[CheeseEpisode, ...] = ()
+    items: tuple[MediaEntry[CheeseEpisode], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcPage(MediaItem):
     """UGC 投稿中的一个分 P。"""
 
@@ -66,60 +77,60 @@ class UgcPage(MediaItem):
     cid: CId
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcVideo(MediaContainer):
     """一个 UGC 投稿，拥有一个或多个分 P。"""
 
     aid: AId
     page_count: int = 1
-    items: tuple[UgcPage, ...] = ()
+    items: tuple[MediaEntry[UgcPage], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcCollection(MediaContainer):
     """UP 主创建的视频合集（season）。"""
 
     collection_id: CollectionId
-    items: tuple[UgcVideo, ...] = ()
+    items: tuple[MediaEntry[UgcVideo], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcSeries(MediaContainer):
     """UP 主创建的视频系列（series）。"""
 
     series_id: SeriesId
-    items: tuple[UgcVideo, ...] = ()
+    items: tuple[MediaEntry[UgcVideo], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcFav(MediaContainer):
     """收藏夹。"""
 
     fid: FId
-    items: tuple[UgcVideo, ...] = ()
+    items: tuple[MediaEntry[UgcVideo], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcAllFavourites(MediaContainer):
     """用户创建的全部收藏夹。"""
 
     mid: MId
-    items: tuple[UgcFav, ...] = ()
+    items: tuple[MediaEntry[UgcFav], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcWatchLater(MediaContainer):
     """稍后再看列表。"""
 
-    items: tuple[UgcVideo, ...] = ()
+    items: tuple[MediaEntry[UgcVideo], ...] = ()
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class UgcSpace(MediaContainer):
     """UP 主空间中的投稿列表。"""
 
     mid: MId
-    items: tuple[UgcVideo, ...] = ()
+    items: tuple[MediaEntry[UgcVideo], ...] = ()
 
 
 __all__ = [
@@ -129,6 +140,7 @@ __all__ = [
     "CheeseSeason",
     "Media",
     "MediaContainer",
+    "MediaEntry",
     "MediaItem",
     "UgcAllFavourites",
     "UgcCollection",

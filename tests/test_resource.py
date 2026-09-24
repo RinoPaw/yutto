@@ -27,7 +27,6 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
     aid = AId("808982399")
     page = UgcPage(
         aid=aid,
-        index=1,
         cid=CId(123),
         metadata=ItemMetaData(title="P1"),
     )
@@ -66,7 +65,6 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
 def test_resource_manifest_keeps_cover_as_url() -> None:
     page = UgcPage(
         aid=AId("808982399"),
-        index=1,
         cid=CId(123),
         metadata=ItemMetaData(title="P1", thumb="https://example.test/cover.jpg"),
     )
@@ -89,7 +87,6 @@ def test_resource_manifest_keeps_cover_as_url() -> None:
 def test_resource_resolution_returns_diagnostics_without_rendering_them(monkeypatch: pytest.MonkeyPatch) -> None:
     page = UgcPage(
         aid=AId("808982399"),
-        index=1,
         cid=CId(123),
         metadata=ItemMetaData(title="P1"),
     )

@@ -77,10 +77,12 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
     assert isinstance(result.media, UgcSeries)
     assert result.failures == ()
     assert len(result.media.items) == 1
-    assert result.media.items[0].metadata.title == "第二个"
-    assert [page.metadata.title for page in result.media.items[0].items] == ["P1", "P2"]
-    assert all(page.metadata.tag == ["标签"] for page in result.media.items[0].items)
-    assert all(page.aid == AId("200") for page in result.media.items[0].items)
+    video = result.media.items[0].media
+    assert result.media.items[0].index == 2
+    assert video.metadata.title == "第二个"
+    assert [entry.media.metadata.title for entry in video.items] == ["P1", "P2"]
+    assert all(entry.media.metadata.tag == ("标签",) for entry in video.items)
+    assert all(entry.media.aid == AId("200") for entry in video.items)
     assert any("bvid=BVSECOND" in call for call in calls)
     assert not any("bvid=BVFIRST" in call for call in calls)
 
@@ -109,8 +111,9 @@ def test_collection_resolves_all_videos_by_default(monkeypatch: pytest.MonkeyPat
     )
 
     assert isinstance(result.media, UgcCollection)
-    assert [video.metadata.title for video in result.media.items] == ["合集视频一", "合集视频二"]
-    assert [page.metadata.title for page in result.media.items[0].items] == ["P1", "P2"]
+    assert [entry.media.metadata.title for entry in result.media.items] == ["合集视频一", "合集视频二"]
+    first_video = result.media.items[0].media
+    assert [entry.media.metadata.title for entry in first_video.items] == ["P1", "P2"]
 
 
 def test_favourite_preserves_folder_owner_and_item_titles(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,8 +148,9 @@ def test_favourite_preserves_folder_owner_and_item_titles(monkeypatch: pytest.Mo
 
     assert isinstance(result.media, UgcFav)
     assert result.media.metadata.owner == "收藏者"
-    assert [video.metadata.title for video in result.media.items] == ["收藏里的单P标题", "收藏里的多P标题"]
-    assert result.media.items[0].items[0].metadata.title == "收藏里的单P标题"
+    assert [entry.media.metadata.title for entry in result.media.items] == ["收藏里的单P标题", "收藏里的多P标题"]
+    first_video = result.media.items[0].media
+    assert first_video.items[0].media.metadata.title == "收藏里的单P标题"
 
 
 def test_series_keeps_successes_and_records_expected_child_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,10 +177,11 @@ def test_series_keeps_successes_and_records_expected_child_failure(monkeypatch: 
     result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_EXECUTION, _DEFAULT_SCOPE))
 
     assert isinstance(result.media, UgcSeries)
-    assert [video.metadata.title for video in result.media.items] == ["第一个", "第三个"]
+    assert [entry.media.metadata.title for entry in result.media.items] == ["第一个", "第三个"]
+    assert [entry.index for entry in result.media.items] == [1, 3]
     assert len(result.failures) == 1
-    assert result.failures[0].index == 2
-    assert result.failures[0].source == BvId("BVBAD")
+    assert result.failures[0].path[0].index == 2
+    assert result.failures[0].path[0].source == BvId("BVBAD")
 
 
 def test_series_programming_error_aborts_task_group(monkeypatch: pytest.MonkeyPatch) -> None:

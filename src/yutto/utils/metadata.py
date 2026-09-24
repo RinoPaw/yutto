@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from dict2xml import dict2xml
@@ -13,12 +14,16 @@ if TYPE_CHECKING:
     from yutto.types import MId
 
 
-class Actor(TypedDict):
+@dataclass(frozen=True, slots=True)
+class Actor:
     name: str
     role: str
     thumb: str
     profile: str
     order: int
+
+    def __getitem__(self, key: str) -> str | int:
+        return getattr(self, key)
 
 
 class ChapterInfoData(TypedDict):
@@ -34,7 +39,7 @@ class MetaData(TypedDict):
     thumb: str
     premiered: int
     dateadded: int
-    actor: list[Actor]
+    actor: list[dict[str, object]]
     genre: list[str]
     tag: list[str]
     source: str
@@ -43,7 +48,7 @@ class MetaData(TypedDict):
     chapter_info_data: list[ChapterInfoData]
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ItemMetaData:
     title: str = ""
     plot: str = ""
@@ -54,18 +59,25 @@ class ItemMetaData:
     thumb: str = ""
     show_title: str = ""
 
-    genre: list[str] = field(default_factory=list)
-    tag: list[str] = field(default_factory=list)
-    actors: list[Actor] = field(default_factory=list)
+    genre: Sequence[str] = ()
+    tag: Sequence[str] = ()
+    actors: Sequence[Actor] = ()
 
     added_at: int = 0
     source: str = ""
     original_filename: str = ""
     website: str = ""
-    chapter_info_data: list[ChapterInfoData] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "genre", tuple(self.genre))
+        object.__setattr__(self, "tag", tuple(self.tag))
+        object.__setattr__(self, "actors", tuple(self.actors))
 
 
-def _metadata_as_dict(metadata: MetaData | ItemMetaData) -> dict[str, Any]:
+def _metadata_as_dict(
+    metadata: MetaData | ItemMetaData,
+    chapter_info_data: Sequence[ChapterInfoData] = (),
+) -> dict[str, Any]:
     if isinstance(metadata, ItemMetaData):
         return {
             "title": metadata.title,
@@ -74,19 +86,26 @@ def _metadata_as_dict(metadata: MetaData | ItemMetaData) -> dict[str, Any]:
             "thumb": metadata.thumb,
             "premiered": metadata.published_at,
             "dateadded": metadata.added_at,
-            "actor": metadata.actors,
-            "genre": metadata.genre,
-            "tag": metadata.tag,
+            "actor": [asdict(actor) for actor in metadata.actors],
+            "genre": list(metadata.genre),
+            "tag": list(metadata.tag),
             "source": metadata.source,
             "original_filename": metadata.original_filename,
             "website": metadata.website,
-            "chapter_info_data": metadata.chapter_info_data,
+            "chapter_info_data": list(chapter_info_data),
         }
-    return dict(metadata)
+    result = dict(metadata)
+    if chapter_info_data:
+        result["chapter_info_data"] = list(chapter_info_data)
+    return result
 
 
-def metadata_value_format(metadata: MetaData | ItemMetaData, metadata_format: dict[str, str]) -> dict[str, Any]:
-    formatted_metadata = _metadata_as_dict(metadata)
+def metadata_value_format(
+    metadata: MetaData | ItemMetaData,
+    metadata_format: dict[str, str],
+    chapter_info_data: Sequence[ChapterInfoData] = (),
+) -> dict[str, Any]:
+    formatted_metadata = _metadata_as_dict(metadata, chapter_info_data)
     for key, value in formatted_metadata.items():
         if key in metadata_format:
             assert isinstance(value, int)
@@ -94,11 +113,19 @@ def metadata_value_format(metadata: MetaData | ItemMetaData, metadata_format: di
     return formatted_metadata
 
 
-def write_metadata(metadata: MetaData | ItemMetaData, video_path: Path, metadata_format: dict[str, str]) -> Path:
+def write_metadata(
+    metadata: MetaData | ItemMetaData,
+    video_path: Path,
+    metadata_format: dict[str, str],
+    *,
+    chapter_info_data: Sequence[ChapterInfoData] = (),
+) -> Path:
     metadata_path = video_path.with_suffix(".nfo")
     custom_root = "episodedetails"  # TODO: 不同视频类型使用不同的 root name
     user_formatted_metadata = (
-        metadata_value_format(metadata, metadata_format) if metadata_format else _metadata_as_dict(metadata)
+        metadata_value_format(metadata, metadata_format, chapter_info_data)
+        if metadata_format
+        else _metadata_as_dict(metadata, chapter_info_data)
     )
     xml_content = dict2xml(user_formatted_metadata, wrap=custom_root, indent="  ")
     with metadata_path.open("w", encoding="utf-8") as f:
@@ -106,15 +133,8 @@ def write_metadata(metadata: MetaData | ItemMetaData, video_path: Path, metadata
     return metadata_path
 
 
-def attach_chapter_info(metadata: MetaData | ItemMetaData, chapter_info_data: list[ChapterInfoData]):
-    if isinstance(metadata, ItemMetaData):
-        metadata.chapter_info_data = chapter_info_data
-    else:
-        metadata["chapter_info_data"] = chapter_info_data
-
-
 # https://wklchris.github.io/blog/FFmpeg/FFmpeg.html#id26
-def write_chapter_info(title: str, chapter_info_data: list[ChapterInfoData], chapter_path: Path):
+def write_chapter_info(title: str, chapter_info_data: Sequence[ChapterInfoData], chapter_path: Path):
     with chapter_path.open("w", encoding="utf-8") as f:
         f.write(";FFMETADATA1\n")
         f.write(f"title={title}\n")

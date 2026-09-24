@@ -8,9 +8,9 @@ from returns.result import Success
 
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import NotFoundError
-from yutto.media import UgcPage, UgcSeries, UgcVideo
+from yutto.media import MediaEntry, UgcPage, UgcSeries, UgcVideo
 from yutto.scope import ROOT_SCOPE, Scope
-from yutto.source import MediaResolveFailure, MediaResolveResult
+from yutto.source import MediaResolveFailure, MediaResolveResult, MediaResolveStep
 from yutto.types import AId, BvId, CId, SeriesId
 from yutto.utils.metadata import ItemMetaData
 
@@ -53,10 +53,18 @@ def _series_with_one_video() -> UgcSeries:
         series_id=SeriesId("456"),
         metadata=ItemMetaData(title="系列"),
         items=(
-            UgcVideo(
-                aid=aid,
-                metadata=ItemMetaData(title="可用视频"),
-                items=(UgcPage(aid=aid, index=1, cid=CId("101"), metadata=ItemMetaData(title="P1")),),
+            MediaEntry(
+                index=1,
+                media=UgcVideo(
+                    aid=aid,
+                    metadata=ItemMetaData(title="可用视频"),
+                    items=(
+                        MediaEntry(
+                            index=1,
+                            media=UgcPage(aid=aid, cid=CId("101"), metadata=ItemMetaData(title="P1")),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
@@ -81,9 +89,9 @@ def test_manager_resolves_source_to_media_tree_and_deduplicates_selection(
 
     assert isinstance(result.media, UgcVideo)
     assert result.media.metadata.title == "投稿"
-    assert [page.index for page in result.media.items] == [3, 1]
-    assert [page.metadata.title for page in result.media.items] == ["P3", "P1"]
-    assert all(page.aid == result.media.aid for page in result.media.items)
+    assert [entry.index for entry in result.media.items] == [3, 1]
+    assert [entry.media.metadata.title for entry in result.media.items] == ["P3", "P1"]
+    assert all(entry.media.aid == result.media.aid for entry in result.media.items)
 
 
 def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,7 +101,12 @@ def test_manager_keeps_partial_success_and_reports_child_failure(monkeypatch: py
         async def resolve(self, execution: object, scope: Scope) -> MediaResolveResult:
             return MediaResolveResult(
                 media=_series_with_one_video(),
-                failures=(MediaResolveFailure(index=2, source=BvId("BVBAD"), error=error),),
+                failures=(
+                    MediaResolveFailure(
+                        path=(MediaResolveStep(index=2, source=BvId("BVBAD")),),
+                        error=error,
+                    ),
+                ),
             )
 
     reports: list[tuple[str, object]] = []
@@ -123,7 +136,12 @@ def test_manager_keeps_all_child_failures_for_download(monkeypatch: pytest.Monke
                     metadata=ItemMetaData(title="系列"),
                     items=(),
                 ),
-                failures=(MediaResolveFailure(index=1, source=BvId("BVBAD"), error=error),),
+                failures=(
+                    MediaResolveFailure(
+                        path=(MediaResolveStep(index=1, source=BvId("BVBAD")),),
+                        error=error,
+                    ),
+                ),
             )
 
     monkeypatch.setattr("yutto.download_manager.parse", lambda value: FakeSource())

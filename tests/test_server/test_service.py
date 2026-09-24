@@ -21,7 +21,7 @@ from yutto.core.result import (
     ItemState,
     ResolveResult,
 )
-from yutto.media import UgcPage, UgcVideo
+from yutto.media import MediaEntry, UgcPage, UgcVideo
 from yutto.runtime import EventReplay, TaskError, TaskEvent, TaskSnapshot, TaskState
 from yutto.scope import Scope
 from yutto.server.service import (
@@ -416,14 +416,13 @@ def test_resolve_result_serializes_media_tree():
     aid = AId("808982399")
     page = UgcPage(
         aid=aid,
-        index=2,
         cid=CId("10"),
         metadata=ItemMetaData(title="P2", duration=1559),
     )
     video = UgcVideo(
         aid=aid,
         metadata=ItemMetaData(title="标题", owner="某UP主", tag=["标签A", "标签B"]),
-        items=(page,),
+        items=(MediaEntry(index=2, media=page),),
     )
     snapshot = TaskSnapshot[Scope, ResolveResult](
         task_id="task-listing",
@@ -450,6 +449,7 @@ def test_resolve_result_serializes_media_tree():
     assert video_metadata["title"] == "标题"
     assert video_metadata["owner"] == "某UP主"
     assert video_metadata["tag"] == ["标签A", "标签B"]
+    assert "chapter_info_data" not in video_metadata
     assert page_wire["type"] == "UgcPage"
     assert page_wire["aid"] == "808982399"
     assert page_wire["index"] == 2

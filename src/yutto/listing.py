@@ -34,6 +34,7 @@ MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
 @dataclass(frozen=True, slots=True)
 class ResolvedMediaPath:
     ancestry: MediaAncestry
+    index: int | None
     item: MediaItem
     path: Path
 
@@ -41,14 +42,15 @@ class ResolvedMediaPath:
 def iter_media_items(
     media: Media,
     ancestry: MediaAncestry = (),
-) -> Iterator[tuple[MediaAncestry, MediaItem]]:
+    source_index: int | None = None,
+) -> Iterator[tuple[MediaAncestry, int | None, MediaItem]]:
     if isinstance(media, MediaContainer):
         child_ancestry = (*ancestry, media)
-        for child in media.items:
-            yield from iter_media_items(child, child_ancestry)
+        for entry in media.items:
+            yield from iter_media_items(entry.media, child_ancestry, entry.index)
         return
     if isinstance(media, MediaItem):
-        yield ancestry, media
+        yield ancestry, source_index, media
         return
     raise TypeError(f"unsupported media: {type(media).__name__}")
 
@@ -152,16 +154,18 @@ def _episode_name(item: BangumiEpisode | CheeseEpisode) -> str:
 
 def _resolve_media_path(
     ancestry: MediaAncestry,
+    index: int | None,
     item: MediaItem,
     subpath_template: str,
 ) -> Path:
+    relation_index = index if index is not None else 1
     if isinstance(item, UgcPage):
         video, auto_path, name, title, username, series_title = _ugc_context(ancestry, item)
         variables = _path_variables(
             video,
             item,
             video.aid,
-            index=item.index,
+            index=relation_index,
             name=name,
             title=title,
             username=username,
@@ -182,7 +186,7 @@ def _resolve_media_path(
     else:
         raise TypeError(f"unsupported media item: {type(item).__name__}")
 
-    variables = _path_variables(parent, item, aid, index=item.index, name=_episode_name(item))
+    variables = _path_variables(parent, item, aid, index=relation_index, name=_episode_name(item))
     auto_path = "{name}" if parent is None else "{title}/{name}"
     return Path(resolve_path_template(subpath_template, auto_path, variables))
 
@@ -191,15 +195,17 @@ def resolve_media_paths(
     root_media: Media,
     *,
     subpath_template: str = "{auto}",
+    source_index: int | None = None,
 ) -> tuple[ResolvedMediaPath, ...]:
     """Resolve paths for every downloadable leaf in a Media tree."""
     return tuple(
         ResolvedMediaPath(
             ancestry=ancestry,
+            index=index,
             item=item,
-            path=_resolve_media_path(ancestry, item, subpath_template),
+            path=_resolve_media_path(ancestry, index, item, subpath_template),
         )
-        for ancestry, item in iter_media_items(root_media)
+        for ancestry, index, item in iter_media_items(root_media, source_index=source_index)
     )
 
 

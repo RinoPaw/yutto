@@ -84,8 +84,8 @@ def test_all_favourites_resolves_every_folder(monkeypatch: pytest.MonkeyPatch) -
     result = asyncio.run(UgcAllFavouritesSource(id=MId("123")).resolve(_EXECUTION, _SCOPE))
 
     assert isinstance(result.media, UgcAllFavourites)
-    assert [favourite.fid.value for favourite in result.media.items] == ["11", "22"]
-    assert all(len(favourite.items) == 1 for favourite in result.media.items)
+    assert [entry.media.fid.value for entry in result.media.items] == ["11", "22"]
+    assert all(len(entry.media.items) == 1 for entry in result.media.items)
     assert result.media.metadata.owner == "收藏者"
     assert result.failures == ()
     assert sum("/x/v3/fav/resource/list" in call for call in calls) == 2

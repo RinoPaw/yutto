@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from yutto.api.season import (
@@ -44,6 +44,7 @@ from yutto.media import (
     CheeseEpisode,
     CheeseSeason,
     Media,
+    MediaEntry,
     UgcAllFavourites,
     UgcCollection,
     UgcFav,
@@ -98,6 +99,7 @@ class MediaResolveFailure:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MediaResolveResult(Generic[TMedia_co]):
     media: TMedia_co
+    source_index: int | None = None
     failures: tuple[MediaResolveFailure, ...] = ()
 
 
@@ -206,20 +208,22 @@ class UgcVideoSource(MediaSource):
                 mid=owner.mid if owner is not None else None,
                 owner=owner.name if owner is not None else "",
                 added_at=added_at,
-                actors=list(actors),
-                genre=list(genres),
-                tag=list(tags),
+                actors=actors,
+                genre=genres,
+                tag=tags,
                 website=video_info.bvid.to_url(),
             )
 
         page_items = tuple(
-            UgcPage(
+            MediaEntry(
                 index=index,
-                aid=aid,
-                cid=pages[index - 1].cid,
-                metadata=make_metadata(
-                    title=pages[index - 1].title,
-                    duration=pages[index - 1].duration,
+                media=UgcPage(
+                    aid=aid,
+                    cid=pages[index - 1].cid,
+                    metadata=make_metadata(
+                        title=pages[index - 1].title,
+                        duration=pages[index - 1].duration,
+                    ),
                 ),
             )
             for index in indexes
@@ -241,8 +245,8 @@ async def _resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_avids: list[tuple[int, AvId]],
     video_scope: Scope,
-) -> tuple[tuple[UgcVideo, ...], tuple[MediaResolveFailure, ...]]:
-    async def resolve_one(index: int, avid: AvId) -> UgcVideo | MediaResolveFailure | None:
+) -> tuple[tuple[MediaEntry[UgcVideo], ...], tuple[MediaResolveFailure, ...]]:
+    async def resolve_one(index: int, avid: AvId) -> MediaEntry[UgcVideo] | MediaResolveFailure | None:
         try:
             result = await UgcVideoSource(id=avid).resolve(execution, video_scope)
         except _EXPECTED_UGC_CHILD_ERRORS as error:
@@ -258,9 +262,9 @@ async def _resolve_ugc_videos(
             )
             return None
 
-        return result.media
+        return MediaEntry(index=index, media=result.media)
 
-    tasks: list[asyncio.Task[UgcVideo | MediaResolveFailure | None]] = []
+    tasks: list[asyncio.Task[MediaEntry[UgcVideo] | MediaResolveFailure | None]] = []
     try:
         async with asyncio.TaskGroup() as task_group:
             tasks = [task_group.create_task(resolve_one(index, avid)) for index, avid in indexed_avids]
@@ -269,7 +273,7 @@ async def _resolve_ugc_videos(
             raise error_group.exceptions[0] from None
         raise
 
-    resolved: list[UgcVideo] = []
+    resolved: list[MediaEntry[UgcVideo]] = []
     failures: list[MediaResolveFailure] = []
     for task in tasks:
         result = task.result()
@@ -366,7 +370,7 @@ class UgcAllFavouritesSource(MediaSource):
         selection = parse_selection(expression if expression is not None else "~")
         selected_folders = _select_items(list(enumerate(folders, start=1)), selection)
         child_scope = Scope({"selection.expression": "~"}, parent=scope)
-        favourites: list[UgcFav] = []
+        favourites: list[MediaEntry[UgcFav]] = []
         failures: list[MediaResolveFailure] = []
 
         for index, fid in selected_folders:
@@ -380,10 +384,13 @@ class UgcAllFavouritesSource(MediaSource):
                     )
                 )
                 continue
-            favourites.append(result.media)
+            favourites.append(MediaEntry(index=index, media=result.media))
             failures.extend(failure.with_parent(index=index, source=fid) for failure in result.failures)
 
-        owner = next((favourite.metadata.owner for favourite in favourites if favourite.metadata.owner), "")
+        owner = next(
+            (entry.media.metadata.owner for entry in favourites if entry.media.metadata.owner),
+            "",
+        )
         return MediaResolveResult(
             media=UgcAllFavourites(
                 mid=self.id,
@@ -485,9 +492,8 @@ class UgcWatchLaterSource(MediaSource):
         )
 
 
-def _parse_bangumi_episode(index: int, item: BangumiEpisodeInfo) -> BangumiEpisode:
+def _parse_bangumi_episode(item: BangumiEpisodeInfo) -> BangumiEpisode:
     return BangumiEpisode(
-        index=index,
         episode_id=item.episode_id,
         aid=item.aid,
         cid=item.cid,
@@ -522,7 +528,7 @@ def _make_bangumi_season_metadata(result: BangumiSeasonInfo) -> ItemMetaData:
         plot=result.description,
         mid=owner.mid if owner is not None else None,
         owner=owner.name if owner is not None else "",
-        genre=list(result.genres),
+        genre=result.genres,
         actors=actors,
     )
 
@@ -536,13 +542,18 @@ def _indexed_bangumi_episode_items(
     return list(enumerate(items, start=1))
 
 
-def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: ItemMetaData) -> None:
-    episode.metadata.mid = episode.metadata.mid or metadata.mid
-    episode.metadata.owner = episode.metadata.owner or metadata.owner
-    if not episode.metadata.genre:
-        episode.metadata.genre = list(metadata.genre)
-    if not episode.metadata.actors:
-        episode.metadata.actors = list(metadata.actors)
+def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: ItemMetaData) -> BangumiEpisode:
+    episode_metadata = episode.metadata
+    return replace(
+        episode,
+        metadata=replace(
+            episode_metadata,
+            mid=episode_metadata.mid or metadata.mid,
+            owner=episode_metadata.owner or metadata.owner,
+            genre=episode_metadata.genre or metadata.genre,
+            actors=episode_metadata.actors or metadata.actors,
+        ),
+    )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -564,9 +575,8 @@ class BangumiEpisodeSource(MediaSource):
         selection = parse_selection(expression) if expression is not None else None
         if selection is None:
             index, item = anchor_item
-            episode = _parse_bangumi_episode(index, item)
-            _apply_container_metadata_to_episode(episode, season_metadata)
-            return MediaResolveResult(media=episode)
+            episode = _apply_container_metadata_to_episode(_parse_bangumi_episode(item), season_metadata)
+            return MediaResolveResult(media=episode, source_index=index)
 
         episode_items = _indexed_bangumi_episode_items(
             result,
@@ -584,7 +594,10 @@ class BangumiEpisodeSource(MediaSource):
             media=BangumiSeason(
                 season_id=result.season_id,
                 metadata=season_metadata,
-                items=tuple(_parse_bangumi_episode(index, item) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_bangumi_episode(item))
+                    for index, item in episode_items
+                ),
             )
         )
 
@@ -614,14 +627,16 @@ class BangumiSeasonSource(MediaSource):
             media=BangumiSeason(
                 season_id=season_id,
                 metadata=_make_bangumi_season_metadata(result),
-                items=tuple(_parse_bangumi_episode(index, item) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_bangumi_episode(item))
+                    for index, item in episode_items
+                ),
             )
         )
 
 
-def _parse_cheese_episode(index: int, item: CheeseEpisodeInfo) -> CheeseEpisode:
+def _parse_cheese_episode(item: CheeseEpisodeInfo) -> CheeseEpisode:
     return CheeseEpisode(
-        index=index,
         episode_id=item.episode_id,
         aid=item.aid,
         cid=item.cid,
@@ -666,7 +681,7 @@ class CheeseEpisodeSource(MediaSource):
         expression = scope.selection.expression
         if expression is None:
             index, item = anchor_item
-            return MediaResolveResult(media=_parse_cheese_episode(index, item))
+            return MediaResolveResult(media=_parse_cheese_episode(item), source_index=index)
         selection = parse_selection(expression)
         episode_items = _cheese_episode_items(result, scope, selection)
         season_id = result.season_id or SeasonId(self.id.value)
@@ -674,7 +689,10 @@ class CheeseEpisodeSource(MediaSource):
             media=CheeseSeason(
                 season_id=season_id,
                 metadata=ItemMetaData(title=result.title),
-                items=tuple(_parse_cheese_episode(index, item) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_cheese_episode(item))
+                    for index, item in episode_items
+                ),
             )
         )
 
@@ -692,7 +710,10 @@ class CheeseSeasonSource(MediaSource):
             media=CheeseSeason(
                 season_id=self.id,
                 metadata=ItemMetaData(title=result.title),
-                items=tuple(_parse_cheese_episode(index, item) for index, item in episode_items),
+                items=tuple(
+                    MediaEntry(index=index, media=_parse_cheese_episode(item))
+                    for index, item in episode_items
+                ),
             )
         )
 

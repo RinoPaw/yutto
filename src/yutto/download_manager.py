@@ -233,7 +233,11 @@ class DownloadManager:
         result = await self.resolve_scope(execution, scope)
 
         subpath_template = str(scope.output.subpath_template)
-        path_entries = resolve_media_paths(result.media, subpath_template=subpath_template)
+        path_entries = resolve_media_paths(
+            result.media,
+            subpath_template=subpath_template,
+            source_index=result.source_index,
+        )
         download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
         prepared: list[tuple[MediaAncestry, MediaItem, Path, str | None]] = []
         current_display_group: str | None = None
