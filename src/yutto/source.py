@@ -13,6 +13,7 @@ from yutto.api.season import (
     get_season_id_by_media,
 )
 from yutto.api.ugc import (
+    UgcVideoReference,
     get_all_favourite_folders,
     get_collection,
     get_favourite_info,
@@ -143,11 +144,11 @@ class UgcVideoSource(MediaSource):
         aid = video_info.aid
         tags = await get_ugc_video_tags(execution, aid)
         added_at = get_time_stamp_by_now()
-        page_data = video_info.pages
+        pages = video_info.pages
         selection_expression = scope.selection.expression
         selection = parse_selection(selection_expression) if selection_expression is not None else None
         if selection is not None:
-            total = len(page_data)
+            total = len(pages)
             result = selection.evaluate(total)
             if result.out_of_range:
                 emit_download_report(
@@ -162,8 +163,8 @@ class UgcVideoSource(MediaSource):
             indexes = result.indexes
         else:
             page = self.page if self.page is not None else 1
-            if page > len(page_data):
-                raise WrongArgumentError(f"序号 {page} 超出范围（1~{len(page_data)}）")
+            if page > len(pages):
+                raise WrongArgumentError(f"序号 {page} 超出范围（1~{len(pages)}）")
             indexes = (page,)
 
         actors: list[Actor] = []
@@ -210,14 +211,14 @@ class UgcVideoSource(MediaSource):
                 website=video_info.bvid.to_url(),
             )
 
-        pages = tuple(
+        page_items = tuple(
             UgcPage(
                 index=index,
                 aid=aid,
-                cid=page_data[index - 1].cid,
+                cid=pages[index - 1].cid,
                 metadata=make_metadata(
-                    title=page_data[index - 1].title,
-                    duration=page_data[index - 1].duration,
+                    title=pages[index - 1].title,
+                    duration=pages[index - 1].duration,
                 ),
             )
             for index in indexes
@@ -225,12 +226,12 @@ class UgcVideoSource(MediaSource):
         return MediaResolveResult(
             media=UgcVideo(
                 aid=aid,
-                page_count=len(page_data),
+                page_count=len(pages),
                 metadata=make_metadata(
                     title=video_info.title,
                     duration=video_info.duration,
                 ),
-                items=pages,
+                items=page_items,
             )
         )
 
@@ -279,17 +280,15 @@ async def _resolve_ugc_videos(
 
 
 def _ugc_candidates(
-    items: list[dict[str, Any]],
+    items: tuple[UgcVideoReference, ...],
     scope: Scope,
     selection: Selection,
-    *,
-    publication_field: str,
-) -> list[tuple[int, dict[str, Any]]]:
+) -> list[tuple[int, UgcVideoReference]]:
     indexed = list(enumerate(items, start=1))
     indexed = [
         (index, item)
         for index, item in indexed
-        if item.get(publication_field) is None or _publication_time_matches(int(item[publication_field]), scope)
+        if item.published_at is None or _publication_time_matches(item.published_at, scope)
     ]
     return _select_items(indexed, selection)
 
@@ -300,18 +299,20 @@ class UgcCollectionSource(MediaSource):
     owner_id: MId
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        title, archives = await get_collection(execution, self.id, self.owner_id)
+        collection = await get_collection(execution, self.id, self.owner_id)
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_archives = _ugc_candidates(archives, scope, selection, publication_field="pubdate")
+        selected_videos = _ugc_candidates(collection.videos, scope, selection)
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], video_scope
+            execution,
+            [(index, item.bvid) for index, item in selected_videos],
+            video_scope,
         )
         return MediaResolveResult(
             media=UgcCollection(
                 collection_id=self.id,
-                metadata=ItemMetaData(title=title, mid=self.owner_id),
+                metadata=ItemMetaData(title=collection.title, mid=self.owner_id),
                 items=resolved,
             ),
             failures=failures,
@@ -323,29 +324,30 @@ class UgcFavSource(MediaSource):
     id: FId
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcFav]:
-        info, medias = await asyncio.gather(
+        info, videos = await asyncio.gather(
             get_favourite_info(execution, self.id),
             get_favourite_medias(execution, self.id),
         )
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_medias = _ugc_candidates(medias, scope, selection, publication_field="pubtime")
+        selected_videos = _ugc_candidates(videos, scope, selection)
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], video_scope
+            execution,
+            [(index, item.bvid) for index, item in selected_videos],
+            video_scope,
         )
 
-        upper = info.get("upper") or {}
-        upper_mid = upper.get("mid")
+        owner = info.owner
         return MediaResolveResult(
             media=UgcFav(
                 fid=self.id,
                 metadata=ItemMetaData(
-                    title=str(info.get("title", "")),
-                    plot=str(info.get("intro", "")),
-                    thumb=str(info.get("cover", "")),
-                    mid=MId(str(upper_mid)) if upper_mid is not None else None,
-                    owner=str(upper.get("name", "")),
+                    title=info.title,
+                    plot=info.description,
+                    thumb=info.cover,
+                    mid=owner.mid if owner is not None else None,
+                    owner=owner.name if owner is not None else "",
                 ),
                 items=resolved,
             ),
@@ -358,9 +360,7 @@ class UgcAllFavouritesSource(MediaSource):
     id: MId
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
-        folders = [
-            folder for folder in await get_all_favourite_folders(execution, self.id) if folder.get("id") is not None
-        ]
+        folders = await get_all_favourite_folders(execution, self.id)
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_folders = _select_items(list(enumerate(folders, start=1)), selection)
@@ -368,8 +368,7 @@ class UgcAllFavouritesSource(MediaSource):
         favourites: list[UgcFav] = []
         failures: list[MediaResolveFailure] = []
 
-        for index, folder in selected_folders:
-            fid = FId(str(folder["id"]))
+        for index, fid in selected_folders:
             try:
                 result = await UgcFavSource(id=fid).resolve(execution, child_scope)
             except _EXPECTED_UGC_CHILD_ERRORS as error:
@@ -404,23 +403,23 @@ class UgcSeriesSource(MediaSource):
 
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
         info = await get_series_info(execution, self.id)
-        meta = info.get("meta", {})
-        mid = MId(str(meta["mid"]))
-        archives = await get_series_archives(execution, self.id, mid)
+        archives = await get_series_archives(execution, self.id, info.owner_id)
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_archives = _ugc_candidates(archives, scope, selection, publication_field="pubdate")
+        selected_videos = _ugc_candidates(archives, scope, selection)
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], video_scope
+            execution,
+            [(index, item.bvid) for index, item in selected_videos],
+            video_scope,
         )
         return MediaResolveResult(
             media=UgcSeries(
                 series_id=self.id,
                 metadata=ItemMetaData(
-                    title=str(meta.get("name", "")),
-                    mid=mid,
-                    plot=str(meta.get("description", "")),
+                    title=info.title,
+                    mid=info.owner_id,
+                    plot=info.description,
                 ),
                 items=resolved,
             ),
@@ -440,20 +439,22 @@ class UgcSpaceSource(MediaSource):
         )
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_archives = _ugc_candidates(archives, scope, selection, publication_field="created")
+        selected_videos = _ugc_candidates(archives, scope, selection)
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_archives], video_scope
+            execution,
+            [(index, item.bvid) for index, item in selected_videos],
+            video_scope,
         )
         return MediaResolveResult(
             media=UgcSpace(
                 mid=self.id,
                 metadata=ItemMetaData(
-                    title=str(profile.get("name", "")),
-                    plot=str(profile.get("sign", "")),
-                    thumb=str(profile.get("face", "")),
+                    title=profile.name,
+                    plot=profile.description,
+                    thumb=profile.face,
                     mid=self.id,
-                    owner=str(profile.get("name", "")),
+                    owner=profile.name,
                 ),
                 items=resolved,
             ),
@@ -467,10 +468,12 @@ class UgcWatchLaterSource(MediaSource):
         entries = await get_watch_later_entries(execution)
         expression = scope.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_entries = _ugc_candidates(entries, scope, selection, publication_field="pubdate")
+        selected_videos = _ugc_candidates(entries, scope, selection)
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
-            execution, [(index, BvId(item["bvid"])) for index, item in selected_entries], video_scope
+            execution,
+            [(index, item.bvid) for index, item in selected_videos],
+            video_scope,
         )
         return MediaResolveResult(
             media=UgcWatchLater(

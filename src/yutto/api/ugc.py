@@ -10,12 +10,12 @@ from yutto.api.account import encode_wbi, get_wbi_img
 from yutto.api.common import fetch_payload
 from yutto.core.operation import emit_download_report
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, NotLoginError
-from yutto.types import AId, BvId, CId, MId
+from yutto.types import AId, BvId, CId, FId, MId
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
-    from yutto.types import AvId, CollectionId, FId, SeriesId
+    from yutto.types import AvId, CollectionId, SeriesId
 
 WATCH_LATER_API = "https://api.bilibili.com/x/v2/history/toview/web"
 
@@ -57,6 +57,40 @@ class UgcVideoInfo:
     pages: tuple[UgcPageInfo, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class UgcVideoReference:
+    bvid: BvId
+    published_at: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class UgcCollectionInfo:
+    title: str
+    videos: tuple[UgcVideoReference, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class UgcFavouriteInfo:
+    title: str
+    description: str
+    cover: str
+    owner: UgcOwnerInfo | None
+
+
+@dataclass(frozen=True, slots=True)
+class UgcSeriesInfo:
+    title: str
+    owner_id: MId
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class UgcSpaceProfile:
+    name: str
+    description: str
+    face: str
+
+
 def _query(avid: AvId) -> str:
     return urlencode({key: value for key, value in avid.to_dict().items() if value})
 
@@ -67,6 +101,15 @@ def _dict_list(value: object, description: str) -> list[dict[str, Any]]:
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise NoAccessPermissionError(f"无法解析{description}，原因：API 响应格式异常")
     return value
+
+
+def _decode_optional_int(value: object, description: str) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as error:
+        raise NoAccessPermissionError(f"无法解析{description}，原因：API 响应格式异常") from error
 
 
 def _decode_ugc_owner(value: object) -> UgcOwnerInfo | None:
@@ -115,7 +158,7 @@ def _decode_ugc_pages(value: object, *, video_title: str) -> tuple[UgcPageInfo, 
             UgcPageInfo(
                 cid=CId(cid),
                 title=str(title) if title is not None else video_title,
-                duration=int(item.get("duration", 0)),
+                duration=_decode_optional_int(item.get("duration"), "视频分 P 时长") or 0,
             )
         )
     return tuple(pages)
@@ -136,13 +179,33 @@ def _decode_ugc_video_info(data: dict[str, Any]) -> UgcVideoInfo:
         title=video_title,
         description=str(data.get("desc", "")),
         cover=str(data.get("pic", "")),
-        published_at=int(data.get("pubdate", 0)),
-        duration=int(data.get("duration", 0)),
+        published_at=_decode_optional_int(data.get("pubdate"), "视频发布时间") or 0,
+        duration=_decode_optional_int(data.get("duration"), "视频时长") or 0,
         category=category if isinstance(category, str) and category else None,
         owner=_decode_ugc_owner(data.get("owner")),
         staff=_decode_ugc_staff(data.get("staff")),
         pages=_decode_ugc_pages(data.get("pages"), video_title=video_title),
     )
+
+
+def _decode_video_references(
+    value: object,
+    *,
+    description: str,
+    publication_field: str,
+) -> tuple[UgcVideoReference, ...]:
+    videos: list[UgcVideoReference] = []
+    for item in _dict_list(value, description):
+        bvid = item.get("bvid")
+        if not bvid:
+            continue
+        videos.append(
+            UgcVideoReference(
+                bvid=BvId(str(bvid)),
+                published_at=_decode_optional_int(item.get(publication_field), f"{description}发布时间"),
+            )
+        )
+    return tuple(videos)
 
 
 async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> UgcVideoInfo:
@@ -173,7 +236,7 @@ async def get_ugc_video_info(scope: ExecutionScope, avid: AvId) -> UgcVideoInfo:
     return _decode_ugc_video_info(data)
 
 
-async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> list[str]:
+async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> tuple[str, ...]:
     api = f"https://api.bilibili.com/x/tag/archive/tags?aid={aid.value}"
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, api))
     if response.get("code") != 0:
@@ -181,17 +244,21 @@ async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> list[str]:
     raw_tags = response.get("data")
     if not isinstance(raw_tags, list):
         raise NotFoundError(f"无法获取视频 {aid} 标签，原因：API 响应格式异常")
-    return [str(tag["tag_name"]) for tag in raw_tags if isinstance(tag, dict) and tag.get("tag_name") is not None]
+    return tuple(
+        str(tag["tag_name"])
+        for tag in raw_tags
+        if isinstance(tag, dict) and tag.get("tag_name") is not None
+    )
 
 
 async def get_collection(
     scope: ExecutionScope,
     collection_id: CollectionId,
     owner_id: MId,
-) -> tuple[str, list[dict[str, Any]]]:
+) -> UgcCollectionInfo:
     page_size = 30
     page_num = 1
-    archives: list[dict[str, Any]] = []
+    videos: list[UgcVideoReference] = []
     title = ""
 
     while True:
@@ -213,7 +280,13 @@ async def get_collection(
             title = str((meta or {}).get("name", ""))
 
         page_archives = _dict_list(payload.get("archives"), "视频合集")
-        archives.extend(item for item in page_archives if item.get("bvid"))
+        videos.extend(
+            _decode_video_references(
+                page_archives,
+                description="视频合集",
+                publication_field="pubdate",
+            )
+        )
 
         page = payload.get("page")
         if page is not None and not isinstance(page, dict):
@@ -226,23 +299,29 @@ async def get_collection(
             break
         page_num += 1
 
-    return title, archives
+    return UgcCollectionInfo(title=title, videos=tuple(videos))
 
 
-async def get_favourite_info(scope: ExecutionScope, fid: FId) -> dict[str, Any]:
-    return await fetch_payload(
+async def get_favourite_info(scope: ExecutionScope, fid: FId) -> UgcFavouriteInfo:
+    payload = await fetch_payload(
         scope,
         f"https://api.bilibili.com/x/v3/fav/folder/info?media_id={fid}",
         "收藏夹",
         f"fid: {fid}",
         "data",
     )
+    return UgcFavouriteInfo(
+        title=str(payload.get("title", "")),
+        description=str(payload.get("intro", "")),
+        cover=str(payload.get("cover", "")),
+        owner=_decode_ugc_owner(payload.get("upper")),
+    )
 
 
-async def get_favourite_medias(scope: ExecutionScope, fid: FId) -> list[dict[str, Any]]:
+async def get_favourite_medias(scope: ExecutionScope, fid: FId) -> tuple[UgcVideoReference, ...]:
     page_size = 20
     page_num = 1
-    medias: list[dict[str, Any]] = []
+    videos: list[UgcVideoReference] = []
 
     while True:
         payload = await fetch_payload(
@@ -253,7 +332,13 @@ async def get_favourite_medias(scope: ExecutionScope, fid: FId) -> list[dict[str
             "data",
         )
         page_medias = _dict_list(payload.get("medias"), "收藏夹")
-        medias.extend(item for item in page_medias if item.get("bvid"))
+        videos.extend(
+            _decode_video_references(
+                page_medias,
+                description="收藏夹",
+                publication_field="pubtime",
+            )
+        )
 
         has_more = payload.get("has_more")
         if has_more is not None:
@@ -263,10 +348,10 @@ async def get_favourite_medias(scope: ExecutionScope, fid: FId) -> list[dict[str
             break
         page_num += 1
 
-    return medias
+    return tuple(videos)
 
 
-async def get_all_favourite_folders(scope: ExecutionScope, mid: MId) -> list[dict[str, Any]]:
+async def get_all_favourite_folders(scope: ExecutionScope, mid: MId) -> tuple[FId, ...]:
     payload = await fetch_payload(
         scope,
         f"https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={mid}",
@@ -274,23 +359,39 @@ async def get_all_favourite_folders(scope: ExecutionScope, mid: MId) -> list[dic
         f"mid: {mid}",
         "data",
     )
-    return _dict_list(payload.get("list"), "收藏夹列表")
+    return tuple(
+        FId(str(folder["id"]))
+        for folder in _dict_list(payload.get("list"), "收藏夹列表")
+        if folder.get("id") is not None
+    )
 
 
-async def get_series_info(scope: ExecutionScope, series_id: SeriesId) -> dict[str, Any]:
-    return await fetch_payload(
+async def get_series_info(scope: ExecutionScope, series_id: SeriesId) -> UgcSeriesInfo:
+    payload = await fetch_payload(
         scope,
         f"https://api.bilibili.com/x/series/series?series_id={series_id}",
         "视频系列",
         f"series_id: {series_id}",
         "data",
     )
+    meta = payload.get("meta")
+    if not isinstance(meta, dict) or meta.get("mid") is None:
+        raise NoAccessPermissionError("无法解析视频系列，原因：API 响应缺少必要字段")
+    return UgcSeriesInfo(
+        title=str(meta.get("name", "")),
+        owner_id=MId(str(meta["mid"])),
+        description=str(meta.get("description", "")),
+    )
 
 
-async def get_series_archives(scope: ExecutionScope, series_id: SeriesId, mid: MId) -> list[dict[str, Any]]:
+async def get_series_archives(
+    scope: ExecutionScope,
+    series_id: SeriesId,
+    mid: MId,
+) -> tuple[UgcVideoReference, ...]:
     page_size = 30
     page_num = 1
-    archives: list[dict[str, Any]] = []
+    videos: list[UgcVideoReference] = []
 
     while True:
         payload = await fetch_payload(
@@ -305,7 +406,13 @@ async def get_series_archives(scope: ExecutionScope, series_id: SeriesId, mid: M
             "data",
         )
         page_archives = _dict_list(payload.get("archives"), "视频系列")
-        archives.extend(item for item in page_archives if item.get("bvid"))
+        videos.extend(
+            _decode_video_references(
+                page_archives,
+                description="视频系列",
+                publication_field="pubdate",
+            )
+        )
 
         page = payload.get("page")
         if page is not None and not isinstance(page, dict):
@@ -318,7 +425,7 @@ async def get_series_archives(scope: ExecutionScope, series_id: SeriesId, mid: M
             break
         page_num += 1
 
-    return archives
+    return tuple(videos)
 
 
 async def get_space_profile_and_archives(
@@ -326,9 +433,9 @@ async def get_space_profile_and_archives(
     mid: MId,
     *,
     stop_before_timestamp: int | None = None,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[UgcSpaceProfile, tuple[UgcVideoReference, ...]]:
     wbi_img = await get_wbi_img(scope)
-    profile = await fetch_payload(
+    profile_payload = await fetch_payload(
         scope,
         "https://api.bilibili.com/x/space/wbi/acc/info",
         "UP 主",
@@ -336,10 +443,15 @@ async def get_space_profile_and_archives(
         "data",
         params=encode_wbi({"mid": mid}, wbi_img),
     )
+    profile = UgcSpaceProfile(
+        name=str(profile_payload.get("name", "")),
+        description=str(profile_payload.get("sign", "")),
+        face=str(profile_payload.get("face", "")),
+    )
 
     page_size = 30
     page_num = 1
-    archives: list[dict[str, Any]] = []
+    videos: list[UgcVideoReference] = []
     while True:
         payload = await fetch_payload(
             scope,
@@ -362,10 +474,16 @@ async def get_space_profile_and_archives(
         if listing is not None and not isinstance(listing, dict):
             raise NoAccessPermissionError("无法解析 UP 主空间，原因：API 响应格式异常")
         page_archives = _dict_list((listing or {}).get("vlist"), "UP 主空间")
-        archives.extend(item for item in page_archives if item.get("bvid"))
+        page_videos = _decode_video_references(
+            page_archives,
+            description="UP 主空间",
+            publication_field="created",
+        )
+        videos.extend(page_videos)
 
         if stop_before_timestamp is not None and any(
-            item.get("created") is not None and int(item["created"]) < stop_before_timestamp for item in page_archives
+            video.published_at is not None and video.published_at < stop_before_timestamp
+            for video in page_videos
         ):
             break
 
@@ -380,10 +498,10 @@ async def get_space_profile_and_archives(
             break
         page_num += 1
 
-    return profile, archives
+    return profile, tuple(videos)
 
 
-async def get_watch_later_entries(scope: ExecutionScope) -> list[dict[str, Any]]:
+async def get_watch_later_entries(scope: ExecutionScope) -> tuple[UgcVideoReference, ...]:
     response = unwrap_fetch_result(await Fetcher.fetch_json(scope, WATCH_LATER_API))
     if response.get("code") in {-101, -400}:
         raise NotLoginError("账号未登录，无法获取稍后再看列表哦~ Ծ‸Ծ")
@@ -392,14 +510,23 @@ async def get_watch_later_entries(scope: ExecutionScope) -> list[dict[str, Any]]
     payload = response.get("data")
     if not isinstance(payload, dict):
         raise NoAccessPermissionError(f"无法解析稍后再看（watch_later），原因：{response.get('message')}")
-    return [item for item in _dict_list(payload.get("list"), "稍后再看") if item.get("bvid")]
+    return _decode_video_references(
+        payload.get("list"),
+        description="稍后再看",
+        publication_field="pubdate",
+    )
 
 
 __all__ = [
+    "UgcCollectionInfo",
+    "UgcFavouriteInfo",
     "UgcOwnerInfo",
     "UgcPageInfo",
+    "UgcSeriesInfo",
+    "UgcSpaceProfile",
     "UgcStaffInfo",
     "UgcVideoInfo",
+    "UgcVideoReference",
     "WATCH_LATER_API",
     "get_all_favourite_folders",
     "get_collection",
