@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from argparse import Namespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from returns.result import Success
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 def _execution_scope(session: Any) -> ExecutionScope:
-    return ExecutionScope(cast("Any", session), fetch_workers=1, download_workers=1)
+    return ExecutionScope(session, fetch_workers=1, download_workers=1)
 
 
 def test_parse_auth_inline_handles_case_and_spaces():
@@ -183,7 +183,7 @@ async def test_user_info_cache_is_scoped_to_execution_scope(monkeypatch: pytest.
 @pytest.mark.processor
 @as_sync
 async def test_validate_user_info_reuses_execution_scope_session_and_cache(monkeypatch: pytest.MonkeyPatch):
-    session = cast("Any", object())
+    session: Any = object()
     scope = _execution_scope(session)
     sessions: list[Any] = []
 
