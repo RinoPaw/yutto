@@ -30,9 +30,9 @@ def test_cli_accepts_every_audio_only_output_format_from_shared_contract(output_
 
 def test_output_format_contract_is_shared_by_config_and_resolvers() -> None:
     assert YuttoBasicConfig(output_format="mkv").output_format == resolve_output_format("mkv")
-    assert YuttoBasicConfig(output_format_audio_only="flac").output_format_audio_only == resolve_audio_only_output_format(
-        "flac"
-    )
+    assert YuttoBasicConfig(
+        output_format_audio_only="flac"
+    ).output_format_audio_only == resolve_audio_only_output_format("flac")
 
 
 @pytest.mark.parametrize("value", [None, "webm", 1])
