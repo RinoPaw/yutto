@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from yutto.media.quality import AudioQuality, VideoQuality
+from yutto.output_formats import AudioOnlyOutputFormat, OutputFormat
 from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
@@ -31,8 +32,8 @@ class YuttoBasicConfig(_ConfigModel):
     vcodec: str | None = None
     acodec: str | None = None
     download_vcodec_priority: list[str] | None = None
-    output_format: Literal["infer", "mp4", "mkv", "mov"] | None = None
-    output_format_audio_only: Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "mov"] | None = None
+    output_format: OutputFormat | None = None
+    output_format_audio_only: AudioOnlyOutputFormat | None = None
     ffmpeg_path: str | None = None
     ai_translation_language: str | None = None
     danmaku_format: Literal["xml", "ass", "protobuf"] | None = None
