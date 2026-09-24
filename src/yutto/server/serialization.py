@@ -13,6 +13,7 @@ from yutto.media import (
     CheeseEpisode,
     CheeseSeason,
     Media,
+    MediaEntry,
     UgcAllFavourites,
     UgcCollection,
     UgcFav,
@@ -246,15 +247,17 @@ def _resolve_failure_to_json(failure: ResolveFailure) -> dict[str, JsonValue]:
     }
 
 
-def _media_to_json(media: Media, *, relation_index: int | None = None) -> dict[str, JsonValue]:
+def _media_to_json(media: Media, *, relation: MediaEntry[Media] | None = None) -> dict[str, JsonValue]:
     base: dict[str, JsonValue] = {
         "type": type(media).__name__,
         "metadata": _metadata_to_json(media.metadata),
     }
+    if relation is not None:
+        base["index"] = relation.index
+        if relation.display_title is not None:
+            base["display_title"] = relation.display_title
 
     if isinstance(media, BangumiEpisode):
-        if relation_index is not None:
-            base["index"] = relation_index
         base.update(
             {
                 "episode_id": str(media.episode_id),
@@ -267,12 +270,10 @@ def _media_to_json(media: Media, *, relation_index: int | None = None) -> dict[s
         base.update(
             {
                 "season_id": str(media.season_id),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, CheeseEpisode):
-        if relation_index is not None:
-            base["index"] = relation_index
         base.update(
             {
                 "episode_id": str(media.episode_id),
@@ -284,12 +285,10 @@ def _media_to_json(media: Media, *, relation_index: int | None = None) -> dict[s
         base.update(
             {
                 "season_id": str(media.season_id),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, UgcPage):
-        if relation_index is not None:
-            base["index"] = relation_index
         base.update(
             {
                 "aid": str(media.aid),
@@ -301,44 +300,44 @@ def _media_to_json(media: Media, *, relation_index: int | None = None) -> dict[s
             {
                 "aid": str(media.aid),
                 "page_count": media.page_count,
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, UgcCollection):
         base.update(
             {
                 "collection_id": str(media.collection_id),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, UgcSeries):
         base.update(
             {
                 "series_id": str(media.series_id),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, UgcFav):
         base.update(
             {
                 "fid": str(media.fid),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, UgcAllFavourites):
         base.update(
             {
                 "mid": str(media.mid),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     elif isinstance(media, UgcWatchLater):
-        base["items"] = [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items]
+        base["items"] = [_media_to_json(entry.media, relation=entry) for entry in media.items]
     elif isinstance(media, UgcSpace):
         base.update(
             {
                 "mid": str(media.mid),
-                "items": [_media_to_json(entry.media, relation_index=entry.index) for entry in media.items],
+                "items": [_media_to_json(entry.media, relation=entry) for entry in media.items],
             }
         )
     else:
