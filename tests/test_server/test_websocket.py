@@ -4,6 +4,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from itertools import count
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -29,7 +30,6 @@ pytestmark = pytest.mark.processor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from yutto.runtime import EventReplay, TaskEvent
 
