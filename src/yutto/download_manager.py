@@ -88,6 +88,11 @@ def _report_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> None:
 
 
 def _report_resource_manifest(manifest: ResourceManifest, item: MediaItem, scope: Scope) -> None:
+    if not isinstance(item, (UgcPage, BangumiEpisode, CheeseEpisode)):
+        raise TypeError(f"unsupported resource media item: {type(item).__name__}")
+
+    aid = item.aid
+    cid = item.cid
     requested_language = scope.resource.ai_translation_language
     languages = manifest.translation_languages
     if languages:
@@ -120,20 +125,20 @@ def _report_resource_manifest(manifest: ResourceManifest, item: MediaItem, scope
             ReportLevel.WARNING,
         )
 
-    if manifest.is_preview and isinstance(item, (UgcPage, BangumiEpisode, CheeseEpisode)):
+    if manifest.is_preview:
         emit_download_report(
-            f"视频（{item.aid}, cid: {item.cid}）是预览视频（疑似未登录或非大会员用户）",
+            f"视频（{aid}, cid: {cid}）是预览视频（疑似未登录或非大会员用户）",
             ReportLevel.WARNING,
         )
 
     if manifest.subtitle_unavailable_reason is not None and not isinstance(item, UgcPage):
         emit_download_report(
-            f"无法获取该视频的字幕（{item.aid}, cid: {item.cid}），原因：{manifest.subtitle_unavailable_reason}",
+            f"无法获取该视频的字幕（{aid}, cid: {cid}），原因：{manifest.subtitle_unavailable_reason}",
             ReportLevel.WARNING,
         )
     for language in manifest.invalid_subtitle_languages:
         emit_download_report(
-            f"跳过无效的字幕URL（{item.aid}, cid: {item.cid}），语言：{language}",
+            f"跳过无效的字幕URL（{aid}, cid: {cid}），语言：{language}",
             ReportLevel.WARNING,
         )
 
