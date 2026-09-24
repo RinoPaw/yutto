@@ -139,7 +139,6 @@ class DownloadExecutor:
                 if not plan.media_requested:
                     return ItemResult(
                         state=ItemState.DONE,
-                        output_path=plan.paths.output,
                         artifacts=tuple(artifacts),
                     )
                 emit_download_event(
@@ -150,7 +149,6 @@ class DownloadExecutor:
                 )
                 return ItemResult(
                     state=ItemState.SKIPPED,
-                    output_path=plan.paths.output,
                     skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
                     artifacts=tuple(artifacts),
                 )

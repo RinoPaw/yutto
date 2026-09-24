@@ -58,19 +58,19 @@ class ItemResult(_ResultModel):
     @model_validator(mode="after")
     def validate_state(self) -> Self:
         if self.state is ItemState.DONE:
-            if self.output_path is None:
-                raise ValueError("done item must have an output path")
             if self.skip_reason is not None:
                 raise ValueError("done item must not have a skip reason")
             if self.failure is not None:
                 raise ValueError("done item must not have a failure")
         elif self.state is ItemState.SKIPPED:
-            if self.output_path is None:
-                raise ValueError("skipped item must have an output path")
             if self.skip_reason is None:
                 raise ValueError("skipped item must have a skip reason")
             if self.failure is not None:
                 raise ValueError("skipped item must not have a failure")
+            if self.skip_reason is ItemSkipReason.ALREADY_EXISTS and self.output_path is None:
+                raise ValueError("already-existing item must have an output path")
+            if self.skip_reason is ItemSkipReason.NO_MEDIA_STREAM and self.output_path is not None:
+                raise ValueError("item without a media stream must not have an output path")
         elif self.state is ItemState.FAILED:
             if self.output_path is not None:
                 raise ValueError("failed item must not have an output path")

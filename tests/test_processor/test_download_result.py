@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.processor
 
-
 ENTRY_PATH = Path("series/episode")
 
 
@@ -65,11 +64,7 @@ def make_scope(
 
 
 def make_metadata() -> ItemMetaData:
-    return ItemMetaData(
-        title="测试",
-        show_title="测试",
-        original_filename="episode",
-    )
+    return ItemMetaData(title="测试", show_title="测试", original_filename="episode")
 
 
 def make_resource_only_entry() -> ResourceManifest:
@@ -196,7 +191,6 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
     output_dir = tmp_path / "output/series"
     assert result == ItemResult(
         state=ItemState.DONE,
-        output_path=output_dir / "episode.m4a",
         artifacts=(
             Artifact(kind=ArtifactKind.SUBTITLE, path=output_dir / "episode.zh-CN.srt"),
             Artifact(kind=ArtifactKind.DANMAKU, path=output_dir / "episode.ass"),
@@ -204,17 +198,14 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
             Artifact(kind=ArtifactKind.COVER, path=output_dir / "episode-poster.jpg"),
         ),
     )
+    assert result.output_path is None
     assert all(artifact.path.exists() for artifact in result.artifacts)
     assert not (tmp_path / "temporary/series/episode_cover.jpg").exists()
 
 
 @as_sync
 async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(tmp_path: Path):
-    entry = replace(
-        make_media_entry(),
-        danmaku_source_type=None,
-        danmaku_urls=(),
-    )
+    entry = replace(make_media_entry(), danmaku_source_type=None, danmaku_urls=())
     output_path = tmp_path / "output/series/episode.m4a"
     subtitle_path = tmp_path / "output/series/episode.zh-CN.srt"
     output_path.parent.mkdir(parents=True)
@@ -265,9 +256,9 @@ async def test_missing_requested_audio_does_not_start_media_transfer(
 
     assert result == ItemResult(
         state=ItemState.SKIPPED,
-        output_path=tmp_path / "output/series/episode.m4a",
         skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
     )
+    assert result.output_path is None
 
 
 def test_multi_part_protobuf_danmaku_returns_every_output_path(tmp_path: Path):

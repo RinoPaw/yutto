@@ -57,8 +57,8 @@ def test_resolve_result_keeps_media_tree_without_flat_projection():
         result.items = ()  # ty: ignore[invalid-assignment]
 
 
-def test_item_result_validates_skip_reason_without_requiring_artifacts():
-    resource_only = ItemResult(state=ItemState.DONE, output_path=Path("video.mp4"))
+def test_item_result_output_path_only_describes_real_media_output():
+    resource_only = ItemResult(state=ItemState.DONE)
     media_download = ItemResult(
         state=ItemState.DONE,
         output_path=Path("video.mp4"),
@@ -70,25 +70,29 @@ def test_item_result_validates_skip_reason_without_requiring_artifacts():
         skip_reason=ItemSkipReason.ALREADY_EXISTS,
         artifacts=(Artifact(kind=ArtifactKind.MEDIA, path=Path("video.mp4")),),
     )
+    missing_media = ItemResult(
+        state=ItemState.SKIPPED,
+        skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
+    )
 
-    assert resource_only.artifacts == ()
+    assert resource_only.output_path is None
     assert resource_only.has_downloaded_media is False
     assert media_download.has_downloaded_media is True
     assert existing_media.has_downloaded_media is False
-    assert (
-        ItemResult(
-            state=ItemState.SKIPPED,
-            output_path=Path("video.mp4"),
-            skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
-        ).skip_reason
-        is ItemSkipReason.NO_MEDIA_STREAM
-    )
+    assert missing_media.output_path is None
 
     with pytest.raises(ValidationError, match="done item must not have"):
         ItemResult(
             state=ItemState.DONE,
-            output_path=Path("video.mp4"),
             skip_reason=ItemSkipReason.ALREADY_EXISTS,
         )
     with pytest.raises(ValidationError, match="skipped item must have"):
-        ItemResult(state=ItemState.SKIPPED, output_path=Path("video.mp4"))
+        ItemResult(state=ItemState.SKIPPED)
+    with pytest.raises(ValidationError, match="already-existing item must have"):
+        ItemResult(state=ItemState.SKIPPED, skip_reason=ItemSkipReason.ALREADY_EXISTS)
+    with pytest.raises(ValidationError, match="must not have an output path"):
+        ItemResult(
+            state=ItemState.SKIPPED,
+            output_path=Path("video.mp4"),
+            skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
+        )
