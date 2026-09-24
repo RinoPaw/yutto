@@ -48,6 +48,8 @@ def make_plan(
 ) -> tuple[ResourceManifest, Scope, DownloadPlan]:
     manifest = replace(
         make_resource_only_entry(),
+        video_requested=video_codec is not None,
+        audio_requested=audio_codec is not None,
         videos=(make_video(video_codec),) if video_codec is not None else (),
         audios=(make_audio(audio_codec),) if audio_codec is not None else (),
     )
