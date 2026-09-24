@@ -221,7 +221,7 @@ async def test_out_of_order_ranges_commit_an_exact_temporary_file():
     with LocalRangeServer(payload, release_after={first_range: later_range}) as server:
         async with create_client(trust_env=False) as session:
             downloaded = await download_one(
-                _execution_scope(session),
+                _execution_scope(session, download_workers=2),
                 server.url,
                 block_size=page_size,
             )
