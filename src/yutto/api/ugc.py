@@ -246,11 +246,7 @@ async def get_ugc_video_tags(scope: ExecutionScope, aid: AId) -> tuple[str, ...]
     raw_tags = response.get("data")
     if not isinstance(raw_tags, list):
         raise NotFoundError(f"无法获取视频 {aid} 标签，原因：API 响应格式异常")
-    return tuple(
-        str(tag["tag_name"])
-        for tag in raw_tags
-        if isinstance(tag, dict) and tag.get("tag_name") is not None
-    )
+    return tuple(str(tag["tag_name"]) for tag in raw_tags if isinstance(tag, dict) and tag.get("tag_name") is not None)
 
 
 async def get_collection(
@@ -484,8 +480,7 @@ async def get_space_profile_and_archives(
         videos.extend(page_videos)
 
         if stop_before_timestamp is not None and any(
-            video.published_at is not None and video.published_at < stop_before_timestamp
-            for video in page_videos
+            video.published_at is not None and video.published_at < stop_before_timestamp for video in page_videos
         ):
             break
 
