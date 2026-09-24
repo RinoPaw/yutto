@@ -274,10 +274,10 @@ async def resolve_resource_manifest(
     if not audio:
         audios = ()
 
-    danmaku_format = resolve_danmaku_format(scope)
     danmaku_source_type: DanmakuSourceType | None = None
     danmaku_urls: tuple[str, ...] = ()
     if danmaku:
+        danmaku_format = resolve_danmaku_format(scope)
         danmaku_source_type, danmaku_urls = await _resolve_danmaku(
             execution,
             aid,

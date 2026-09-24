@@ -331,6 +331,6 @@ def _optional_int(value: object) -> int | None:
 def _patterns(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError("danmaku block keyword patterns must be a list of strings")
-    return tuple(cast("list[str]", value))
+    if not isinstance(value, tuple) or not all(isinstance(item, str) for item in value):
+        raise ValueError("danmaku block keyword patterns must be a sequence of strings")
+    return cast("tuple[str, ...]", value)

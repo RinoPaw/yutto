@@ -80,8 +80,8 @@ def resolve_video_codec_priority(scope: Scope) -> Sequence[VideoCodec] | None:
     value = scope.stream.video_codec_priority
     if value is None:
         return None
-    if not isinstance(value, list) or not value:
-        raise ValueError("video codec priority must be a non-empty list")
+    if not isinstance(value, tuple) or not value:
+        raise ValueError("video codec priority must be a non-empty sequence")
     if any(codec not in video_codec_priority_default for codec in value):
         raise ValueError("video codec priority contains an unsupported codec")
     download_codec, _ = resolve_video_codecs(scope)

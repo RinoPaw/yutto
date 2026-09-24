@@ -129,7 +129,11 @@ class StreamSpec:
     # 音频下载编码与保存编码策略，格式为 DOWNLOAD:SAVE。
     audio_codec: ScopeText = MISSING
     # 视频下载编码优先级；显式 None 表示自动推断。
-    video_codec_priority: list[str] | None | _Missing = MISSING
+    video_codec_priority: tuple[str, ...] | None | _Missing = MISSING
+
+    def __post_init__(self) -> None:
+        if isinstance(self.video_codec_priority, list):
+            object.__setattr__(self, "video_codec_priority", tuple(self.video_codec_priority))
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +205,11 @@ class DanmakuSpec:
     # 是否屏蔽彩色弹幕。
     block_colorful: ScopeBool = MISSING
     # 用于过滤弹幕文本的关键词/正则列表。
-    block_keyword_patterns: list[str] | None | _Missing = MISSING
+    block_keyword_patterns: tuple[str, ...] | None | _Missing = MISSING
+
+    def __post_init__(self) -> None:
+        if isinstance(self.block_keyword_patterns, list):
+            object.__setattr__(self, "block_keyword_patterns", tuple(self.block_keyword_patterns))
 
 
 _SPEC_TYPES: dict[str, type[Any]] = {
