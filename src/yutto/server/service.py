@@ -14,6 +14,7 @@ from yutto.core.execution import (
     resolve_network_proxy,
 )
 from yutto.downloader.planner import resolve_block_size_bytes
+from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
 from yutto.resource import resolve_danmaku_format, should_save_cover
 from yutto.scope import MISSING, Scope
 from yutto.server.request import scope_parser_from_settings as scope_parser_from_settings
@@ -183,22 +184,11 @@ class ServerPolicy:
         resolve_video_codec_priority(scope)
         resolve_danmaku_format(scope)
         should_save_cover(scope)
-
-        output_format = scope.output.format
-        if output_format is not MISSING and output_format not in {"infer", "mp4", "mkv", "mov"}:
-            raise ServerPolicyError(f"unsupported output format: {output_format}")
-        audio_only_format = scope.output.audio_only_format
-        if audio_only_format is not MISSING and audio_only_format not in {
-            "infer",
-            "m4a",
-            "aac",
-            "mp3",
-            "flac",
-            "mp4",
-            "mkv",
-            "mov",
-        }:
-            raise ServerPolicyError(f"unsupported audio-only output format: {audio_only_format}")
+        try:
+            resolve_output_format(scope.output.format)
+            resolve_audio_only_output_format(scope.output.audio_only_format)
+        except ValueError as error:
+            raise ServerPolicyError(str(error)) from error
 
     @staticmethod
     def _validate_worker_count(field: str, value: int, maximum: int) -> None:
