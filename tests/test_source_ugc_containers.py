@@ -150,9 +150,10 @@ def test_favourite_preserves_folder_owner_and_item_titles(monkeypatch: pytest.Mo
 
     assert isinstance(result.media, UgcFav)
     assert result.media.metadata.owner == "收藏者"
-    assert [entry.media.metadata.title for entry in result.media.items] == ["收藏里的单P标题", "收藏里的多P标题"]
+    assert [entry.display_title for entry in result.media.items] == ["收藏里的单P标题", "收藏里的多P标题"]
+    assert [entry.media.metadata.title for entry in result.media.items] == ["原始单P标题", "原始多P标题"]
     first_video = result.media.items[0].media
-    assert first_video.items[0].media.metadata.title == "收藏里的单P标题"
+    assert first_video.items[0].media.metadata.title == "P1"
 
 
 def test_series_keeps_successes_and_records_expected_child_failure(monkeypatch: pytest.MonkeyPatch) -> None:
