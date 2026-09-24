@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 class FakeDownloadTaskApi:
     def __init__(self, *, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
+        self.submissions: list[tuple[Scope, Scope]] = []
         self.runtime = TaskRuntime[Scope, DownloadResult](
             self._run,
             task_id_factory=lambda: "task-1",
@@ -49,7 +50,14 @@ class FakeDownloadTaskApi:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, DownloadResult]:
+    async def submit(
+        self,
+        scope: Scope,
+        *,
+        execution_scope: Scope | None = None,
+    ) -> TaskSnapshot[Scope, DownloadResult]:
+        execution = scope if execution_scope is None else execution_scope
+        self.submissions.append((scope, execution))
         return await self.runtime.submit(scope)
 
     def get(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None:
@@ -77,6 +85,7 @@ class FakeResolveTaskApi:
     def __init__(self, *, item_count: int = 0, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
         self.item_count = item_count
+        self.submissions: list[tuple[Scope, Scope]] = []
         ids = count(1)
         self.runtime = TaskRuntime[Scope, ResolveResult](
             self._run,
@@ -90,7 +99,14 @@ class FakeResolveTaskApi:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, scope: Scope) -> TaskSnapshot[Scope, ResolveResult]:
+    async def submit(
+        self,
+        scope: Scope,
+        *,
+        execution_scope: Scope | None = None,
+    ) -> TaskSnapshot[Scope, ResolveResult]:
+        execution = scope if execution_scope is None else execution_scope
+        self.submissions.append((scope, execution))
         return await self.runtime.submit(scope)
 
     def get(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None:
@@ -324,6 +340,50 @@ async def test_server_policy_rejects_invalid_requests_before_task_submission(
 
             assert download_service.list() == ()
             assert resolve_service.list() == ()
+    finally:
+        await server.close()
+
+
+@pytest.mark.processor
+@as_sync
+async def test_server_keeps_public_request_scope_separate_from_execution_scope(tmp_path: Path):
+    service = FakeDownloadTaskApi()
+    policy = ServerPolicy(
+        ServerPolicyOptions(
+            download_root=tmp_path / "downloads",
+            tmp_root=tmp_path / "temporary",
+            auth_file=tmp_path / "auth.toml",
+        )
+    )
+    server, _, uri = await start_server(service=service, prepare_scope=policy.prepare_scope)
+    try:
+        async with connect(uri, proxy=None) as connection:
+            await connection.send(rpc_request(1, "server.authenticate", {"token": "test-token"}))
+            await receive_json(connection)
+            await connection.send(
+                rpc_request(
+                    2,
+                    "download.start",
+                    {
+                        "request": {
+                            "source": {"url": "BV1scope"},
+                            "output": {
+                                "directory": "shows/season-1",
+                                "temporary_directory": "work",
+                            },
+                        }
+                    },
+                )
+            )
+            started = (await receive_json(connection))["result"]
+
+            assert started["payload"]["output"]["directory"] == "shows/season-1"
+            assert started["payload"]["output"]["temporary_directory"] == "work"
+            request_scope, execution_scope = service.submissions[0]
+            assert request_scope.output.directory == Path("shows/season-1")
+            assert request_scope.output.temporary_directory == Path("work")
+            assert execution_scope.output.directory == (tmp_path / "downloads/shows/season-1").resolve()
+            assert execution_scope.output.temporary_directory == (tmp_path / "temporary/work").resolve()
     finally:
         await server.close()
 
