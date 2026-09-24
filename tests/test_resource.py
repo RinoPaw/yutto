@@ -36,9 +36,9 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
         calls.append(args)
         return PlayUrlInfo(videos=(), audios=())
 
-    async def fake_danmaku(*args: Any) -> tuple[str, list[str]]:
+    async def fake_danmaku(*args: Any) -> tuple[str, tuple[str, ...]]:
         calls.append(args)
-        return "xml", ["https://example.test/danmaku.xml"]
+        return "xml", ("https://example.test/danmaku.xml",)
 
     monkeypatch.setattr("yutto.resource.get_ugc_video_playurl", fake_playurl)
     monkeypatch.setattr("yutto.resource._resolve_danmaku", fake_danmaku)
