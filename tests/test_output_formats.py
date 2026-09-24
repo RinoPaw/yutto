@@ -14,17 +14,21 @@ from yutto.output_formats import (
 pytestmark = pytest.mark.processor
 
 
-def _download_option_choices(option: str) -> tuple[str, ...]:
-    parser = build_parser()
-    download = next(action for action in parser._actions if action.dest == "command").choices["download"]
-    action = next(action for action in download._actions if option in action.option_strings)
-    assert action.choices is not None
-    return tuple(action.choices)
+def _parse_download(*args: str):
+    return build_parser().parse_args(["download", "BV1test", *args])
 
 
-def test_output_format_contract_is_shared_by_cli_and_config() -> None:
-    assert _download_option_choices("--output-format") == OUTPUT_FORMATS
-    assert _download_option_choices("--output-format-audio-only") == AUDIO_ONLY_OUTPUT_FORMATS
+@pytest.mark.parametrize("output_format", OUTPUT_FORMATS)
+def test_cli_accepts_every_output_format_from_shared_contract(output_format: str) -> None:
+    assert _parse_download("--output-format", output_format).output_format == output_format
+
+
+@pytest.mark.parametrize("output_format", AUDIO_ONLY_OUTPUT_FORMATS)
+def test_cli_accepts_every_audio_only_output_format_from_shared_contract(output_format: str) -> None:
+    assert _parse_download("--output-format-audio-only", output_format).output_format_audio_only == output_format
+
+
+def test_output_format_contract_is_shared_by_config_and_resolvers() -> None:
     assert YuttoBasicConfig(output_format="mkv").output_format == resolve_output_format("mkv")
     assert YuttoBasicConfig(output_format_audio_only="flac").output_format_audio_only == resolve_audio_only_output_format(
         "flac"
@@ -37,3 +41,10 @@ def test_output_format_resolvers_reject_values_outside_contract(value: object) -
         resolve_output_format(value)
     with pytest.raises(ValueError, match="unsupported audio-only output format"):
         resolve_audio_only_output_format(value)
+
+
+def test_cli_rejects_output_formats_outside_contract() -> None:
+    with pytest.raises(SystemExit):
+        _parse_download("--output-format", "webm")
+    with pytest.raises(SystemExit):
+        _parse_download("--output-format-audio-only", "webm")
