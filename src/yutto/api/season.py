@@ -126,7 +126,9 @@ def _decode_bangumi_season(payload: dict[str, Any], id: SeasonId | EpisodeId) ->
     for section in _dict_list(payload.get("section"), "番剧分区"):
         if section.get("type") == 5:
             continue
-        episodes.extend(_decode_bangumi_episode(item) for item in _dict_list(section.get("episodes"), "番剧附加剧集列表"))
+        episodes.extend(
+            _decode_bangumi_episode(item) for item in _dict_list(section.get("episodes"), "番剧附加剧集列表")
+        )
 
     up_info = payload.get("up_info")
     if up_info is not None and not isinstance(up_info, dict):
