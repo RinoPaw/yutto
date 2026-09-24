@@ -213,10 +213,7 @@ class DownloadManager:
 
         resolved_failures = tuple(
             ResolveFailure(
-                path=tuple(
-                    ResolveFailureStep(index=step.index, source=str(step.source))
-                    for step in failure.path
-                ),
+                path=tuple(ResolveFailureStep(index=step.index, source=str(step.source)) for step in failure.path),
                 type=type(failure.error).__name__,
                 message=failure.error.message,
                 code=failure.error.code.value,
