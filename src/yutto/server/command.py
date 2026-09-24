@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from yutto.auth import default_auth_file
+from yutto.cli.runtime import resolve_runtime_options
+from yutto.cli.settings import scope_from_config
 from yutto.core.application import YuttoApplication
+from yutto.core.execution import resolve_download_workers, resolve_fetch_workers
 from yutto.core.task_service import DownloadTaskService, ResolveTaskService
 from yutto.download_manager import DownloadManager
 from yutto.downloader.path_leases import DownloadPathLeasePool
@@ -174,9 +177,10 @@ def _build_download_application(
 @as_sync
 async def run_server_command(args: argparse.Namespace, settings: YuttoConfig) -> None:
     values = vars(args)
-    configured_jobs = settings.basic.jobs if settings.basic.jobs is not None else 1
-    configured_fetch_workers = settings.basic.fetch_workers if settings.basic.fetch_workers is not None else 8
-    configured_download_workers = settings.basic.download_workers if settings.basic.download_workers is not None else 8
+    configured_scope = scope_from_config(settings)
+    configured_jobs = resolve_runtime_options(configured_scope).jobs
+    configured_fetch_workers = resolve_fetch_workers(configured_scope)
+    configured_download_workers = resolve_download_workers(configured_scope)
 
     values.setdefault("request_settings", settings)
     values.setdefault("ffmpeg_path", "ffmpeg")

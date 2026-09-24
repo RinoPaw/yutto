@@ -4,12 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
-from yutto.utils.fetcher import (
-    DEFAULT_FETCH_WORKERS,
-    cookies_from_auth,
-    create_client,
-    resolve_proxy,
-)
+from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -35,8 +30,8 @@ class ExecutionScope:
         self,
         session: YuttoSession,
         *,
-        fetch_workers: int = DEFAULT_FETCH_WORKERS,
-        download_workers: int = DEFAULT_FETCH_WORKERS,
+        fetch_workers: int,
+        download_workers: int,
         enforce_output_boundary: bool = False,
     ):
         if fetch_workers < 1:
