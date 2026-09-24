@@ -295,10 +295,7 @@ async def _resolve_ugc_videos(
     tasks: list[asyncio.Task[MediaEntry[UgcVideo] | MediaResolveFailure | None]] = []
     try:
         async with asyncio.TaskGroup() as task_group:
-            tasks = [
-                task_group.create_task(resolve_one(index, reference))
-                for index, reference in indexed_videos
-            ]
+            tasks = [task_group.create_task(resolve_one(index, reference)) for index, reference in indexed_videos]
     except ExceptionGroup as error_group:
         if len(error_group.exceptions) == 1:
             raise error_group.exceptions[0] from None
