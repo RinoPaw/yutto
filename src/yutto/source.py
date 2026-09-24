@@ -241,28 +241,6 @@ class UgcVideoSource(MediaSource):
         )
 
 
-def _apply_ugc_reference_title(media: UgcVideo, reference: UgcVideoReference) -> UgcVideo:
-    title = reference.title
-    if title is None:
-        return media
-
-    items = media.items
-    if media.page_count == 1 and len(items) == 1:
-        entry = items[0]
-        items = (
-            replace(
-                entry,
-                media=replace(entry.media, metadata=replace(entry.media.metadata, title=title)),
-            ),
-        )
-
-    return replace(
-        media,
-        metadata=replace(media.metadata, title=title),
-        items=items,
-    )
-
-
 async def _resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_videos: list[tuple[int, UgcVideoReference]],
@@ -289,7 +267,8 @@ async def _resolve_ugc_videos(
 
         return MediaEntry(
             index=index,
-            media=_apply_ugc_reference_title(result.media, reference),
+            media=result.media,
+            display_title=reference.title,
         )
 
     tasks: list[asyncio.Task[MediaEntry[UgcVideo] | MediaResolveFailure | None]] = []
