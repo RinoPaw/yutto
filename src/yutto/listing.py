@@ -11,6 +11,7 @@ from yutto.media import (
     CheeseSeason,
     Media,
     MediaContainer,
+    MediaEntry,
     MediaItem,
     UgcCollection,
     UgcFav,
@@ -28,7 +29,16 @@ if TYPE_CHECKING:
     from yutto.path_templates import PathTemplateVariableDict
     from yutto.types import AId
 
-MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
+
+@dataclass(frozen=True, slots=True)
+class MediaAncestryStep:
+    """One parent-to-child relationship along a media traversal path."""
+
+    parent: MediaContainer
+    entry: MediaEntry[Media]
+
+
+MediaAncestry: TypeAlias = tuple[MediaAncestryStep, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,12 +55,13 @@ def iter_media_items(
     source_index: int | None = None,
 ) -> Iterator[tuple[MediaAncestry, int | None, MediaItem]]:
     if isinstance(media, MediaContainer):
-        child_ancestry = (*ancestry, media)
         for entry in media.items:
-            yield from iter_media_items(entry.media, child_ancestry, entry.index)
+            step = MediaAncestryStep(parent=media, entry=entry)
+            yield from iter_media_items(entry.media, (*ancestry, step), source_index)
         return
     if isinstance(media, MediaItem):
-        yield ancestry, source_index, media
+        relation_index = ancestry[-1].entry.index if ancestry else source_index
+        yield ancestry, relation_index, media
         return
     raise TypeError(f"unsupported media: {type(media).__name__}")
 
@@ -98,10 +109,10 @@ def _ugc_context(
     ancestry: MediaAncestry,
     page: UgcPage,
 ) -> tuple[UgcVideo, str, str, str, str | None, str | None]:
-    if not ancestry or not isinstance(ancestry[-1], UgcVideo):
+    if not ancestry or not isinstance(ancestry[-1].parent, UgcVideo):
         raise TypeError("UgcPage parent must be UgcVideo")
 
-    video = ancestry[-1]
+    video = ancestry[-1].parent
     name = page.metadata.title
     title = video.metadata.title
     username: str | None = None
@@ -111,7 +122,9 @@ def _ugc_context(
         auto_path = "{title}/{name}" if video.page_count > 1 else "{title}"
         return video, auto_path, name, title, username, series_title
 
-    root = ancestry[-2]
+    video_relation = ancestry[-2].entry
+    root = ancestry[-2].parent
+    title = video_relation.display_title or video.metadata.title
     if isinstance(root, UgcSeries):
         auto_path = "{series_title}/{title}/{name}"
         username = root.metadata.owner or video.metadata.owner
@@ -131,7 +144,7 @@ def _ugc_context(
         username = root.metadata.owner or video.metadata.owner
         series_title = root.metadata.title
         if not multi_page:
-            name = video.metadata.title
+            name = title
     elif isinstance(root, UgcSpace):
         auto_path = "{username}的全部投稿视频/{title}/{name}"
         username = root.metadata.owner or root.metadata.title
@@ -174,12 +187,12 @@ def _resolve_media_path(
         return Path(resolve_path_template(subpath_template, auto_path, variables))
 
     if isinstance(item, BangumiEpisode):
-        parent = ancestry[-1] if ancestry else None
+        parent = ancestry[-1].parent if ancestry else None
         if parent is not None and not isinstance(parent, BangumiSeason):
             raise TypeError("BangumiEpisode parent must be BangumiSeason")
         aid = item.aid
     elif isinstance(item, CheeseEpisode):
-        parent = ancestry[-1] if ancestry else None
+        parent = ancestry[-1].parent if ancestry else None
         if parent is not None and not isinstance(parent, CheeseSeason):
             raise TypeError("CheeseEpisode parent must be CheeseSeason")
         aid = item.aid
@@ -211,6 +224,7 @@ def resolve_media_paths(
 
 __all__ = [
     "MediaAncestry",
+    "MediaAncestryStep",
     "ResolvedMediaPath",
     "iter_media_items",
     "resolve_media_paths",
