@@ -22,7 +22,7 @@ from yutto.downloader.planner import resolve_block_size_bytes
 from yutto.media import Media
 from yutto.resource import resolve_danmaku_format, should_save_cover
 from yutto.scope import MISSING, Scope
-from yutto.server.request import scope_parser_from_settings
+from yutto.server.request import scope_parser_from_settings as scope_parser_from_settings
 from yutto.stream import (
     resolve_audio_codecs,
     resolve_audio_quality,
