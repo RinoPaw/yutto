@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from yutto.downloader.selector import select_streams
+from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
 from yutto.resource import resolve_danmaku_format, should_save_cover, wants_audio, wants_metadata, wants_video
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import TIME_FULL_FMT
@@ -230,8 +231,8 @@ def resolve_output_suffix(
     audio: AudioUrlMeta | None,
     scope: Scope,
 ) -> str:
-    output_format = _text(scope.output.format)
-    audio_only_format = _text(scope.output.audio_only_format)
+    output_format = resolve_output_format(scope.output.format)
+    audio_only_format = resolve_audio_only_output_format(scope.output.audio_only_format)
     _, audio_save_codec = resolve_audio_codecs(scope)
     if video is None:
         if audio_only_format != "infer":
