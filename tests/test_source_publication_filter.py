@@ -63,6 +63,8 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
             return Success(_video_response(100, "BVOLD", "旧视频", 1_704_067_200))
         if "/x/web-interface/view?bvid=BVKEEP" in url:
             return Success(_video_response(300, "BVKEEP", "保留视频", 1_706_745_600))
+        if "/x/tag/archive/tags" in url:
+            return Success({"code": 0, "data": []})
         raise AssertionError(f"unexpected fetch url: {url}")
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
@@ -115,6 +117,8 @@ def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: 
             return Success(_video_response(301, "BVKEEP2", "保留二", 1_706_832_000))
         if "/x/web-interface/view?bvid=BVOLD" in url:
             raise AssertionError("old video should be filtered before resolving its details")
+        if "/x/tag/archive/tags" in url:
+            return Success({"code": 0, "data": []})
         raise AssertionError(f"unexpected fetch url: {url}")
 
     monkeypatch.setattr("yutto.api.ugc.get_wbi_img", fake_get_wbi_img)
