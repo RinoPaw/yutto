@@ -259,9 +259,7 @@ async def run_preview_formats(
                             raise outcome
 
                         selection = select_streams(outcome, scope)
-                        entries.append(
-                            _make_listing_entry(index, ancestry, relation_index, item, outcome, selection)
-                        )
+                        entries.append(_make_listing_entry(index, ancestry, relation_index, item, outcome, selection))
                         listed_streams = listed_streams or bool(outcome.videos or outcome.audios)
 
                     emit_grouped_manifest_report(entries, total_items=len(items))
