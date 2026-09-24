@@ -15,6 +15,8 @@ from yutto.media import MediaEntry, UgcPage, UgcVideo
 from yutto.types import AId, CId
 from yutto.utils.metadata import ChapterInfoData, ItemMetaData, write_metadata
 
+pytestmark = pytest.mark.processor
+
 
 def test_media_relation_owns_index_instead_of_leaf() -> None:
     aid = AId("123")
