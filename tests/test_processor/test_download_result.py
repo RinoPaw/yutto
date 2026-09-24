@@ -17,7 +17,7 @@ from yutto.downloader.media_muxer import MediaMuxer
 from yutto.exceptions import PostprocessingError
 from yutto.resource import ResourceManifest
 from yutto.scope import ROOT_SCOPE, Scope
-from yutto.types import AudioUrlMeta, VideoUrlMeta
+from yutto.types import AudioUrlMeta
 from yutto.utils.danmaku import write_danmaku
 from yutto.utils.functional import as_sync
 from yutto.utils.metadata import ItemMetaData
@@ -74,6 +74,7 @@ def make_metadata() -> ItemMetaData:
 
 def make_resource_only_entry() -> ResourceManifest:
     return ResourceManifest(
+        subtitle_requested=True,
         subtitles=(("zh-CN", "https://example.test/subtitle.json"),),
         danmaku_source_type="xml",
         danmaku_urls=("https://example.test/danmaku.xml",),
@@ -95,6 +96,7 @@ def make_audio(codec: AudioCodec = "mp4a") -> AudioUrlMeta:
 def make_media_entry() -> ResourceManifest:
     return replace(
         make_resource_only_entry(),
+        audio_requested=True,
         audios=(make_audio(),),
         chapter_info_url="https://example.test/chapters.json",
     )
@@ -247,18 +249,7 @@ async def test_missing_requested_audio_does_not_start_media_transfer(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    entry = ResourceManifest(
-        videos=(
-            VideoUrlMeta(
-                url="https://example.test/video",
-                mirrors=(),
-                codec="avc",
-                width=1920,
-                height=1080,
-                quality=80,
-            ),
-        ),
-    )
+    entry = ResourceManifest(audio_requested=True)
 
     async def unexpected_download(*_args: object, **_kwargs: object) -> tuple[Path, ...]:
         raise AssertionError("media transfer must not start")
