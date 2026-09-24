@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
+from yutto.api.player import PlayUrlInfo, SubtitleInfo, SubtitleTrack, TranslationLanguage
+from yutto.core.operation import bind_download_report_sink
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest, resolve_resource_manifest
 from yutto.scope import ROOT_SCOPE, Scope
@@ -31,9 +33,9 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
     )
     calls: list[tuple[Any, ...]] = []
 
-    async def fake_playurl(*args: Any) -> tuple[list[Any], list[Any]]:
+    async def fake_playurl(*args: Any) -> PlayUrlInfo:
         calls.append(args)
-        return [], []
+        return PlayUrlInfo(videos=(), audios=())
 
     async def fake_danmaku(*args: Any) -> tuple[str, list[str]]:
         calls.append(args)
@@ -82,3 +84,49 @@ def test_resource_manifest_keeps_cover_as_url() -> None:
 
     assert manifest.cover_url == "https://example.test/cover.jpg"
     assert not hasattr(manifest, "cover_data")
+
+
+def test_resource_resolution_returns_diagnostics_without_rendering_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = UgcPage(
+        aid=AId("808982399"),
+        index=1,
+        cid=CId(123),
+        metadata=ItemMetaData(title="P1"),
+    )
+    language = TranslationLanguage(code="en", title="English")
+
+    async def fake_playurl(*_args: Any) -> PlayUrlInfo:
+        return PlayUrlInfo(
+            videos=(),
+            audios=(),
+            is_preview=True,
+            translation_languages=(language,),
+        )
+
+    async def fake_subtitle_info(*_args: Any, **_kwargs: Any) -> SubtitleInfo:
+        return SubtitleInfo(
+            tracks=(SubtitleTrack(language="zh-CN", url="https://example.test/subtitle.json"),),
+            invalid_languages=("ja-JP",),
+        )
+
+    monkeypatch.setattr("yutto.resource.get_ugc_video_playurl", fake_playurl)
+    monkeypatch.setattr("yutto.resource.get_subtitle_info", fake_subtitle_info)
+
+    reports: list[str] = []
+    scope = _scope(
+        {
+            "source.value": "BV1D84y1t76J",
+            "resource.danmaku": False,
+            "resource.cover": False,
+            "resource.chapter_info": False,
+            "resource.ai_translation_language": "en",
+        }
+    )
+    with bind_download_report_sink(lambda message, *_args: reports.append(message)):
+        manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, scope))
+
+    assert reports == []
+    assert manifest.translation_languages == (language,)
+    assert manifest.is_preview is True
+    assert manifest.invalid_subtitle_languages == ("ja-JP",)
+    assert manifest.subtitles == (("zh-CN", "https://example.test/subtitle.json"),)
