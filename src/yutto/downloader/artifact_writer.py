@@ -48,10 +48,7 @@ class ArtifactWriter:
                 write_subtitle(
                     cast(
                         "SubtitleData",
-                        [
-                            {"content": line.content, "from": line.start, "to": line.end}
-                            for line in subtitle.lines
-                        ],
+                        [{"content": line.content, "from": line.start, "to": line.end} for line in subtitle.lines],
                     ),
                     plan.paths.output,
                     subtitle.lang,
