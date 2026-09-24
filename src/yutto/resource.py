@@ -8,8 +8,8 @@ from yutto.api.player import (
     TranslationLanguage,
     get_bangumi_playurl,
     get_cheese_playurl,
-    get_player_info,
     get_player_info_url,
+    get_subtitle_info,
     get_ugc_playurl,
 )
 from yutto.auth import get_user_info
@@ -17,7 +17,6 @@ from yutto.core.operation import ReportColor, ReportLevel, emit_download_report
 from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 from yutto.types import AudioUrlMeta, VideoUrlMeta
-from yutto.utils.functional import data_has_chained_keys
 
 if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
@@ -182,30 +181,23 @@ async def _resolve_subtitles(
     aid: AId,
     cid: CId,
 ) -> tuple[SubtitleResource, ...]:
-    resp_json = await get_player_info(scope, aid, cid, wbi=not isinstance(item, CheeseEpisode))
-    if resp_json is None:
+    info = await get_subtitle_info(scope, aid, cid, wbi=not isinstance(item, CheeseEpisode))
+    if info is None:
         return ()
-    if not data_has_chained_keys(resp_json, ["data", "subtitle", "subtitles"]):
+    if info.tracks is None:
         if not isinstance(item, UgcPage):
             emit_download_report(
-                f"无法获取该视频的字幕（{aid}, cid: {cid}），原因：{resp_json.get('message')}",
+                f"无法获取该视频的字幕（{aid}, cid: {cid}），原因：{info.message}",
                 ReportLevel.WARNING,
             )
         return ()
 
-    subtitles: list[SubtitleResource] = []
-    for sub_info in resp_json["data"]["subtitle"]["subtitles"]:
-        subtitle_url = sub_info["subtitle_url"]
-        if subtitle_url is None or not subtitle_url.strip():
-            emit_download_report(
-                f"跳过无效的字幕URL（{aid}, cid: {cid}），语言：{sub_info.get('lan_doc', '未知')}",
-                ReportLevel.WARNING,
-            )
-            continue
-        if not subtitle_url.startswith(("http://", "https://")):
-            subtitle_url = f"https:{subtitle_url}"
-        subtitles.append((sub_info["lan_doc"], subtitle_url))
-    return tuple(subtitles)
+    for language in info.invalid_languages:
+        emit_download_report(
+            f"跳过无效的字幕URL（{aid}, cid: {cid}），语言：{language}",
+            ReportLevel.WARNING,
+        )
+    return tuple((track.language, track.url) for track in info.tracks)
 
 
 async def _resolve_danmaku(

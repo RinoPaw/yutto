@@ -5,6 +5,7 @@ import shutil
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
+from yutto.api.player import get_chapter_info, get_subtitle_lines
 from yutto.core.events import (
     DownloadArtifactCreated,
     DownloadItemSkipped,
@@ -24,7 +25,6 @@ from yutto.downloader.transfer import download_files
 from yutto.stream_formats import emit_manifest_formats
 from yutto.types import MultiLangSubtitle
 from yutto.utils.fetcher import Fetcher, unwrap_fetch_result
-from yutto.utils.functional import data_has_chained_keys
 from yutto.utils.metadata import ChapterInfoData
 
 if TYPE_CHECKING:
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from yutto.resource import ResourceManifest
     from yutto.utils.danmaku import DanmakuData
     from yutto.utils.metadata import ItemMetaData
+    from yutto.utils.subtitle import SubtitleData
 
 
 class DownloadExecutor:
@@ -54,12 +55,22 @@ class DownloadExecutor:
             subtitles: list[MultiLangSubtitle] = []
             if manifest.subtitles:
                 subtitle_results = await asyncio.gather(
-                    *(Fetcher.fetch_json(scope, url) for _, url in manifest.subtitles)
+                    *(get_subtitle_lines(scope, url) for _, url in manifest.subtitles)
                 )
-                for (lang, _), result in zip(manifest.subtitles, subtitle_results, strict=True):
-                    subtitle_json = result.value_or(None)
-                    if subtitle_json is not None and "body" in subtitle_json:
-                        subtitles.append(MultiLangSubtitle(lang=lang, lines=subtitle_json["body"]))
+                for (lang, _), lines in zip(manifest.subtitles, subtitle_results, strict=True):
+                    if lines is not None:
+                        subtitles.append(
+                            MultiLangSubtitle(
+                                lang=lang,
+                                lines=cast(
+                                    "SubtitleData",
+                                    [
+                                        {"content": line.content, "from": line.start, "to": line.end}
+                                        for line in lines
+                                    ],
+                                ),
+                            )
+                        )
 
             danmaku = cast(
                 "DanmakuData",
@@ -89,13 +100,13 @@ class DownloadExecutor:
 
             chapter_info_data: tuple[ChapterInfoData, ...] = ()
             if manifest.chapter_info_url is not None:
-                chapter_json = (await Fetcher.fetch_json(scope, manifest.chapter_info_url)).value_or(None)
-                if chapter_json is not None and data_has_chained_keys(chapter_json, ["data", "view_points"]):
+                chapter_info = await get_chapter_info(scope, manifest.chapter_info_url)
+                if chapter_info is not None and chapter_info.points is not None:
                     chapter_info_data = tuple(
-                        ChapterInfoData(content=item["content"], start=item["from"], end=item["to"])
-                        for item in chapter_json["data"]["view_points"]
+                        ChapterInfoData(content=point.content, start=point.start, end=point.end)
+                        for point in chapter_info.points
                     )
-                elif chapter_json is not None:
+                elif chapter_info is not None:
                     emit_download_report("无法获取该视频的章节信息", ReportLevel.WARNING)
 
             downloaded = Downloaded(

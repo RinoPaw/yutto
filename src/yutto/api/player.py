@@ -30,6 +30,38 @@ class PlayUrlInfo:
     translation_languages: tuple[TranslationLanguage, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class SubtitleTrack:
+    language: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleInfo:
+    tracks: tuple[SubtitleTrack, ...] | None
+    invalid_languages: tuple[str, ...] = ()
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleLine:
+    content: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
+class ChapterPoint:
+    content: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class ChapterInfo:
+    points: tuple[ChapterPoint, ...] | None
+
+
 def _video_streams(items: list[dict[str, Any]]) -> tuple[VideoUrlMeta, ...]:
     return tuple(
         VideoUrlMeta(
@@ -106,6 +138,62 @@ def _translation_languages(data: dict[str, Any]) -> tuple[TranslationLanguage, .
         for item in language.get("items") or []
         if item.get("lang") is not None and item.get("title") is not None
     )
+
+
+def _decode_subtitle_info(response: dict[str, Any]) -> SubtitleInfo:
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return SubtitleInfo(tracks=None, message=str(response.get("message", "")))
+    subtitle = data.get("subtitle")
+    if not isinstance(subtitle, dict):
+        return SubtitleInfo(tracks=None, message=str(response.get("message", "")))
+    raw_subtitles = subtitle.get("subtitles")
+    if not isinstance(raw_subtitles, list):
+        return SubtitleInfo(tracks=None, message=str(response.get("message", "")))
+
+    tracks: list[SubtitleTrack] = []
+    invalid_languages: list[str] = []
+    for item in raw_subtitles:
+        if not isinstance(item, dict):
+            raise NoAccessPermissionError("无法解析字幕信息，原因：API 响应格式异常")
+        language = str(item.get("lan_doc", "未知"))
+        raw_url = item.get("subtitle_url")
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            invalid_languages.append(language)
+            continue
+        url = raw_url.strip()
+        if not url.startswith(("http://", "https://")):
+            url = f"https:{url}"
+        tracks.append(SubtitleTrack(language=language, url=url))
+    return SubtitleInfo(
+        tracks=tuple(tracks),
+        invalid_languages=tuple(invalid_languages),
+        message=str(response.get("message", "")),
+    )
+
+
+def _decode_chapter_info(response: dict[str, Any]) -> ChapterInfo:
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return ChapterInfo(points=None)
+    raw_chapters = data.get("view_points")
+    if not isinstance(raw_chapters, list):
+        return ChapterInfo(points=None)
+
+    points: list[ChapterPoint] = []
+    for item in raw_chapters:
+        if not isinstance(item, dict):
+            raise NoAccessPermissionError("无法解析章节信息，原因：API 响应格式异常")
+        content = item.get("content")
+        start = item.get("from")
+        end = item.get("to")
+        if content is None or start is None or end is None:
+            raise NoAccessPermissionError("无法解析章节信息，原因：API 响应缺少必要字段")
+        try:
+            points.append(ChapterPoint(content=str(content), start=int(start), end=int(end)))
+        except (TypeError, ValueError) as error:
+            raise NoAccessPermissionError("无法解析章节信息，原因：API 响应格式异常") from error
+    return ChapterInfo(points=tuple(points))
 
 
 async def get_ugc_playurl(
@@ -207,22 +295,59 @@ def get_player_info_url(aid: AId, cid: CId, *, wbi: bool) -> str:
     return f"{endpoint}?aid={aid}&cid={cid}"
 
 
-async def get_player_info(
+async def get_subtitle_info(
     scope: ExecutionScope,
     aid: AId,
     cid: CId,
     *,
     wbi: bool,
-) -> dict[str, Any] | None:
-    return (await Fetcher.fetch_json(scope, get_player_info_url(aid, cid, wbi=wbi))).value_or(None)
+) -> SubtitleInfo | None:
+    response = (await Fetcher.fetch_json(scope, get_player_info_url(aid, cid, wbi=wbi))).value_or(None)
+    return _decode_subtitle_info(response) if response is not None else None
+
+
+async def get_chapter_info(scope: ExecutionScope, url: str) -> ChapterInfo | None:
+    response = (await Fetcher.fetch_json(scope, url)).value_or(None)
+    return _decode_chapter_info(response) if response is not None else None
+
+
+async def get_subtitle_lines(scope: ExecutionScope, url: str) -> tuple[SubtitleLine, ...] | None:
+    response = (await Fetcher.fetch_json(scope, url)).value_or(None)
+    if response is None or "body" not in response:
+        return None
+    body = response["body"]
+    if not isinstance(body, list):
+        raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应格式异常")
+
+    lines: list[SubtitleLine] = []
+    for item in body:
+        if not isinstance(item, dict):
+            raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应格式异常")
+        content = item.get("content")
+        start = item.get("from")
+        end = item.get("to")
+        if content is None or start is None or end is None:
+            raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应缺少必要字段")
+        try:
+            lines.append(SubtitleLine(content=str(content), start=float(start), end=float(end)))
+        except (TypeError, ValueError) as error:
+            raise NoAccessPermissionError("无法解析字幕正文，原因：API 响应格式异常") from error
+    return tuple(lines)
 
 
 __all__ = [
+    "ChapterInfo",
+    "ChapterPoint",
     "PlayUrlInfo",
+    "SubtitleInfo",
+    "SubtitleLine",
+    "SubtitleTrack",
     "TranslationLanguage",
     "get_bangumi_playurl",
+    "get_chapter_info",
     "get_cheese_playurl",
-    "get_player_info",
     "get_player_info_url",
+    "get_subtitle_info",
+    "get_subtitle_lines",
     "get_ugc_playurl",
 ]
