@@ -89,7 +89,7 @@ def make_audio_plan(
     audio_save_codec: str = "copy",
 ) -> DownloadPlan:
     path = Path("output")
-    resources = ResourceManifest(audios=(make_audio(),))
+    resources = ResourceManifest(audio_requested=True, audios=(make_audio(),))
     scope = Scope(
         {
             "source.value": "BV1muxer",
