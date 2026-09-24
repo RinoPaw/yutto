@@ -88,12 +88,6 @@ class ItemResult(_ResultModel):
 class DownloadResult(_ResultModel):
     items: tuple[ItemResult, ...] = Field(default_factory=tuple)
 
-    @model_validator(mode="after")
-    def validate_item_identity(self) -> Self:
-        if any(item.planned_path is None for item in self.items):
-            raise ValueError("download result items must have a planned path")
-        return self
-
 
 class ResolveFailureStep(_ResultModel):
     index: int
