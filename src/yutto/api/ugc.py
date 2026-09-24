@@ -61,6 +61,7 @@ class UgcVideoInfo:
 class UgcVideoReference:
     bvid: BvId
     published_at: int | None
+    title: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,10 +202,12 @@ def _decode_video_references(
         bvid = item.get("bvid")
         if not bvid:
             continue
+        title = item.get("title")
         videos.append(
             UgcVideoReference(
                 bvid=BvId(str(bvid)),
                 published_at=_decode_optional_int(item.get(publication_field), f"{description}发布时间"),
+                title=str(title) if title is not None else None,
             )
         )
     return tuple(videos)
