@@ -240,8 +240,8 @@ async def _resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_avids: list[tuple[int, AvId]],
     video_scope: Scope,
-) -> tuple[tuple[tuple[int, UgcVideo], ...], tuple[MediaResolveFailure, ...]]:
-    async def resolve_one(index: int, avid: AvId) -> tuple[int, UgcVideo] | MediaResolveFailure | None:
+) -> tuple[tuple[UgcVideo, ...], tuple[MediaResolveFailure, ...]]:
+    async def resolve_one(index: int, avid: AvId) -> UgcVideo | MediaResolveFailure | None:
         try:
             result = await UgcVideoSource(id=avid).resolve(execution, video_scope)
         except _EXPECTED_UGC_CHILD_ERRORS as error:
@@ -257,9 +257,9 @@ async def _resolve_ugc_videos(
             )
             return None
 
-        return index, result.media
+        return result.media
 
-    tasks: list[asyncio.Task[tuple[int, UgcVideo] | MediaResolveFailure | None]] = []
+    tasks: list[asyncio.Task[UgcVideo | MediaResolveFailure | None]] = []
     try:
         async with asyncio.TaskGroup() as task_group:
             tasks = [task_group.create_task(resolve_one(index, avid)) for index, avid in indexed_avids]
@@ -268,7 +268,7 @@ async def _resolve_ugc_videos(
             raise error_group.exceptions[0] from None
         raise
 
-    resolved: list[tuple[int, UgcVideo]] = []
+    resolved: list[UgcVideo] = []
     failures: list[MediaResolveFailure] = []
     for task in tasks:
         result = task.result()
@@ -313,7 +313,7 @@ class UgcCollectionSource(MediaSource):
             media=UgcCollection(
                 collection_id=self.id,
                 metadata=ItemMetaData(title=title, mid=self.owner_id),
-                items=tuple(video for _, video in resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -348,7 +348,7 @@ class UgcFavSource(MediaSource):
                     mid=MId(str(upper_mid)) if upper_mid is not None else None,
                     owner=str(upper.get("name", "")),
                 ),
-                items=tuple(video for _, video in resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -423,7 +423,7 @@ class UgcSeriesSource(MediaSource):
                     mid=mid,
                     plot=str(meta.get("description", "")),
                 ),
-                items=tuple(video for _, video in resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -456,7 +456,7 @@ class UgcSpaceSource(MediaSource):
                     mid=self.id,
                     owner=str(profile.get("name", "")),
                 ),
-                items=tuple(video for _, video in resolved),
+                items=resolved,
             ),
             failures=failures,
         )
@@ -476,7 +476,7 @@ class UgcWatchLaterSource(MediaSource):
         return MediaResolveResult(
             media=UgcWatchLater(
                 metadata=ItemMetaData(title="稍后再看"),
-                items=tuple(video for _, video in resolved),
+                items=resolved,
             ),
             failures=failures,
         )
