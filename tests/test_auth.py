@@ -29,6 +29,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _execution_scope(session: Any) -> ExecutionScope:
+    return ExecutionScope(cast("Any", session), fetch_workers=1, download_workers=1)
+
+
 def test_parse_auth_inline_handles_case_and_spaces():
     assert parse_auth_inline("  SESSDATA = foo ; BILI_JCT = bar  ") == {"SESSDATA": "foo", "bili_jct": "bar"}
 
@@ -167,8 +171,8 @@ async def test_user_info_cache_is_scoped_to_execution_scope(monkeypatch: pytest.
         return Success(next(responses))
 
     monkeypatch.setattr(Fetcher, "fetch_json", fake_fetch_json)
-    first_scope = ExecutionScope(cast("Any", object()))
-    second_scope = ExecutionScope(cast("Any", object()))
+    first_scope = _execution_scope(object())
+    second_scope = _execution_scope(object())
 
     assert await get_user_info(first_scope) == {"vip_status": True, "is_login": True}
     assert await get_user_info(first_scope) == {"vip_status": True, "is_login": True}
@@ -180,7 +184,7 @@ async def test_user_info_cache_is_scoped_to_execution_scope(monkeypatch: pytest.
 @as_sync
 async def test_validate_user_info_reuses_execution_scope_session_and_cache(monkeypatch: pytest.MonkeyPatch):
     session = cast("Any", object())
-    scope = ExecutionScope(session)
+    scope = _execution_scope(session)
     sessions: list[Any] = []
 
     async def fake_fetch_json(active_scope: ExecutionScope, url: str):
@@ -207,7 +211,7 @@ async def test_concurrent_user_info_reads_share_one_fetch(monkeypatch: pytest.Mo
         return Success({"data": {"vipStatus": 1, "isLogin": True}})
 
     monkeypatch.setattr(Fetcher, "fetch_json", fake_fetch_json)
-    scope = ExecutionScope(cast("Any", object()))
+    scope = _execution_scope(object())
 
     results = await asyncio.gather(get_user_info(scope), get_user_info(scope))
 
@@ -249,8 +253,8 @@ async def test_wbi_cache_is_scoped_to_execution_scope(monkeypatch: pytest.Monkey
         return Success(next(responses))
 
     monkeypatch.setattr(Fetcher, "fetch_json", fake_fetch_json)
-    first_scope = ExecutionScope(cast("Any", object()))
-    second_scope = ExecutionScope(cast("Any", object()))
+    first_scope = _execution_scope(object())
+    second_scope = _execution_scope(object())
 
     assert await get_wbi_img(first_scope) == {"img_key": "first-img", "sub_key": "first-sub"}
     assert await get_wbi_img(first_scope) == {"img_key": "first-img", "sub_key": "first-sub"}
