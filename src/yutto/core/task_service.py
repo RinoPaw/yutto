@@ -16,13 +16,13 @@ from yutto.core.events import (
 )
 from yutto.core.result import DownloadResult, ResolveResult
 from yutto.runtime import TaskRuntime, TaskSnapshot
-from yutto.scope import Scope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from yutto.core.execution import ExecutionScopeFactory
     from yutto.runtime import EventReplay, TaskCapacityPool, TaskContext, TaskEvent
+    from yutto.scope import Scope
 
 
 _ResultT = TypeVar("_ResultT")
