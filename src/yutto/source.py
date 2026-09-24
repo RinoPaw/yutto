@@ -241,17 +241,42 @@ class UgcVideoSource(MediaSource):
         )
 
 
+def _apply_ugc_reference_title(media: UgcVideo, reference: UgcVideoReference) -> UgcVideo:
+    title = reference.title
+    if title is None:
+        return media
+
+    items = media.items
+    if media.page_count == 1 and len(items) == 1:
+        entry = items[0]
+        items = (
+            replace(
+                entry,
+                media=replace(entry.media, metadata=replace(entry.media.metadata, title=title)),
+            ),
+        )
+
+    return replace(
+        media,
+        metadata=replace(media.metadata, title=title),
+        items=items,
+    )
+
+
 async def _resolve_ugc_videos(
     execution: ExecutionScope,
-    indexed_avids: list[tuple[int, AvId]],
+    indexed_videos: list[tuple[int, UgcVideoReference]],
     video_scope: Scope,
 ) -> tuple[tuple[MediaEntry[UgcVideo], ...], tuple[MediaResolveFailure, ...]]:
-    async def resolve_one(index: int, avid: AvId) -> MediaEntry[UgcVideo] | MediaResolveFailure | None:
+    async def resolve_one(
+        index: int,
+        reference: UgcVideoReference,
+    ) -> MediaEntry[UgcVideo] | MediaResolveFailure | None:
         try:
-            result = await UgcVideoSource(id=avid).resolve(execution, video_scope)
+            result = await UgcVideoSource(id=reference.bvid).resolve(execution, video_scope)
         except _EXPECTED_UGC_CHILD_ERRORS as error:
             return MediaResolveFailure(
-                path=(MediaResolveStep(index=index, source=avid),),
+                path=(MediaResolveStep(index=index, source=reference.bvid),),
                 error=error,
             )
 
@@ -262,12 +287,18 @@ async def _resolve_ugc_videos(
             )
             return None
 
-        return MediaEntry(index=index, media=result.media)
+        return MediaEntry(
+            index=index,
+            media=_apply_ugc_reference_title(result.media, reference),
+        )
 
     tasks: list[asyncio.Task[MediaEntry[UgcVideo] | MediaResolveFailure | None]] = []
     try:
         async with asyncio.TaskGroup() as task_group:
-            tasks = [task_group.create_task(resolve_one(index, avid)) for index, avid in indexed_avids]
+            tasks = [
+                task_group.create_task(resolve_one(index, reference))
+                for index, reference in indexed_videos
+            ]
     except ExceptionGroup as error_group:
         if len(error_group.exceptions) == 1:
             raise error_group.exceptions[0] from None
@@ -311,7 +342,7 @@ class UgcCollectionSource(MediaSource):
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
             execution,
-            [(index, item.bvid) for index, item in selected_videos],
+            selected_videos,
             video_scope,
         )
         return MediaResolveResult(
@@ -339,7 +370,7 @@ class UgcFavSource(MediaSource):
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
             execution,
-            [(index, item.bvid) for index, item in selected_videos],
+            selected_videos,
             video_scope,
         )
 
@@ -418,7 +449,7 @@ class UgcSeriesSource(MediaSource):
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
             execution,
-            [(index, item.bvid) for index, item in selected_videos],
+            selected_videos,
             video_scope,
         )
         return MediaResolveResult(
@@ -451,7 +482,7 @@ class UgcSpaceSource(MediaSource):
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
             execution,
-            [(index, item.bvid) for index, item in selected_videos],
+            selected_videos,
             video_scope,
         )
         return MediaResolveResult(
@@ -480,7 +511,7 @@ class UgcWatchLaterSource(MediaSource):
         video_scope = Scope({"selection.expression": "~"}, parent=scope)
         resolved, failures = await _resolve_ugc_videos(
             execution,
-            [(index, item.bvid) for index, item in selected_videos],
+            selected_videos,
             video_scope,
         )
         return MediaResolveResult(
