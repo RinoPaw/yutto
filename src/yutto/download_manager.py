@@ -221,6 +221,7 @@ class DownloadManager:
                 except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError) as error:
                     emit_download_report(error.message, ReportLevel.ERROR)
                     results[index] = ItemResult(
+                        planned_path=path,
                         state=ItemState.FAILED,
                         failure=ItemFailure(
                             type=type(error).__name__,
@@ -243,7 +244,7 @@ class DownloadManager:
                     )
                 if index + 1 < len(start_turns):
                     start_turns[index + 1].set()
-                results[index] = await process_download(
+                item_result = await process_download(
                     execution,
                     manifest,
                     item.metadata,
@@ -251,6 +252,7 @@ class DownloadManager:
                     scope,
                     path_leases=self.path_leases,
                 )
+                results[index] = item_result.model_copy(update={"planned_path": path})
 
         tasks = [
             asyncio.create_task(
