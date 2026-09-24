@@ -23,10 +23,11 @@ class MediaItem(Media):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MediaEntry(Generic[TMedia_co]):
-    """One media object's position inside its parent container."""
+    """One media object's relationship to its parent container."""
 
     index: int
     media: TMedia_co
+    display_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
