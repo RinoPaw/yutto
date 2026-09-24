@@ -29,6 +29,8 @@ def _install_fetcher_stub(monkeypatch: pytest.MonkeyPatch, routes: dict[str, Any
                 if isinstance(response, BaseException):
                     raise response
                 return Success(response)
+        if "/x/tag/archive/tags" in url:
+            return Success({"code": 0, "data": []})
         raise AssertionError(f"unexpected fetch url: {url}")
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
