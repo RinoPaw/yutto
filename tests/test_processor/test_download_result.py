@@ -17,19 +17,23 @@ from yutto.downloader.media_muxer import MediaMuxer
 from yutto.exceptions import PostprocessingError
 from yutto.resource import ResourceManifest
 from yutto.scope import ROOT_SCOPE, Scope
+from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.danmaku import write_danmaku
 from yutto.utils.functional import as_sync
 from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
     from yutto.stream import AudioCodec
-    from yutto.types import AudioUrlMeta
     from yutto.utils.danmaku import DanmakuData, DanmakuOptions
 
 pytestmark = pytest.mark.processor
 
 
 ENTRY_PATH = Path("series/episode")
+
+
+def _execution_scope(session: Any) -> ExecutionScope:
+    return ExecutionScope(cast("Any", session), fetch_workers=1, download_workers=1)
 
 
 def make_scope(
@@ -72,21 +76,20 @@ def make_resource_only_entry() -> ResourceManifest:
     return ResourceManifest(
         subtitles=(("zh-CN", "https://example.test/subtitle.json"),),
         danmaku_source_type="xml",
-        danmaku_save_type="xml",
         danmaku_urls=("https://example.test/danmaku.xml",),
         cover_url="https://example.test/cover.jpg",
     )
 
 
 def make_audio(codec: AudioCodec = "mp4a") -> AudioUrlMeta:
-    return {
-        "url": "https://signed.example.test/audio?token=audio-secret",
-        "mirrors": ["https://mirror.example.test/audio?token=mirror-secret"],
-        "codec": codec,
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    return AudioUrlMeta(
+        url="https://signed.example.test/audio?token=audio-secret",
+        mirrors=("https://mirror.example.test/audio?token=mirror-secret",),
+        codec=codec,
+        width=0,
+        height=0,
+        quality=30280,
+    )
 
 
 def make_media_entry() -> ResourceManifest:
@@ -152,7 +155,7 @@ async def test_interrupted_mux_cleans_transfer_owned_files(
     monkeypatch.setattr(executor_module, "MediaMuxer", lambda: muxer)
     execution = asyncio.create_task(
         process_download(
-            ExecutionScope(cast("Any", object())),
+            _execution_scope(object()),
             make_media_entry(),
             make_metadata(),
             ENTRY_PATH,
@@ -181,7 +184,7 @@ async def test_interrupted_mux_cleans_transfer_owned_files(
 @as_sync
 async def test_resource_only_download_returns_final_artifacts_without_temporary_files(tmp_path: Path):
     result = await process_download(
-        ExecutionScope(cast("Any", object())),
+        _execution_scope(object()),
         make_resource_only_entry(),
         make_metadata(),
         ENTRY_PATH,
@@ -208,7 +211,6 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
     entry = replace(
         make_media_entry(),
         danmaku_source_type=None,
-        danmaku_save_type=None,
         danmaku_urls=(),
     )
     output_path = tmp_path / "output/series/episode.m4a"
@@ -218,7 +220,7 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
     subtitle_path.write_text("stale subtitle")
 
     result = await process_download(
-        ExecutionScope(cast("Any", object())),
+        _execution_scope(object()),
         entry,
         make_metadata(),
         ENTRY_PATH,
@@ -247,14 +249,14 @@ async def test_missing_requested_audio_does_not_start_media_transfer(
 ):
     entry = ResourceManifest(
         videos=(
-            {
-                "url": "https://example.test/video",
-                "mirrors": [],
-                "codec": "avc",
-                "width": 1920,
-                "height": 1080,
-                "quality": 80,
-            },
+            VideoUrlMeta(
+                url="https://example.test/video",
+                mirrors=(),
+                codec="avc",
+                width=1920,
+                height=1080,
+                quality=80,
+            ),
         ),
     )
 
@@ -263,7 +265,7 @@ async def test_missing_requested_audio_does_not_start_media_transfer(
 
     monkeypatch.setattr(executor_module, "download_files", unexpected_download)
     result = await process_download(
-        ExecutionScope(cast("Any", object())),
+        _execution_scope(object()),
         entry,
         make_metadata(),
         ENTRY_PATH,
