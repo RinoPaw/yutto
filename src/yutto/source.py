@@ -42,6 +42,7 @@ from yutto.media import (
     UgcAllFavourites,
     UgcCollection,
     UgcFav,
+    UgcFavEntry,
     UgcPage,
     UgcSeries,
     UgcSpace,
@@ -141,7 +142,7 @@ class UgcVideoSource(MediaSource):
     async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcVideo]:
         video_data = await get_ugc_video_info(execution, self.id)
         aid = AId(video_data["aid"])
-        tags = await get_ugc_video_tags(execution, aid) if scope.resource.metadata else []
+        tags = await get_ugc_video_tags(execution, aid)
         added_at = get_time_stamp_by_now()
         page_data: list[dict[str, Any]] = list(video_data["pages"])
         selection_expression = scope.selection.expression
@@ -335,13 +336,14 @@ class UgcFavSource(MediaSource):
         resolved, failures = await _resolve_ugc_videos(
             execution, [(index, BvId(item["bvid"])) for index, item in selected_medias], video_scope
         )
-        for index, video in resolved:
-            favourite = medias[index - 1]
-            favourite_title = str(favourite.get("title") or video.metadata.title)
-            video.metadata.title = favourite_title
-            if len(video.items) == 1:
-                video.items[0].metadata.title = favourite_title
-                video.items[0].metadata.show_title = favourite_title
+        entries = tuple(
+            UgcFavEntry(
+                index=index,
+                metadata=ItemMetaData(title=str(medias[index - 1].get("title") or video.metadata.title)),
+                video=video,
+            )
+            for index, video in resolved
+        )
 
         upper = info.get("upper") or {}
         upper_mid = upper.get("mid")
@@ -355,7 +357,7 @@ class UgcFavSource(MediaSource):
                     mid=MId(str(upper_mid)) if upper_mid is not None else None,
                     owner=str(upper.get("name", "")),
                 ),
-                items=tuple(video for _, video in resolved),
+                items=entries,
             ),
             failures=failures,
         )

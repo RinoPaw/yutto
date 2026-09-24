@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -14,6 +14,7 @@ from yutto.media import (
     MediaItem,
     UgcCollection,
     UgcFav,
+    UgcFavEntry,
     UgcPage,
     UgcSeries,
     UgcSpace,
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from yutto.path_templates import PathTemplateVariableDict
     from yutto.types import AId
 
-MediaAncestry: TypeAlias = tuple[MediaContainer, ...]
+MediaAncestry: TypeAlias = tuple[MediaContainer | UgcFavEntry, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +43,9 @@ def iter_media_items(
     media: Media,
     ancestry: MediaAncestry = (),
 ) -> Iterator[tuple[MediaAncestry, MediaItem]]:
+    if isinstance(media, UgcFavEntry):
+        yield from iter_media_items(media.video, (*ancestry, media))
+        return
     if isinstance(media, MediaContainer):
         child_ancestry = (*ancestry, media)
         for child in media.items:
@@ -100,8 +104,13 @@ def _ugc_context(
         raise TypeError("UgcPage parent must be UgcVideo")
 
     video = ancestry[-1]
+    favourite_entry = ancestry[-2] if len(ancestry) >= 2 and isinstance(ancestry[-2], UgcFavEntry) else None
     name = page.metadata.title
-    title = video.metadata.title
+    title = (
+        favourite_entry.metadata.title or video.metadata.title
+        if favourite_entry is not None
+        else video.metadata.title
+    )
     username: str | None = None
     series_title: str | None = None
 
@@ -109,7 +118,10 @@ def _ugc_context(
         auto_path = "{title}/{name}" if video.page_count > 1 else "{title}"
         return video, auto_path, name, title, username, series_title
 
-    root = ancestry[-2]
+    root_index = -3 if favourite_entry is not None else -2
+    if len(ancestry) < abs(root_index):
+        raise TypeError("UgcVideo container ancestry is incomplete")
+    root = ancestry[root_index]
     if isinstance(root, UgcSeries):
         auto_path = "{series_title}/{title}/{name}"
         username = root.metadata.owner or video.metadata.owner
@@ -120,6 +132,8 @@ def _ugc_context(
         username = root.metadata.owner or video.metadata.owner
         series_title = root.metadata.title
     elif isinstance(root, UgcFav):
+        if favourite_entry is None:
+            raise TypeError("UgcFav child must carry UgcFavEntry context")
         multi_page = len(video.items) > 1
         auto_path = (
             "{username}的收藏夹/{series_title}/{title}/{name}"
@@ -129,7 +143,7 @@ def _ugc_context(
         username = root.metadata.owner or video.metadata.owner
         series_title = root.metadata.title
         if not multi_page:
-            name = video.metadata.title
+            name = title
     elif isinstance(root, UgcSpace):
         auto_path = "{username}的全部投稿视频/{title}/{name}"
         username = root.metadata.owner or root.metadata.title
@@ -141,6 +155,27 @@ def _ugc_context(
         raise TypeError(f"unsupported UGC parent: {type(root).__name__}")
 
     return video, auto_path, name, title, username, series_title
+
+
+def _contextualize_item(ancestry: MediaAncestry, item: MediaItem) -> MediaItem:
+    if not isinstance(item, UgcPage) or len(ancestry) < 3:
+        return item
+
+    root = ancestry[-3]
+    favourite_entry = ancestry[-2]
+    video = ancestry[-1]
+    if (
+        isinstance(root, UgcFav)
+        and isinstance(favourite_entry, UgcFavEntry)
+        and isinstance(video, UgcVideo)
+        and len(video.items) == 1
+    ):
+        title = favourite_entry.metadata.title or video.metadata.title
+        return replace(
+            item,
+            metadata=replace(item.metadata, title=title, show_title=title),
+        )
+    return item
 
 
 def _episode_name(item: BangumiEpisode | CheeseEpisode) -> str:
@@ -193,14 +228,17 @@ def resolve_media_paths(
     subpath_template: str = "{auto}",
 ) -> tuple[ResolvedMediaPath, ...]:
     """Resolve paths for every downloadable leaf in a Media tree."""
-    return tuple(
-        ResolvedMediaPath(
-            ancestry=ancestry,
-            item=item,
-            path=_resolve_media_path(ancestry, item, subpath_template),
+    resolved: list[ResolvedMediaPath] = []
+    for ancestry, item in iter_media_items(root_media):
+        contextual_item = _contextualize_item(ancestry, item)
+        resolved.append(
+            ResolvedMediaPath(
+                ancestry=ancestry,
+                item=contextual_item,
+                path=_resolve_media_path(ancestry, contextual_item, subpath_template),
+            )
         )
-        for ancestry, item in iter_media_items(root_media)
-    )
+    return tuple(resolved)
 
 
 __all__ = [

@@ -29,7 +29,7 @@ from yutto.exceptions import (
     WrongArgumentError,
 )
 from yutto.listing import MediaAncestry, iter_media_items, resolve_media_paths
-from yutto.media import UgcFav, UgcVideo
+from yutto.media import UgcFav, UgcFavEntry, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import resolve_resource_manifest
@@ -65,12 +65,18 @@ def show_batch_episode_title(
 
 
 def _display_group(ancestry: MediaAncestry) -> str | None:
-    if len(ancestry) < 2:
+    if len(ancestry) < 3:
         return None
-    root = ancestry[-2]
+    root = ancestry[-3]
+    favourite_entry = ancestry[-2]
     video = ancestry[-1]
-    if isinstance(root, UgcFav) and isinstance(video, UgcVideo) and len(video.items) > 1:
-        return video.metadata.title
+    if (
+        isinstance(root, UgcFav)
+        and isinstance(favourite_entry, UgcFavEntry)
+        and isinstance(video, UgcVideo)
+        and len(video.items) > 1
+    ):
+        return favourite_entry.metadata.title or video.metadata.title
     return None
 
 

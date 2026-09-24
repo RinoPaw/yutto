@@ -92,11 +92,19 @@ class UgcSeries(MediaContainer):
 
 
 @dataclass(slots=True, kw_only=True)
+class UgcFavEntry(Media):
+    """收藏夹中的一个条目，保存收藏关系自己的标题与位置。"""
+
+    index: int
+    video: UgcVideo
+
+
+@dataclass(slots=True, kw_only=True)
 class UgcFav(MediaContainer):
     """收藏夹。"""
 
     fid: FId
-    items: tuple[UgcVideo, ...] = ()
+    items: tuple[UgcFavEntry, ...] = ()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -133,6 +141,7 @@ __all__ = [
     "UgcAllFavourites",
     "UgcCollection",
     "UgcFav",
+    "UgcFavEntry",
     "UgcPage",
     "UgcSeries",
     "UgcSpace",
