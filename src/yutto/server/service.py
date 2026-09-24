@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
-from datetime import date, datetime
-from enum import Enum
+from dataclasses import dataclass
 from pathlib import Path
 from string import Formatter
-from typing import TYPE_CHECKING, TypeAlias, TypeVar
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING
 
 from yutto.auth import load_auth, validate_profile
 from yutto.core.execution import (
@@ -19,10 +14,15 @@ from yutto.core.execution import (
     resolve_network_proxy,
 )
 from yutto.downloader.planner import resolve_block_size_bytes
-from yutto.media import Media
 from yutto.resource import resolve_danmaku_format, should_save_cover
 from yutto.scope import MISSING, Scope
 from yutto.server.request import scope_parser_from_settings as scope_parser_from_settings
+from yutto.server.serialization import (
+    event_to_json as event_to_json,
+    replay_to_json as replay_to_json,
+    snapshot_summary_to_json as snapshot_summary_to_json,
+    snapshot_to_json as snapshot_to_json,
+)
 from yutto.stream import (
     resolve_audio_codecs,
     resolve_audio_quality,
@@ -30,33 +30,10 @@ from yutto.stream import (
     resolve_video_codecs,
     resolve_video_quality,
 )
-from yutto.types import BilibiliId
 from yutto.utils.fetcher import resolve_proxy
 
 if TYPE_CHECKING:
     from yutto.auth import AuthInfo
-    from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
-
-JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
-PayloadT = TypeVar("PayloadT")
-ResultT = TypeVar("ResultT")
-
-_CREDENTIAL_FIELDS = frozenset(
-    {
-        "api_key",
-        "auth",
-        "authorization",
-        "bili_jct",
-        "cookie",
-        "cookies",
-        "credential",
-        "credentials",
-        "password",
-        "secret",
-        "sessdata",
-        "token",
-    }
-)
 
 
 class ServerPolicyError(ValueError):
@@ -306,142 +283,3 @@ def _scope_text(value: object, default: str) -> str:
     if not isinstance(value, str):
         raise ValueError("expected a string Scope value")
     return value
-
-
-def snapshot_to_json(snapshot: TaskSnapshot[PayloadT, ResultT]) -> dict[str, object]:
-    """Convert a task snapshot into a credential-safe JSON object."""
-    result = snapshot_summary_to_json(snapshot)
-    if snapshot.error is not None:
-        error: dict[str, JsonValue] = {
-            "code": snapshot.error.code,
-            "type": snapshot.error.type,
-            "message": snapshot.error.message,
-        }
-        if snapshot.error.truncated:
-            error["truncated"] = True
-        result["error"] = error
-    result["payload"] = _to_json_value(snapshot.payload)
-    result["result"] = _to_json_value(snapshot.result)
-    return result
-
-
-def snapshot_summary_to_json(snapshot: TaskSnapshot[PayloadT, ResultT]) -> dict[str, object]:
-    """Convert a task snapshot without retaining or expanding its payload."""
-    error: dict[str, JsonValue] | None = None
-    if snapshot.error is not None:
-        error = {"code": snapshot.error.code, "type": snapshot.error.type}
-        if snapshot.error.truncated:
-            error["truncated"] = True
-    return {
-        "task_id": snapshot.task_id,
-        "state": snapshot.state.value,
-        "error": error,
-        "created_at": snapshot.created_at.isoformat(),
-        "started_at": snapshot.started_at.isoformat() if snapshot.started_at is not None else None,
-        "finished_at": snapshot.finished_at.isoformat() if snapshot.finished_at is not None else None,
-        "last_event_seq": snapshot.last_event_seq,
-    }
-
-
-def event_to_json(event: TaskEvent) -> dict[str, object]:
-    """Convert a runtime event into a credential-safe JSON object."""
-    return {
-        "task_id": event.task_id,
-        "seq": event.seq,
-        "kind": event.kind,
-        "state": event.state.value,
-        "created_at": event.created_at.isoformat(),
-        "data": _to_json_value(event.data),
-    }
-
-
-def replay_to_json(replay: EventReplay) -> dict[str, object]:
-    """Convert a bounded event replay into a JSON object."""
-    return {
-        "task_id": replay.task_id,
-        "after_seq": replay.after_seq,
-        "events": [event_to_json(event) for event in replay.events],
-        "truncated": replay.truncated,
-    }
-
-
-def _scope_to_json(scope: Scope) -> dict[str, JsonValue]:
-    result: dict[str, JsonValue] = {}
-    for path, value in scope.flatten().items():
-        section, field = path.split(".", 1)
-        if _is_credential_field(field):
-            continue
-        section_value = result.setdefault(section, {})
-        if not isinstance(section_value, dict):
-            raise TypeError(f"invalid Scope section: {section}")
-        if field.casefold() == "proxy" and isinstance(value, str):
-            section_value[field] = _sanitize_proxy(value)
-            continue
-        section_value[field] = _to_json_value(value)
-    return result
-
-
-def _to_json_value(value: object) -> JsonValue:
-    if isinstance(value, Scope):
-        return _scope_to_json(value)
-    if isinstance(value, Enum):
-        return _to_json_value(value.value)
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, Path):
-        return value.as_posix()
-    if isinstance(value, BilibiliId):
-        return str(value)
-    if isinstance(value, Media):
-        result: dict[str, JsonValue] = {"type": type(value).__name__}
-        for item_field in fields(value):
-            result[item_field.name] = _to_json_value(getattr(value, item_field.name))
-        return result
-    if is_dataclass(value) and not isinstance(value, type):
-        result = {}
-        for item_field in fields(value):
-            if _is_credential_field(item_field.name):
-                continue
-            result[item_field.name] = _to_json_value(getattr(value, item_field.name))
-        return result
-    if isinstance(value, BaseModel):
-        return _to_json_value(value.model_dump(mode="python"))
-    if isinstance(value, Mapping):
-        result = {}
-        for key, item in value.items():
-            json_key = str(key)
-            if _is_credential_field(json_key):
-                continue
-            if json_key.casefold() == "proxy" and isinstance(item, str):
-                result[json_key] = _sanitize_proxy(item)
-                continue
-            result[json_key] = _to_json_value(item)
-        return result
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_to_json_value(item) for item in value]
-    raise TypeError(f"value of type {type(value).__name__} is not JSON compatible")
-
-
-def _is_credential_field(field: str) -> bool:
-    normalized = field.casefold().replace("-", "_")
-    return normalized in _CREDENTIAL_FIELDS or normalized.endswith(
-        ("_api_key", "_cookie", "_credential", "_password", "_secret", "_token")
-    )
-
-
-def _sanitize_proxy(proxy: str) -> str:
-    scheme_separator = proxy.find("://")
-    if scheme_separator < 0:
-        return proxy
-
-    authority_start = scheme_separator + 3
-    authority_end = len(proxy)
-    for separator in "/?#":
-        if (index := proxy.find(separator, authority_start)) >= 0:
-            authority_end = min(authority_end, index)
-    credential_separator = proxy.rfind("@", authority_start, authority_end)
-    if credential_separator < 0:
-        return proxy
-    return f"{proxy[: scheme_separator + 3]}{proxy[credential_separator + 1 :]}"
