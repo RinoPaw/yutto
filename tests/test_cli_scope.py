@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from yutto.cli.auth import resolve_auth_command_options
 from yutto.cli.compat import normalize_argv
@@ -11,9 +11,6 @@ from yutto.cli.parser import build_parser
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import YuttoConfig, resolved_config_from_settings
 from yutto.config import DEFAULT_CONFIG, ResolvedConfig
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_resolved_config_preserves_explicit_none_without_parent_lookup():
