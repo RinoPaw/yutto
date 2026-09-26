@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -109,19 +110,23 @@ class ConfigRequest(_RpcModel):
 
 
 def config_parser_from_settings(settings: YuttoConfig) -> Callable[[object], ResolvedConfig]:
-    """Build the validated server wire-format -> flat config adapter."""
-    configured_values = dict(resolved_config_from_settings(settings).values)
-    configured_values.pop("output.directory", None)
-    configured_values.pop("output.temporary_directory", None)
-    configured = ResolvedConfig(configured_values)
+    """Build the validated server wire-format -> typed task config adapter."""
+    configured = resolved_config_from_settings(settings)
+    configured = replace(
+        configured,
+        output=replace(
+            configured.output,
+            directory=Path(),
+            temporary_directory=None,
+        ),
+    )
 
     def parse(payload: object) -> ResolvedConfig:
         try:
             request = ConfigRequest.model_validate(payload)
         except ValidationError as error:
             raise ValueError(_request_validation_reason(error)) from error
-        values = _config_values_from_request(request, configured)
-        return configured.with_overrides(values)
+        return _config_from_request(request, configured)
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
@@ -150,177 +155,194 @@ def _request_validation_reason(error: ValidationError) -> str:
     return "invalid request"
 
 
-def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> dict[str, Any]:
-    values: dict[str, Any] = {"source.value": request.source.url}
+def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> ResolvedConfig:
+    source = replace(baseline.source, value=request.source.url)
 
-    access = request.access
-    if "auth_profile" in access.model_fields_set:
-        values["credential.profile"] = "default" if access.auth_profile is None else access.auth_profile
-    _copy_present_bools(
-        access,
-        {
-            "login_strict": "access.login_strict",
-            "vip_strict": "access.vip_strict",
-        },
-        values,
-    )
+    credential = baseline.credential
+    access = baseline.access
+    access_request = request.access
+    if "auth_profile" in access_request.model_fields_set:
+        credential = replace(
+            credential,
+            profile="default" if access_request.auth_profile is None else access_request.auth_profile,
+        )
+    if "login_strict" in access_request.model_fields_set:
+        access = replace(access, login_strict=bool(access_request.login_strict))
+    if "vip_strict" in access_request.model_fields_set:
+        access = replace(access, vip_strict=bool(access_request.vip_strict))
 
-    selection = request.selection
-    _copy_present(
-        selection,
-        {"expression": "selection.expression"},
-        values,
-    )
-    _copy_present_bools(
-        selection,
-        {"skip_preview": "selection.skip_preview"},
-        values,
-    )
-    for field, path in {
-        "start_time": "selection.published_since",
-        "end_time": "selection.published_before",
-    }.items():
-        if field not in selection.model_fields_set:
-            continue
-        value = getattr(selection, field)
-        values[path] = None if value is None else parse_local_timestamp(value)
-
+    selection = baseline.selection
+    selection_request = request.selection
+    selection_updates: dict[str, object] = {}
+    if "expression" in selection_request.model_fields_set:
+        selection_updates["expression"] = selection_request.expression
+    if "skip_preview" in selection_request.model_fields_set:
+        selection_updates["skip_preview"] = bool(selection_request.skip_preview)
+    if "start_time" in selection_request.model_fields_set:
+        value = selection_request.start_time
+        selection_updates["published_since"] = None if value is None else parse_local_timestamp(value)
+    if "end_time" in selection_request.model_fields_set:
+        value = selection_request.end_time
+        selection_updates["published_before"] = None if value is None else parse_local_timestamp(value)
     if "with_extra_episodes" in request.model_fields_set:
-        values["selection.with_extra_episodes"] = bool(request.with_extra_episodes)
-    if request.batch is True and "expression" not in selection.model_fields_set:
-        values["selection.expression"] = "~"
+        selection_updates["with_extra_episodes"] = bool(request.with_extra_episodes)
+    if request.batch is True and "expression" not in selection_request.model_fields_set:
+        selection_updates["expression"] = "~"
+    selection = replace(selection, **selection_updates)
 
-    _copy_present_bools(
-        request.resources,
+    resources = request.resources
+    resource_updates = _present_updates(
+        resources,
         {
-            "video": "resource.video",
-            "audio": "resource.audio",
-            "danmaku": "resource.danmaku",
-            "subtitle": "resource.subtitle",
-            "metadata": "resource.metadata",
-            "cover": "resource.cover",
-            "chapter_info": "resource.chapter_info",
-            "save_cover": "resource.save_cover",
+            "video": "video",
+            "audio": "audio",
+            "danmaku": "danmaku",
+            "subtitle": "subtitle",
+            "metadata": "metadata",
+            "cover": "cover",
+            "chapter_info": "chapter_info",
+            "save_cover": "save_cover",
+            "ai_translation_language": "ai_translation_language",
         },
-        values,
     )
-    _copy_present(
-        request.resources,
-        {"ai_translation_language": "resource.ai_translation_language"},
-        values,
-    )
+    for field in (
+        "video",
+        "audio",
+        "danmaku",
+        "subtitle",
+        "metadata",
+        "cover",
+        "chapter_info",
+        "save_cover",
+    ):
+        if field in resource_updates:
+            resource_updates[field] = bool(resource_updates[field])
+    resource = replace(baseline.resource, **resource_updates)
 
-    stream = request.stream
-    _copy_present(
-        stream,
+    stream_request = request.stream
+    stream_updates = _present_updates(
+        stream_request,
         {
-            "video_quality": "stream.video_quality",
-            "audio_quality": "stream.audio_quality",
+            "video_quality": "video_quality",
+            "audio_quality": "audio_quality",
         },
-        values,
     )
-    if "video_download_codec_priority" in stream.model_fields_set:
-        priority = stream.video_download_codec_priority
-        values["stream.video_codec_priority"] = None if priority is None else tuple(priority)
-    if {"video_download_codec", "video_save_codec"} & stream.model_fields_set:
+    if "video_download_codec_priority" in stream_request.model_fields_set:
+        priority = stream_request.video_download_codec_priority
+        stream_updates["video_codec_priority"] = None if priority is None else tuple(priority)
+    if {"video_download_codec", "video_save_codec"} & stream_request.model_fields_set:
         default_download, default_save = resolve_video_codecs(baseline)
         download = (
-            stream.video_download_codec if "video_download_codec" in stream.model_fields_set else default_download
+            stream_request.video_download_codec
+            if "video_download_codec" in stream_request.model_fields_set
+            else default_download
         )
-        save = stream.video_save_codec if "video_save_codec" in stream.model_fields_set else default_save
+        save = stream_request.video_save_codec if "video_save_codec" in stream_request.model_fields_set else default_save
         if download is None or save is None:
             raise ValueError("video codec fields must not be null")
-        values["stream.video_codec"] = f"{download}:{save}"
-    if {"audio_download_codec", "audio_save_codec"} & stream.model_fields_set:
+        stream_updates["video_codec"] = f"{download}:{save}"
+    if {"audio_download_codec", "audio_save_codec"} & stream_request.model_fields_set:
         default_download, default_save = resolve_audio_codecs(baseline)
         download = (
-            stream.audio_download_codec if "audio_download_codec" in stream.model_fields_set else default_download
+            stream_request.audio_download_codec
+            if "audio_download_codec" in stream_request.model_fields_set
+            else default_download
         )
-        save = stream.audio_save_codec if "audio_save_codec" in stream.model_fields_set else default_save
+        save = stream_request.audio_save_codec if "audio_save_codec" in stream_request.model_fields_set else default_save
         if download is None or save is None:
             raise ValueError("audio codec fields must not be null")
-        values["stream.audio_codec"] = f"{download}:{save}"
+        stream_updates["audio_codec"] = f"{download}:{save}"
+    stream = replace(baseline.stream, **stream_updates)
 
-    output = request.output
-    if "directory" in output.model_fields_set:
-        if output.directory is None:
+    output_request = request.output
+    output_updates = _present_updates(
+        output_request,
+        {
+            "format": "format",
+            "audio_only_format": "audio_only_format",
+            "subpath_template": "subpath_template",
+            "metadata_format_premiered": "metadata_premiered_format",
+        },
+    )
+    if "directory" in output_request.model_fields_set:
+        if output_request.directory is None:
             raise ValueError("output.directory must not be null")
-        values["output.directory"] = Path(output.directory)
-    if "temporary_directory" in output.model_fields_set:
-        values["output.temporary_directory"] = (
-            None if output.temporary_directory is None else Path(output.temporary_directory)
+        output_updates["directory"] = Path(output_request.directory)
+    if "temporary_directory" in output_request.model_fields_set:
+        output_updates["temporary_directory"] = (
+            None if output_request.temporary_directory is None else Path(output_request.temporary_directory)
         )
-    _copy_present(
-        output,
-        {
-            "format": "output.format",
-            "audio_only_format": "output.audio_only_format",
-            "subpath_template": "output.subpath_template",
-            "metadata_format_premiered": "output.metadata_premiered_format",
-        },
-        values,
-    )
-    _copy_present_bools(output, {"overwrite": "output.overwrite"}, values)
+    if "overwrite" in output_request.model_fields_set:
+        output_updates["overwrite"] = bool(output_request.overwrite)
+    output = replace(baseline.output, **output_updates)
 
-    network = request.network
-    _copy_present(
-        network,
+    network_request = request.network
+    network_updates = _present_updates(
+        network_request,
         {
-            "proxy": "network.proxy",
-            "fetch_workers": "network.fetch_workers",
-            "download_workers": "network.download_workers",
-            "download_interval": "network.download_interval",
-            "banned_mirrors_pattern": "network.banned_mirrors_pattern",
+            "proxy": "proxy",
+            "fetch_workers": "fetch_workers",
+            "download_workers": "download_workers",
+            "download_interval": "download_interval",
+            "banned_mirrors_pattern": "banned_mirrors_pattern",
         },
-        values,
     )
-    if "block_size_bytes" in network.model_fields_set:
-        if network.block_size_bytes is None:
+    if "block_size_bytes" in network_request.model_fields_set:
+        if network_request.block_size_bytes is None:
             raise ValueError("network.block_size_bytes must not be null")
-        values["network.block_size"] = float(network.block_size_bytes) / MEBIBYTE
+        network_updates["block_size"] = float(network_request.block_size_bytes) / MEBIBYTE
+    network = replace(baseline.network, **network_updates)
 
-    danmaku = request.danmaku
-    _copy_present(
-        danmaku,
+    danmaku_request = request.danmaku
+    danmaku_updates = _present_updates(
+        danmaku_request,
         {
-            "format": "danmaku.format",
-            "font_size": "danmaku.font_size",
-            "font": "danmaku.font",
-            "opacity": "danmaku.opacity",
-            "display_region_ratio": "danmaku.display_region_ratio",
-            "speed": "danmaku.speed",
+            "format": "format",
+            "font_size": "font_size",
+            "font": "font",
+            "opacity": "opacity",
+            "display_region_ratio": "display_region_ratio",
+            "speed": "speed",
         },
-        values,
     )
-    _copy_present_bools(
-        danmaku,
-        {
-            "block_top": "danmaku.block_top",
-            "block_bottom": "danmaku.block_bottom",
-            "block_scroll": "danmaku.block_scroll",
-            "block_reverse": "danmaku.block_reverse",
-            "block_special": "danmaku.block_special",
-            "block_colorful": "danmaku.block_colorful",
-        },
-        values,
+    for field in ("opacity", "display_region_ratio", "speed"):
+        if field in danmaku_updates and danmaku_updates[field] is not None:
+            danmaku_updates[field] = float(danmaku_updates[field])
+    for field in (
+        "block_top",
+        "block_bottom",
+        "block_scroll",
+        "block_reverse",
+        "block_special",
+        "block_colorful",
+    ):
+        if field in danmaku_request.model_fields_set:
+            danmaku_updates[field] = bool(getattr(danmaku_request, field))
+    if "block_keyword_patterns" in danmaku_request.model_fields_set:
+        patterns = danmaku_request.block_keyword_patterns
+        danmaku_updates["block_keyword_patterns"] = None if patterns is None else tuple(patterns)
+    danmaku = replace(baseline.danmaku, **danmaku_updates)
+
+    return replace(
+        baseline,
+        source=source,
+        credential=credential,
+        access=access,
+        selection=selection,
+        resource=resource,
+        stream=stream,
+        output=output,
+        network=network,
+        danmaku=danmaku,
     )
-    if "block_keyword_patterns" in danmaku.model_fields_set:
-        patterns = danmaku.block_keyword_patterns
-        values["danmaku.block_keyword_patterns"] = None if patterns is None else tuple(patterns)
-
-    return values
 
 
-def _copy_present(model: BaseModel, paths: dict[str, str], target: dict[str, Any]) -> None:
-    for field, path in paths.items():
-        if field in model.model_fields_set:
-            target[path] = getattr(model, field)
-
-
-def _copy_present_bools(model: BaseModel, paths: dict[str, str], target: dict[str, Any]) -> None:
-    for field, path in paths.items():
-        if field in model.model_fields_set:
-            target[path] = bool(getattr(model, field))
+def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, object]:
+    return {
+        target: getattr(model, source)
+        for source, target in fields.items()
+        if source in model.model_fields_set
+    }
 
 
 __all__ = ["ConfigRequest", "config_parser_from_settings"]
