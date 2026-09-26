@@ -185,7 +185,7 @@ def build_server(
     )
     parse_config = config_parser_from_settings(options.request_settings)
     default_config = parse_config({"source": {"url": "yutto-server-default-validation"}})
-    prepared_default = policy.prepare_scope(default_config)
+    prepared_default = policy.prepare_config(default_config)
     policy.resolve_credentials(prepared_default)
     scope_factory = policy.build_scope_factory()
 
@@ -222,7 +222,7 @@ def build_server(
             port=options.port,
             allowed_origins=options.allow_origin,
         ),
-        prepare_scope=policy.prepare_scope,
+        prepare_scope=policy.prepare_config,
         parse_scope=parse_config,
         resolve_service=resolve_service,
     )
