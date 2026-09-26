@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import YuttoConfig, resolve_config
+from yutto.cli.settings import YuttoConfig, resolve_config, resolved_config_from_settings
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_runtime_options_leave_lower_layer_defaults_unresolved():
+def test_runtime_options_use_process_defaults():
     runtime = resolve_runtime_options({}, YuttoConfig())
 
-    assert runtime.jobs is None
+    assert runtime.jobs == 1
     assert runtime.ffmpeg_path is None
 
 
@@ -67,10 +68,10 @@ def test_resolve_config_uses_injected_search(tmp_path: Path):
     assert config.basic.no_progress is True
 
 
-def test_credential_options_merge_task_over_config(tmp_path: Path):
+def test_credential_options_project_each_resolved_task_config(tmp_path: Path):
     config_auth_file = tmp_path / "config-auth.toml"
     cli_auth_file = tmp_path / "cli-auth.toml"
-    config = YuttoConfig.model_validate(
+    settings = YuttoConfig.model_validate(
         {
             "basic": {"sessdata": "config-sessdata"},
             "auth": {
@@ -80,20 +81,19 @@ def test_credential_options_merge_task_over_config(tmp_path: Path):
             },
         }
     )
-
-    options = resolve_credential_options(
-        [
-            {"source": "BV1config"},
-            {
-                "source": "BV1cli",
-                "auth": "cli-auth",
-                "auth_file": cli_auth_file,
-                "auth_profile": "cli-profile",
-                "sessdata": "cli-sessdata",
-            },
-        ],
-        config,
+    configured = resolved_config_from_settings(settings)
+    cli = replace(
+        configured,
+        credential=replace(
+            configured.credential,
+            cookie="cli-auth",
+            file=cli_auth_file,
+            profile="cli-profile",
+            sessdata="cli-sessdata",
+        ),
     )
+
+    options = resolve_credential_options([configured, cli])
 
     assert vars(options[0]) == {
         "auth": "config-auth",
