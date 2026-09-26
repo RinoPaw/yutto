@@ -9,11 +9,12 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.input import apply_cli_overrides, expand_download_configs
 from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoConfig, resolved_config_from_settings
-from yutto.config import ResolvedConfig
 
 if TYPE_CHECKING:
     import argparse
     from pathlib import Path
+
+    from yutto.config import ResolvedConfig
 
 
 pytestmark = pytest.mark.processor
