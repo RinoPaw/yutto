@@ -10,10 +10,10 @@ from returns.result import Success
 import yutto.__main__ as main_module
 import yutto.download_manager as download_manager_module
 from yutto._native import InvalidUrlError
+from yutto.config import ResolvedConfig, SourceSpec
 from yutto.core.execution import ExecutionScope
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, NotLoginError, WrongUrlError, YuttoBaseException
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.fetcher import Fetcher
 from yutto.utils.functional import as_sync
 
@@ -24,8 +24,8 @@ def _execution_scope(session: Any) -> ExecutionScope:
     return ExecutionScope(session, fetch_workers=1, download_workers=1)
 
 
-def make_scope(url: str = "BV1structured") -> Scope:
-    return Scope({"source.value": url}, parent=ROOT_SCOPE)
+def make_config(url: str = "BV1structured") -> ResolvedConfig:
+    return ResolvedConfig(source=SourceSpec(value=url))
 
 
 def assert_error(error: YuttoBaseException, message: str, code: ErrorCode) -> None:
@@ -36,14 +36,14 @@ def assert_error(error: YuttoBaseException, message: str, code: ErrorCode) -> No
 
 @as_sync
 async def test_manager_raises_login_error(monkeypatch: pytest.MonkeyPatch):
-    async def reject_login(scope: ExecutionScope, requirements: dict[str, bool]) -> bool:
+    async def reject_login(execution: ExecutionScope, requirements: dict[str, bool]) -> bool:
         return False
 
     monkeypatch.setattr(download_manager_module, "validate_user_info", reject_login)
     with pytest.raises(NotLoginError) as exc_info:
-        await DownloadManager().process_scope(
+        await DownloadManager().process_config(
             _execution_scope(object()),
-            make_scope(),
+            make_config(),
         )
 
     assert_error(
@@ -55,14 +55,14 @@ async def test_manager_raises_login_error(monkeypatch: pytest.MonkeyPatch):
 
 @as_sync
 async def test_manager_raises_url_errors_without_network(monkeypatch: pytest.MonkeyPatch):
-    async def reject_url(scope: ExecutionScope, url: str):
+    async def reject_url(execution: ExecutionScope, url: str):
         raise InvalidUrlError("invalid")
 
     monkeypatch.setattr(Fetcher, "get_redirected_url", reject_url)
     with pytest.raises(WrongUrlError) as exc_info:
-        await DownloadManager().process_scope(
+        await DownloadManager().process_config(
             _execution_scope(object()),
-            make_scope("not-a-url"),
+            make_config("not-a-url"),
         )
 
     assert_error(
@@ -74,15 +74,15 @@ async def test_manager_raises_url_errors_without_network(monkeypatch: pytest.Mon
 
 @as_sync
 async def test_manager_reports_unmatched_url_as_structured_error(monkeypatch: pytest.MonkeyPatch):
-    async def keep_url(scope: ExecutionScope, url: str):
+    async def keep_url(execution: ExecutionScope, url: str):
         return Success(url)
 
     monkeypatch.setattr(Fetcher, "get_redirected_url", keep_url)
 
     with pytest.raises(WrongUrlError) as exc_info:
-        await DownloadManager().process_scope(
+        await DownloadManager().process_config(
             _execution_scope(object()),
-            make_scope("https://example.com/unsupported"),
+            make_config("https://example.com/unsupported"),
         )
 
     assert_error(
@@ -110,7 +110,7 @@ def configure_download_cli(
 
     def fail_download(
         scope_factory: object,
-        scopes: list[Scope],
+        configs: list[ResolvedConfig],
         renderer: object,
         *,
         jobs: int | None,
@@ -125,10 +125,10 @@ def configure_download_cli(
     monkeypatch.setattr(main_module, "FFmpeg", FakeFFmpeg)
     monkeypatch.setattr(
         main_module,
-        "expand_download_scopes",
-        lambda scope, active_parser, configured, **kwargs: [scope],
+        "expand_download_configs",
+        lambda config, active_parser, configured, **kwargs: [config],
     )
-    monkeypatch.setattr(main_module, "validate_download_scope", lambda scope, ffmpeg: None)
+    monkeypatch.setattr(main_module, "validate_download_config", lambda config, ffmpeg: None)
     monkeypatch.setattr(main_module, "resolve_credentials", lambda options: None)
     monkeypatch.setattr(main_module, "run_download", fail_download)
     if replace_logger:
