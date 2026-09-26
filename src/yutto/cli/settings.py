@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.output_formats import AudioOnlyOutputFormat, OutputFormat
-from yutto.scope import DEFAULT_CONFIG, ResolvedConfig, merge_configs
+from yutto.scope import DEFAULT_CONFIG, ResolvedConfig
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 from yutto.utils.time import parse_local_timestamp
@@ -207,7 +207,7 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
         if value is not None:
             values[path] = Path(value).expanduser()
 
-    return merge_configs(DEFAULT_CONFIG, ResolvedConfig(values))
+    return DEFAULT_CONFIG.with_overrides(values)
 
 
 def scope_from_config(config: YuttoConfig) -> ResolvedConfig:
