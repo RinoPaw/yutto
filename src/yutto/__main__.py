@@ -134,7 +134,7 @@ def main() -> None:
             try:
                 cli_values, _ = config_values_from_cli(raw_values)
                 command_config = configured.with_overrides(cli_values)
-                run_auth(command_config, auth_command)
+                run_auth(command_config, auth_command, raw_values)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
