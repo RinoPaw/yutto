@@ -130,13 +130,13 @@ _BASIC_CONFIG_PATHS = {
     "proxy": "network.proxy",
     "dir": "output.directory",
     "tmp_dir": "output.temporary_directory",
-    "sessdata": "auth.sessdata",
+    "sessdata": "credential.sessdata",
     "subpath_template": "output.subpath_template",
     "metadata_premiered_format": "output.metadata_premiered_format",
     "download_interval": "network.download_interval",
     "banned_mirrors_pattern": "network.banned_mirrors_pattern",
-    "vip_strict": "auth.vip_strict",
-    "login_strict": "auth.login_strict",
+    "vip_strict": "access.vip_strict",
+    "login_strict": "access.login_strict",
 }
 _BASIC_NON_TASK_FIELDS = frozenset({"aliases", "jobs", "ffmpeg_path", "no_color", "no_progress", "debug"})
 _RESOURCE_CONFIG_PATHS = {
@@ -171,9 +171,9 @@ _SELECTION_CONFIG_PATHS = {
     "published_before": "selection.published_before",
 }
 _AUTH_CONFIG_PATHS = {
-    "auth": "auth.cookie",
-    "auth_file": "auth.file",
-    "auth_profile": "auth.profile",
+    "auth": "credential.cookie",
+    "auth_file": "credential.file",
+    "auth_profile": "credential.profile",
 }
 
 
@@ -198,7 +198,7 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
         if value is not None:
             values[path] = parse_local_timestamp(value)
 
-    for path in ("output.directory", "output.temporary_directory", "auth.file"):
+    for path in ("output.directory", "output.temporary_directory", "credential.file"):
         value = values.get(path)
         if value is not None:
             values[path] = Path(value).expanduser()
