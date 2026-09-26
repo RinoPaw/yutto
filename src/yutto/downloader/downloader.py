@@ -11,11 +11,11 @@ from yutto.downloader.planner import DownloadPlanner
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScope
     from yutto.core.result import ItemResult
     from yutto.downloader.path_leases import DownloadPathLeasePool
     from yutto.resource import ResourceManifest
-    from yutto.scope import Scope
     from yutto.utils.metadata import ItemMetaData
 
 
@@ -24,7 +24,7 @@ async def process_download(
     manifest: ResourceManifest,
     metadata: ItemMetaData,
     path: Path,
-    scope: Scope,
+    config: ResolvedConfig,
     *,
     path_leases: DownloadPathLeasePool | None = None,
 ) -> ItemResult:
@@ -32,7 +32,7 @@ async def process_download(
     item = path.name
     emit_download_report(f"开始处理视频 {item}")
     emit_download_event(DownloadStageChanged(name=DownloadStage.PREPARING, item=item))
-    plan = DownloadPlanner().plan(manifest, path, scope)
+    plan = DownloadPlanner().plan(manifest, path, config)
     lease = (
         path_leases.lease(
             (
