@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from yutto.cli.compat import normalize_argv
 from yutto.cli.settings import resolved_config_from_settings
 from yutto.core.operation import emit_download_report
-from yutto.scope import MISSING, ResolvedConfig, merge_configs
+from yutto.scope import MISSING, ResolvedConfig
 from yutto.utils.console.logger import Logger
 
 if TYPE_CHECKING:
@@ -176,14 +176,14 @@ def expand_download_configs(
     aliases: Mapping[str, str] | None = None,
     config_aliases: Mapping[str, str] | None = None,
 ) -> list[ResolvedConfig]:
-    """Expand task lists by eagerly merging each child into a flat config."""
+    """Expand task lists by eagerly applying each child's overrides."""
 
     source = config.source.value
     if source is MISSING or source is None:
         raise ValueError("download source is missing")
     source = str(source)
 
-    current = merge_configs(config, ResolvedConfig({"source.value": source}))
+    current = config.with_overrides({"source.value": source})
 
     if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
         return [current]
@@ -202,7 +202,7 @@ def expand_download_configs(
             inherited_aliases=inherited_aliases,
         )
         base = baseline if no_inherit or child_no_inherit else current
-        child = merge_configs(base, ResolvedConfig(child_values))
+        child = base.with_overrides(child_values)
         Logger.debug(f"列表参数: {_config_delta(child, baseline)}")
         result.extend(
             expand_download_configs(
@@ -248,7 +248,7 @@ def expand_download_values(
     config_aliases = config.basic.aliases
     aliases = values.get("aliases", config_aliases)
     cli_values, no_inherit = config_values_from_cli(values, inherited_aliases=config_aliases)
-    command_config = merge_configs(configured, ResolvedConfig(cli_values))
+    command_config = configured.with_overrides(cli_values)
     configs = expand_download_configs(
         command_config,
         parser,
