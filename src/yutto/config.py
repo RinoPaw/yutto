@@ -27,7 +27,7 @@ class SelectionSpec:
 
 @dataclass(frozen=True, slots=True)
 class AuthSpec:
-    """认证来源、访问校验以及 auth 命令参数。"""
+    """认证来源与下载访问校验。"""
 
     cookie: str = ""
     file: Path | None = None
@@ -35,9 +35,6 @@ class AuthSpec:
     sessdata: str = ""
     login_strict: bool = False
     vip_strict: bool = False
-    mode: str = "terminal"
-    poll_interval: float = 2.0
-    timeout: int = 180
 
     def __post_init__(self) -> None:
         if isinstance(self.file, str):
