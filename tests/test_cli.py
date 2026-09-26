@@ -9,8 +9,9 @@ import pytest
 import yutto.__main__ as main_module
 import yutto.cli.event_renderer as renderer_module
 from yutto.cli.compat import normalize_argv
-from yutto.cli.input import scope_values_from_cli
+from yutto.cli.input import apply_cli_overrides
 from yutto.cli.parser import build_parser
+from yutto.config import DEFAULT_CONFIG
 from yutto.core.events import DownloadProgress, DownloadStage, DownloadStageChanged
 from yutto.core.execution import RequestExecutionScopeFactory, resolve_download_workers
 from yutto.core.operation import (
@@ -19,7 +20,6 @@ from yutto.core.operation import (
     bind_download_report_sink,
     emit_download_report,
 )
-from yutto.scope import ROOT_SCOPE, Scope
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -105,13 +105,12 @@ def test_unknown_leading_option_is_not_scanned_as_global_config():
     assert normalize_argv(argv) == ["download", *argv]
 
 
-def test_download_scope_rejects_non_positive_num_workers():
+def test_download_config_rejects_non_positive_num_workers():
     args = _parse(["https://example.com", "--num-workers", "0"])
-    values, _ = scope_values_from_cli(vars(args))
-    scope = Scope(values, parent=ROOT_SCOPE)
+    config, _ = apply_cli_overrides(DEFAULT_CONFIG, vars(args))
 
     with pytest.raises(ValueError, match="download_workers must be at least 1"):
-        resolve_download_workers(scope)
+        resolve_download_workers(config)
 
 
 def test_auth_commands_accept_auth_file(tmp_path: Path):
@@ -360,10 +359,10 @@ def test_progress_renderer_avoids_wrapping_for_wide_stats(monkeypatch: pytest.Mo
     assert [renderer_module.get_string_width(line) for line in rendered] == [108, 112]
 
 
-def test_run_download_scopes_report_renderer_and_cleans_up_on_cancel(monkeypatch: pytest.MonkeyPatch):
+def test_run_download_configs_report_renderer_and_cleans_up_on_cancel(monkeypatch: pytest.MonkeyPatch):
     output: list[tuple[str, object]] = []
 
-    async def cancel_download(_application: object, _scopes: object) -> None:
+    async def cancel_download(_application: object, _configs: object) -> None:
         emit_download_report("warning", ReportLevel.WARNING)
         emit_download_report("badge", badge="TAG", color=ReportColor.GREEN)
         raise asyncio.CancelledError
