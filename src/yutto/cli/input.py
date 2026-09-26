@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
-from yutto.config import ResolvedConfig
 from yutto.core.operation import emit_download_report
 from yutto.utils.console.logger import Logger
 
@@ -18,6 +17,8 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Mapping
     from typing import Any
+
+    from yutto.config import ResolvedConfig
 
 
 _CLI_CONFIG_FIELDS = {
