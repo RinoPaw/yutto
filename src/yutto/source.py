@@ -311,6 +311,10 @@ def _ugc_candidates(
     return _select_items(indexed, selection, diagnostics)
 
 
+def _with_all_selected(config: ResolvedConfig) -> ResolvedConfig:
+    return replace(config, selection=replace(config.selection, expression="~"))
+
+
 @dataclass(slots=True, kw_only=True)
 class UgcCollectionSource(MediaSource):
     id: CollectionId
@@ -322,7 +326,7 @@ class UgcCollectionSource(MediaSource):
         expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_videos = _ugc_candidates(collection.videos, config, selection, diagnostics)
-        video_config = config.with_overrides({"selection.expression": "~"})
+        video_config = _with_all_selected(config)
         resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
@@ -349,7 +353,7 @@ class UgcFavSource(MediaSource):
         expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_videos = _ugc_candidates(videos, config, selection, diagnostics)
-        video_config = config.with_overrides({"selection.expression": "~"})
+        video_config = _with_all_selected(config)
         resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
 
@@ -381,7 +385,7 @@ class UgcAllFavouritesSource(MediaSource):
         expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_folders = _select_items(list(enumerate(folders, start=1)), selection, diagnostics)
-        child_config = config.with_overrides({"selection.expression": "~"})
+        child_config = _with_all_selected(config)
         favourites: list[MediaEntry[UgcFav]] = []
         failures: list[MediaResolveFailure] = []
 
@@ -427,7 +431,7 @@ class UgcSeriesSource(MediaSource):
         expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_videos = _ugc_candidates(archives, config, selection, diagnostics)
-        video_config = config.with_overrides({"selection.expression": "~"})
+        video_config = _with_all_selected(config)
         resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
@@ -455,7 +459,7 @@ class UgcSpaceSource(MediaSource):
         expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_videos = _ugc_candidates(archives, config, selection, diagnostics)
-        video_config = config.with_overrides({"selection.expression": "~"})
+        video_config = _with_all_selected(config)
         resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
@@ -483,11 +487,11 @@ class UgcWatchLaterSource(MediaSource):
         expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_videos = _ugc_candidates(entries, config, selection, diagnostics)
-        video_config = config.with_overrides({"selection.expression": "~"})
+        video_config = _with_all_selected(config)
         resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
-            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=resolved),
+            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看", items=resolved)),
             failures=failures,
             diagnostics=tuple(diagnostics),
         )
