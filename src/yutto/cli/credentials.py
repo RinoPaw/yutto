@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.scope import MISSING, ResolvedConfig, merge_configs
+from yutto.scope import MISSING, ResolvedConfig
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -30,7 +30,7 @@ def resolve_credential_options(
             raise TypeError("config is required when resolving raw task mappings")
         configured = resolved_config_from_settings(config)
         raw_configs = cast("Sequence[Mapping[str, Any]]", configs)
-        resolved_configs = [merge_configs(configured, ResolvedConfig(values)) for values in raw_configs]
+        resolved_configs = [configured.with_overrides(values) for values in raw_configs]
 
     return [
         argparse.Namespace(
