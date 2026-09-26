@@ -187,7 +187,7 @@ def build_server(
     default_config = parse_config({"source": {"url": "yutto-server-default-validation"}})
     prepared_default = policy.prepare_config(default_config)
     policy.resolve_credentials(prepared_default)
-    scope_factory = policy.build_scope_factory()
+    execution_factory = policy.build_execution_factory()
 
     event_seq_allocator = monotonic_seq_allocator()
     task_capacity = TaskCapacityPool(options.task_limit)
@@ -200,7 +200,7 @@ def build_server(
         return _build_download_application(factory, event_sink, path_leases=path_leases)
 
     task_service = DownloadTaskService(
-        scope_factory,
+        execution_factory,
         build_download_application,
         task_limit=options.task_limit,
         worker_count=options.jobs,
@@ -208,7 +208,7 @@ def build_server(
         capacity_pool=task_capacity,
     )
     resolve_service = ResolveTaskService(
-        scope_factory,
+        execution_factory,
         build_download_application,
         task_limit=options.task_limit,
         seq_allocator=event_seq_allocator,
@@ -222,21 +222,21 @@ def build_server(
             port=options.port,
             allowed_origins=options.allow_origin,
         ),
-        prepare_scope=policy.prepare_config,
-        parse_scope=parse_config,
+        prepare_config=policy.prepare_config,
+        parse_config=parse_config,
         resolve_service=resolve_service,
     )
 
 
 def _build_download_application(
-    scope_factory: ExecutionScopeFactory,
+    execution_factory: ExecutionScopeFactory,
     event_sink: DownloadEventSink,
     *,
     path_leases: DownloadPathLeasePool | None = None,
 ) -> YuttoApplication:
     manager = DownloadManager(path_leases=path_leases)
     return YuttoApplication(
-        scope_factory,
+        execution_factory,
         workflow=manager,
         event_sink=event_sink,
         resolve_workflow=manager,
