@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.auth import validate_user_info
-from yutto.config import ResolvedConfig
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import (
@@ -39,6 +38,7 @@ from yutto.url_resolver import resolve_redirected_source
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.media import Media, MediaItem
     from yutto.source import MediaResolveDiagnostic, MediaResolveFailure, MediaResolveResult
