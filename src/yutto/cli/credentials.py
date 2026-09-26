@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from yutto.cli.settings import scope_from_config
-from yutto.scope import MISSING, Scope
+from yutto.cli.settings import resolved_config_from_settings
+from yutto.scope import MISSING, ResolvedConfig, merge_configs
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -15,31 +15,31 @@ if TYPE_CHECKING:
 
 
 def resolve_credential_options(
-    scopes: Sequence[Scope] | Sequence[Mapping[str, Any]],
+    configs: Sequence[ResolvedConfig] | Sequence[Mapping[str, Any]],
     config: YuttoConfig | None = None,
 ) -> list[argparse.Namespace]:
-    """Resolve credential options through the same scope chain as download options."""
+    """Resolve credential options from flat canonical configurations."""
 
-    if not scopes:
+    if not configs:
         return []
 
-    if isinstance(scopes[0], Scope):
-        resolved_scopes = list(cast("Sequence[Scope]", scopes))
+    if isinstance(configs[0], ResolvedConfig):
+        resolved_configs = list(cast("Sequence[ResolvedConfig]", configs))
     else:
         if config is None:
             raise TypeError("config is required when resolving raw task mappings")
-        configured = scope_from_config(config)
-        raw_scopes = cast("Sequence[Mapping[str, Any]]", scopes)
-        resolved_scopes = [Scope(scope, parent=configured) for scope in raw_scopes]
+        configured = resolved_config_from_settings(config)
+        raw_configs = cast("Sequence[Mapping[str, Any]]", configs)
+        resolved_configs = [merge_configs(configured, ResolvedConfig(values)) for values in raw_configs]
 
     return [
         argparse.Namespace(
-            auth=str(_value(scope.auth.cookie, "")),
-            auth_file=_auth_file(scope),
-            auth_profile=str(_value(scope.auth.profile, "default")),
-            sessdata=str(_value(scope.auth.sessdata, "")),
+            auth=str(_value(item.auth.cookie, "")),
+            auth_file=_auth_file(item),
+            auth_profile=str(_value(item.auth.profile, "default")),
+            sessdata=str(_value(item.auth.sessdata, "")),
         )
-        for scope in resolved_scopes
+        for item in resolved_configs
     ]
 
 
@@ -47,8 +47,8 @@ def _value(value: object, default: object) -> object:
     return default if value is MISSING or value is None else value
 
 
-def _auth_file(scope: Scope) -> Path | None:
-    value = scope.auth.file
+def _auth_file(config: ResolvedConfig) -> Path | None:
+    value = config.auth.file
     if value is MISSING or value is None:
         return None
     return value if isinstance(value, Path) else Path(value).expanduser()
