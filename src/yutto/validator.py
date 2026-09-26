@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     import argparse
 
     from yutto.auth import AuthInfo
-    from yutto.scope import Scope
+    from yutto.scope import ResolvedConfig
     from yutto.utils.ffmpeg import FFmpeg
 
 
@@ -52,21 +52,21 @@ def resolve_credentials(options: argparse.Namespace) -> AuthInfo | None:
     return resolve_auth(options)
 
 
-def validate_download_scope(scope: Scope, ffmpeg: FFmpeg) -> None:
-    resolve_proxy(resolve_network_proxy(scope))
-    resolve_fetch_workers(scope)
-    resolve_download_workers(scope)
-    resolve_block_size_bytes(scope)
-    should_save_cover(scope)
-    resolve_danmaku_format(scope)
-    resolve_video_quality(scope)
-    resolve_audio_quality(scope)
-    resolve_output_format(scope.output.format)
-    resolve_audio_only_output_format(scope.output.audio_only_format)
+def validate_download_config(config: ResolvedConfig, ffmpeg: FFmpeg) -> None:
+    resolve_proxy(resolve_network_proxy(config))
+    resolve_fetch_workers(config)
+    resolve_download_workers(config)
+    resolve_block_size_bytes(config)
+    should_save_cover(config)
+    resolve_danmaku_format(config)
+    resolve_video_quality(config)
+    resolve_audio_quality(config)
+    resolve_output_format(config.output.format)
+    resolve_audio_only_output_format(config.output.audio_only_format)
 
-    video_download_codec, video_save_codec = resolve_video_codecs(scope)
-    _, audio_save_codec = resolve_audio_codecs(scope)
-    priority = resolve_video_codec_priority(scope)
+    video_download_codec, video_save_codec = resolve_video_codecs(config)
+    _, audio_save_codec = resolve_audio_codecs(config)
+    priority = resolve_video_codec_priority(config)
     if priority is not None:
         if len(priority) < len(video_codec_priority_default):
             Logger.warning(
@@ -91,3 +91,8 @@ def validate_download_scope(scope: Scope, ffmpeg: FFmpeg) -> None:
                 audio_save_codec, ", ".join(ffmpeg.audio_encodecs + ["copy"])
             )
         )
+
+
+def validate_download_scope(config: ResolvedConfig, ffmpeg: FFmpeg) -> None:
+    """Compatibility wrapper for validate_download_config."""
+    validate_download_config(config, ffmpeg)
