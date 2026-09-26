@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from returns.result import Success
 
+from yutto.config import DEFAULT_CONFIG
 from yutto.core.operation import bind_download_report_sink
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.source import MediaResolveDiagnostic, UgcVideoSource
 from yutto.types import AvId
 
@@ -19,7 +20,7 @@ _EXECUTION = cast("ExecutionScope", None)
 
 
 def test_source_returns_selection_diagnostics_without_rendering(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+    async def fake_fetch_json(execution: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
         if "/x/web-interface/view" in url:
             return Success(
                 {
@@ -45,9 +46,12 @@ def test_source_returns_selection_diagnostics_without_rendering(monkeypatch: pyt
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
     reports: list[str] = []
-    scope = Scope({"selection.expression": "3,5,1,3"}, parent=ROOT_SCOPE)
+    config = replace(
+        DEFAULT_CONFIG,
+        selection=replace(DEFAULT_CONFIG.selection, expression="3,5,1,3"),
+    )
     with bind_download_report_sink(lambda message, *_args: reports.append(message)):
-        result = asyncio.run(UgcVideoSource(id=AvId("808982399")).resolve(_EXECUTION, scope))
+        result = asyncio.run(UgcVideoSource(id=AvId("808982399")).resolve(_EXECUTION, config))
 
     assert reports == []
     assert result.diagnostics == (MediaResolveDiagnostic(total=3, out_of_range=(5,), empty=False),)
