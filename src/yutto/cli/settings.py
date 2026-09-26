@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -14,7 +15,7 @@ from yutto.utils.paths import user_config_home
 from yutto.utils.time import parse_local_timestamp
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
 
 class _ConfigModel(BaseModel):
@@ -113,105 +114,176 @@ class YuttoConfig(_ConfigModel):
     auth: YuttoAuthConfig = Field(default_factory=YuttoAuthConfig)
 
 
-_BASIC_CONFIG_PATHS = {
-    "download_workers": "network.download_workers",
-    "fetch_workers": "network.fetch_workers",
-    "video_quality": "stream.video_quality",
-    "audio_quality": "stream.audio_quality",
-    "vcodec": "stream.video_codec",
-    "acodec": "stream.audio_codec",
-    "download_vcodec_priority": "stream.video_codec_priority",
-    "output_format": "output.format",
-    "output_format_audio_only": "output.audio_only_format",
-    "ai_translation_language": "resource.ai_translation_language",
-    "danmaku_format": "danmaku.format",
-    "block_size": "network.block_size",
-    "overwrite": "output.overwrite",
-    "proxy": "network.proxy",
-    "dir": "output.directory",
-    "tmp_dir": "output.temporary_directory",
-    "sessdata": "credential.sessdata",
-    "subpath_template": "output.subpath_template",
-    "metadata_premiered_format": "output.metadata_premiered_format",
-    "download_interval": "network.download_interval",
-    "banned_mirrors_pattern": "network.banned_mirrors_pattern",
-    "vip_strict": "access.vip_strict",
-    "login_strict": "access.login_strict",
-}
 _BASIC_NON_TASK_FIELDS = frozenset({"aliases", "jobs", "ffmpeg_path", "no_color", "no_progress", "debug"})
-_RESOURCE_CONFIG_PATHS = {
-    "require_video": "resource.video",
-    "require_audio": "resource.audio",
-    "require_danmaku": "resource.danmaku",
-    "require_subtitle": "resource.subtitle",
-    "require_metadata": "resource.metadata",
-    "require_cover": "resource.cover",
-    "require_chapter_info": "resource.chapter_info",
-    "save_cover": "resource.save_cover",
-}
-_DANMAKU_CONFIG_PATHS = {
-    "danmaku_font_size": "danmaku.font_size",
-    "danmaku_font": "danmaku.font",
-    "danmaku_opacity": "danmaku.opacity",
-    "danmaku_display_region_ratio": "danmaku.display_region_ratio",
-    "danmaku_speed": "danmaku.speed",
-    "danmaku_block_top": "danmaku.block_top",
-    "danmaku_block_bottom": "danmaku.block_bottom",
-    "danmaku_block_scroll": "danmaku.block_scroll",
-    "danmaku_block_reverse": "danmaku.block_reverse",
-    "danmaku_block_fixed": "danmaku.block_fixed",
-    "danmaku_block_special": "danmaku.block_special",
-    "danmaku_block_colorful": "danmaku.block_colorful",
-    "danmaku_block_keyword_patterns": "danmaku.block_keyword_patterns",
-}
-_SELECTION_CONFIG_PATHS = {
-    "with_extra_episodes": "selection.with_extra_episodes",
-    "skip_preview": "selection.skip_preview",
-    "published_since": "selection.published_since",
-    "published_before": "selection.published_before",
-}
-_AUTH_CONFIG_PATHS = {
-    "auth": "credential.cookie",
-    "auth_file": "credential.file",
-    "auth_profile": "credential.profile",
-}
 
 
 def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
-    """Resolve persistent task settings over application defaults."""
-    values: dict[str, Any] = {}
-    for field_name in config.basic.model_fields_set:
-        if field_name in _BASIC_NON_TASK_FIELDS:
-            continue
-        path = _BASIC_CONFIG_PATHS.get(field_name)
-        if path is None:
-            raise TypeError(f"config field without canonical mapping: {field_name}")
-        values[path] = getattr(config.basic, field_name)
+    """Resolve persistent task settings directly into typed Specs."""
+    basic = config.basic
 
-    _copy_explicit(values, config.resource, _RESOURCE_CONFIG_PATHS)
-    _copy_explicit(values, config.danmaku, _DANMAKU_CONFIG_PATHS)
-    _copy_explicit(values, config.batch, _SELECTION_CONFIG_PATHS)
-    _copy_explicit(values, config.auth, _AUTH_CONFIG_PATHS)
+    network_updates = _present_updates(
+        basic,
+        {
+            "download_workers": "download_workers",
+            "fetch_workers": "fetch_workers",
+            "block_size": "block_size",
+            "proxy": "proxy",
+            "download_interval": "download_interval",
+            "banned_mirrors_pattern": "banned_mirrors_pattern",
+        },
+    )
+    stream_updates = _present_updates(
+        basic,
+        {
+            "video_quality": "video_quality",
+            "audio_quality": "audio_quality",
+            "vcodec": "video_codec",
+            "acodec": "audio_codec",
+        },
+    )
+    if "download_vcodec_priority" in basic.model_fields_set:
+        priority = basic.download_vcodec_priority
+        stream_updates["video_codec_priority"] = None if priority is None else tuple(priority)
 
-    for path in ("selection.published_since", "selection.published_before"):
-        value = values.get(path)
-        if value is not None:
-            values[path] = parse_local_timestamp(value)
+    output_updates = _present_updates(
+        basic,
+        {
+            "output_format": "format",
+            "output_format_audio_only": "audio_only_format",
+            "overwrite": "overwrite",
+            "subpath_template": "subpath_template",
+            "metadata_premiered_format": "metadata_premiered_format",
+        },
+    )
+    if "dir" in basic.model_fields_set:
+        output_updates["directory"] = Path(basic.dir).expanduser() if basic.dir is not None else Path()
+    if "tmp_dir" in basic.model_fields_set:
+        output_updates["temporary_directory"] = None if basic.tmp_dir is None else Path(basic.tmp_dir).expanduser()
 
-    for path in ("output.directory", "output.temporary_directory", "credential.file"):
-        value = values.get(path)
-        if value is not None:
-            values[path] = Path(value).expanduser()
+    credential_updates = _present_updates(basic, {"sessdata": "sessdata"})
+    credential_updates.update(
+        _present_updates(
+            config.auth,
+            {
+                "auth": "cookie",
+                "auth_profile": "profile",
+            },
+        )
+    )
+    if "auth_file" in config.auth.model_fields_set:
+        credential_updates["file"] = (
+            None if config.auth.auth_file is None else Path(config.auth.auth_file).expanduser()
+        )
 
-    return DEFAULT_CONFIG.with_overrides(values)
+    access_updates = _present_updates(
+        basic,
+        {
+            "login_strict": "login_strict",
+            "vip_strict": "vip_strict",
+        },
+    )
+
+    resource_updates = _present_updates(
+        config.resource,
+        {
+            "require_video": "video",
+            "require_audio": "audio",
+            "require_danmaku": "danmaku",
+            "require_subtitle": "subtitle",
+            "require_metadata": "metadata",
+            "require_cover": "cover",
+            "require_chapter_info": "chapter_info",
+            "save_cover": "save_cover",
+        },
+    )
+    resource_updates.update(_present_updates(basic, {"ai_translation_language": "ai_translation_language"}))
+
+    selection_updates = _present_updates(
+        config.batch,
+        {
+            "with_extra_episodes": "with_extra_episodes",
+            "skip_preview": "skip_preview",
+        },
+    )
+    if "published_since" in config.batch.model_fields_set:
+        value = config.batch.published_since
+        selection_updates["published_since"] = None if value is None else parse_local_timestamp(value)
+    if "published_before" in config.batch.model_fields_set:
+        value = config.batch.published_before
+        selection_updates["published_before"] = None if value is None else parse_local_timestamp(value)
+
+    danmaku_updates = _present_updates(
+        config.danmaku,
+        {
+            "danmaku_font_size": "font_size",
+            "danmaku_font": "font",
+            "danmaku_opacity": "opacity",
+            "danmaku_display_region_ratio": "display_region_ratio",
+            "danmaku_speed": "speed",
+            "danmaku_block_top": "block_top",
+            "danmaku_block_bottom": "block_bottom",
+            "danmaku_block_scroll": "block_scroll",
+            "danmaku_block_reverse": "block_reverse",
+            "danmaku_block_fixed": "block_fixed",
+            "danmaku_block_special": "block_special",
+            "danmaku_block_colorful": "block_colorful",
+        },
+    )
+    if "danmaku_block_keyword_patterns" in config.danmaku.model_fields_set:
+        patterns = config.danmaku.danmaku_block_keyword_patterns
+        danmaku_updates["block_keyword_patterns"] = None if patterns is None else tuple(patterns)
+    if "danmaku_format" in basic.model_fields_set:
+        danmaku_updates["format"] = basic.danmaku_format
+
+    task_fields = basic.model_fields_set - _BASIC_NON_TASK_FIELDS
+    handled_basic_fields = {
+        "download_workers",
+        "fetch_workers",
+        "video_quality",
+        "audio_quality",
+        "vcodec",
+        "acodec",
+        "download_vcodec_priority",
+        "output_format",
+        "output_format_audio_only",
+        "ai_translation_language",
+        "danmaku_format",
+        "block_size",
+        "overwrite",
+        "proxy",
+        "dir",
+        "tmp_dir",
+        "sessdata",
+        "subpath_template",
+        "metadata_premiered_format",
+        "download_interval",
+        "banned_mirrors_pattern",
+        "vip_strict",
+        "login_strict",
+    }
+    unknown = task_fields - handled_basic_fields
+    if unknown:
+        raise TypeError(f"config fields without task mapping: {', '.join(sorted(unknown))}")
+
+    return replace(
+        DEFAULT_CONFIG,
+        selection=replace(DEFAULT_CONFIG.selection, **selection_updates),
+        credential=replace(DEFAULT_CONFIG.credential, **credential_updates),
+        access=replace(DEFAULT_CONFIG.access, **access_updates),
+        resource=replace(DEFAULT_CONFIG.resource, **resource_updates),
+        stream=replace(DEFAULT_CONFIG.stream, **stream_updates),
+        output=replace(DEFAULT_CONFIG.output, **output_updates),
+        network=replace(DEFAULT_CONFIG.network, **network_updates),
+        danmaku=replace(DEFAULT_CONFIG.danmaku, **danmaku_updates),
+    )
 
 
-def _copy_explicit(target: dict[str, Any], model: BaseModel, paths: Mapping[str, str]) -> None:
-    for field_name in model.model_fields_set:
-        path = paths.get(field_name)
-        if path is None:
-            raise TypeError(f"config field without canonical mapping: {field_name}")
-        target[path] = getattr(model, field_name)
+def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, Any]:
+    return {
+        target: getattr(model, source)
+        for source, target in fields.items()
+        if source in model.model_fields_set
+    }
 
 
 def search_for_settings_file() -> Path | None:
