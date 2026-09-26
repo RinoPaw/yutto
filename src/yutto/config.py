@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field
 from pathlib import Path
-from types import MappingProxyType, UnionType
-from typing import Any, Union, get_args, get_origin, get_type_hints
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,10 +30,6 @@ class CredentialSpec:
     file: Path | None = None
     profile: str = "default"
     sessdata: str = ""
-
-    def __post_init__(self) -> None:
-        if isinstance(self.file, str):
-            object.__setattr__(self, "file", Path(self.file).expanduser())
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,10 +65,6 @@ class StreamSpec:
     audio_codec: str = "mp4a:copy"
     video_codec_priority: tuple[str, ...] | None = None
 
-    def __post_init__(self) -> None:
-        if isinstance(self.video_codec_priority, list):
-            object.__setattr__(self, "video_codec_priority", tuple(self.video_codec_priority))
-
 
 @dataclass(frozen=True, slots=True)
 class OutputSpec:
@@ -89,12 +78,6 @@ class OutputSpec:
     subpath_template: str = "{auto}"
     metadata_premiered_format: str = "%Y-%m-%d"
 
-    def __post_init__(self) -> None:
-        if isinstance(self.directory, str):
-            object.__setattr__(self, "directory", Path(self.directory).expanduser())
-        if isinstance(self.temporary_directory, str):
-            object.__setattr__(self, "temporary_directory", Path(self.temporary_directory).expanduser())
-
 
 @dataclass(frozen=True, slots=True)
 class NetworkSpec:
@@ -106,10 +89,6 @@ class NetworkSpec:
     block_size: float = 0.5
     download_interval: int = 0
     banned_mirrors_pattern: str | None = None
-
-    def __post_init__(self) -> None:
-        if type(self.block_size) is int:
-            object.__setattr__(self, "block_size", float(self.block_size))
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,178 +110,20 @@ class DanmakuSpec:
     block_colorful: bool = False
     block_keyword_patterns: tuple[str, ...] | None = None
 
-    def __post_init__(self) -> None:
-        for field_name in ("opacity", "display_region_ratio", "speed"):
-            value = getattr(self, field_name)
-            if type(value) is int:
-                object.__setattr__(self, field_name, float(value))
-        if isinstance(self.block_keyword_patterns, list):
-            object.__setattr__(self, "block_keyword_patterns", tuple(self.block_keyword_patterns))
 
-
-_SPEC_TYPES: dict[str, type[Any]] = {
-    "source": SourceSpec,
-    "selection": SelectionSpec,
-    "credential": CredentialSpec,
-    "access": AccessSpec,
-    "resource": ResourceSpec,
-    "stream": StreamSpec,
-    "output": OutputSpec,
-    "network": NetworkSpec,
-    "danmaku": DanmakuSpec,
-}
-_SPEC_FIELDS = {
-    section: frozenset(descriptor.name for descriptor in fields(spec_type))
-    for section, spec_type in _SPEC_TYPES.items()
-}
-_SPEC_ANNOTATIONS = {section: get_type_hints(spec_type) for section, spec_type in _SPEC_TYPES.items()}
-
-
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class ResolvedConfig:
-    """完整、扁平、类型已归一化的一次下载/解析任务配置。
+    """一次下载/解析任务已经归一化的完整 typed config。"""
 
-    对象只保存 9 个任务 Spec。默认值由 Spec 自身定义，构造时立即应用；
-    后续覆盖通过 ``with_overrides`` 显式完成，不存在运行时继承链。
-    """
-
-    source: SourceSpec
-    selection: SelectionSpec
-    credential: CredentialSpec
-    access: AccessSpec
-    resource: ResourceSpec
-    stream: StreamSpec
-    output: OutputSpec
-    network: NetworkSpec
-    danmaku: DanmakuSpec
-
-    def __init__(
-        self,
-        values: Mapping[str, Any] | None = None,
-        **overrides: Any,
-    ) -> None:
-        supplied = dict(values or {})
-        supplied.update(overrides)
-
-        section_values: dict[str, Any] = {}
-        field_updates: dict[str, dict[str, Any]] = {}
-        for name, value in supplied.items():
-            if name in _SPEC_TYPES:
-                section_values[name] = self._coerce_spec(name, value)
-                continue
-
-            section, separator, field_name = name.partition(".")
-            if not separator or section not in _SPEC_TYPES or field_name not in _SPEC_FIELDS[section]:
-                raise TypeError(f"unknown config field: {name}")
-            field_updates.setdefault(section, {})[field_name] = value
-
-        resolved_specs: dict[str, Any] = {}
-        for section, spec_type in _SPEC_TYPES.items():
-            spec = section_values.get(section, spec_type())
-            updates = field_updates.get(section)
-            if updates:
-                spec = replace(spec, **updates)
-            self._validate_spec(section, spec)
-            resolved_specs[section] = spec
-
-        object.__setattr__(self, "source", resolved_specs["source"])
-        object.__setattr__(self, "selection", resolved_specs["selection"])
-        object.__setattr__(self, "credential", resolved_specs["credential"])
-        object.__setattr__(self, "access", resolved_specs["access"])
-        object.__setattr__(self, "resource", resolved_specs["resource"])
-        object.__setattr__(self, "stream", resolved_specs["stream"])
-        object.__setattr__(self, "output", resolved_specs["output"])
-        object.__setattr__(self, "network", resolved_specs["network"])
-        object.__setattr__(self, "danmaku", resolved_specs["danmaku"])
-
-    @staticmethod
-    def _coerce_spec(section: str, value: Any) -> Any:
-        spec_type = _SPEC_TYPES[section]
-        if isinstance(value, spec_type):
-            return value
-        if isinstance(value, Mapping):
-            unknown = set(value) - _SPEC_FIELDS[section]
-            if unknown:
-                names = ", ".join(sorted(map(str, unknown)))
-                raise TypeError(f"unknown {section} fields: {names}")
-            return spec_type(**value)
-        raise TypeError(f"{section} must be {spec_type.__name__} or a field mapping")
-
-    @staticmethod
-    def _validate_spec(section: str, spec: Any) -> None:
-        for descriptor in fields(spec):
-            value = getattr(spec, descriptor.name)
-            expected = _SPEC_ANNOTATIONS[section][descriptor.name]
-            if not _matches_type(value, expected):
-                raise TypeError(
-                    f"{section}.{descriptor.name} must be {_type_name(expected)}, "
-                    f"got {type(value).__name__}"
-                )
-
-    @property
-    def values(self) -> Mapping[str, Any]:
-        """返回当前完整配置的 canonical ``spec.field`` 值。"""
-        result: dict[str, Any] = {}
-        for section in _SPEC_TYPES:
-            spec = getattr(self, section)
-            for descriptor in fields(spec):
-                result[f"{section}.{descriptor.name}"] = getattr(spec, descriptor.name)
-        return MappingProxyType(result)
-
-    def with_overrides(
-        self,
-        values: Mapping[str, Any] | None = None,
-        **overrides: Any,
-    ) -> ResolvedConfig:
-        """返回仅应用给定覆盖值的新完整配置。"""
-        supplied = dict(self.values)
-        supplied.update(values or {})
-        supplied.update(overrides)
-        return ResolvedConfig(supplied)
-
-
-def _matches_type(value: object, expected: object) -> bool:
-    if expected is Any:
-        return True
-
-    origin = get_origin(expected)
-    if origin in (Union, UnionType):
-        return any(_matches_type(value, option) for option in get_args(expected))
-
-    if origin is tuple:
-        if not isinstance(value, tuple):
-            return False
-        args = get_args(expected)
-        if len(args) == 2 and args[1] is Ellipsis:
-            return all(_matches_type(item, args[0]) for item in value)
-        return len(value) == len(args) and all(
-            _matches_type(item, item_type) for item, item_type in zip(value, args, strict=True)
-        )
-
-    if expected is None or expected is type(None):
-        return value is None
-    if expected is bool:
-        return type(value) is bool
-    if expected is int:
-        return type(value) is int
-    if expected is float:
-        return type(value) is float
-    return isinstance(value, expected)
-
-
-def _type_name(expected: object) -> str:
-    origin = get_origin(expected)
-    if origin in (Union, UnionType):
-        return " | ".join(_type_name(option) for option in get_args(expected))
-    if origin is tuple:
-        args = get_args(expected)
-        if len(args) == 2 and args[1] is Ellipsis:
-            return f"tuple[{_type_name(args[0])}, ...]"
-    if expected is type(None):
-        return "None"
-    if isinstance(expected, type):
-        return expected.__name__
-    return str(expected)
+    source: SourceSpec = field(default_factory=SourceSpec)
+    selection: SelectionSpec = field(default_factory=SelectionSpec)
+    credential: CredentialSpec = field(default_factory=CredentialSpec)
+    access: AccessSpec = field(default_factory=AccessSpec)
+    resource: ResourceSpec = field(default_factory=ResourceSpec)
+    stream: StreamSpec = field(default_factory=StreamSpec)
+    output: OutputSpec = field(default_factory=OutputSpec)
+    network: NetworkSpec = field(default_factory=NetworkSpec)
+    danmaku: DanmakuSpec = field(default_factory=DanmakuSpec)
 
 
 DEFAULT_CONFIG = ResolvedConfig()
