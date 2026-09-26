@@ -17,7 +17,6 @@ class _Missing:
 
 
 MISSING = _Missing()
-_DEFAULT_PARENT = object()
 _T = TypeVar("_T")
 
 
@@ -172,8 +171,7 @@ class ResolvedConfig:
     """扁平的 canonical 配置对象。
 
     对象只保存 9 个 Spec，不保存 parent，也不在字段访问时做继承解析。
-    兼容入口可以在构造时传入 ``parent``，但它只会被立即展开并合并一次；
-    未显式传入 ``parent`` 时同样会立即合入应用默认值。构造完成后不存在作用域链。
+    应用默认值在构造时立即写入；后续覆盖通过 ``with_overrides`` 显式完成。
     """
 
     source: SourceSpec
@@ -189,17 +187,9 @@ class ResolvedConfig:
     def __init__(
         self,
         values: Mapping[str, Any] | None = None,
-        parent: ResolvedConfig | None | object = _DEFAULT_PARENT,
         **overrides: Any,
     ) -> None:
-        if parent is _DEFAULT_PARENT:
-            resolved_parent: ResolvedConfig | None = DEFAULT_CONFIG
-        elif parent is None or isinstance(parent, ResolvedConfig):
-            resolved_parent = parent
-        else:
-            raise TypeError("parent must be ResolvedConfig or None")
-
-        supplied = dict(resolved_parent.values) if resolved_parent is not None else {}
+        supplied = dict(_DEFAULT_VALUES)
         supplied.update(values or {})
         supplied.update(overrides)
 
@@ -264,7 +254,10 @@ class ResolvedConfig:
         **overrides: Any,
     ) -> ResolvedConfig:
         """Return a new flat config with only the supplied values overriding this config."""
-        return ResolvedConfig(values, parent=self, **overrides)
+        supplied = dict(self.values)
+        supplied.update(values or {})
+        supplied.update(overrides)
+        return ResolvedConfig(supplied)
 
     def flatten(self, *, stop_at: ResolvedConfig | None = None) -> dict[str, Any]:
         """兼容旧调用；配置已经是扁平的，因此这里只复制当前值。"""
@@ -274,7 +267,7 @@ class ResolvedConfig:
 
 
 def merge_configs(*configs: ResolvedConfig) -> ResolvedConfig:
-    """按从低到高的优先级立即合并多个配置对象。"""
+    """按从低到高的优先级立即合并多个完整配置对象。"""
     values: dict[str, Any] = {}
     for config in configs:
         values.update(config.values)
@@ -345,9 +338,9 @@ _DEFAULT_VALUES: dict[str, Any] = {
     "danmaku.block_keyword_patterns": None,
 }
 
-DEFAULT_CONFIG = ResolvedConfig(_DEFAULT_VALUES, parent=None)
+DEFAULT_CONFIG = ResolvedConfig()
 
-# 迁移期兼容名：不再存在 Scope 类型或 ROOT_SCOPE 的 parent chain。
+# 迁移期兼容名：Scope 只是 ResolvedConfig 的旧名字，不再提供 parent 继承。
 Scope: TypeAlias = ResolvedConfig
 ROOT_SCOPE = DEFAULT_CONFIG
 
