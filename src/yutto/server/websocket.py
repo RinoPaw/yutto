@@ -11,7 +11,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
 from yutto.__version__ import VERSION
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 from yutto.runtime import TaskCapacityError
 from yutto.server.rpc import JsonRpcDispatcher, JsonRpcError, encode_notification
 from yutto.server.service import event_to_json, replay_to_json, snapshot_summary_to_json, snapshot_to_json
@@ -110,7 +110,7 @@ def _task_snapshot_summary_to_json(
 ) -> dict[str, object]:
     summary = snapshot_summary_to_json(snapshot)
     source = snapshot.payload.source.value
-    summary["url"] = "" if source is MISSING or source is None else str(source)
+    summary["url"] = "" if source is None else source
     return summary
 
 
