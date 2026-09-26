@@ -17,6 +17,7 @@ class _Missing:
 
 
 MISSING = _Missing()
+_DEFAULT_PARENT = object()
 _T = TypeVar("_T")
 
 
@@ -172,7 +173,7 @@ class ResolvedConfig:
 
     对象只保存 9 个 Spec，不保存 parent，也不在字段访问时做继承解析。
     兼容入口可以在构造时传入 ``parent``，但它只会被立即展开并合并一次；
-    构造完成后不会保留任何作用域链。
+    未显式传入 ``parent`` 时同样会立即合入应用默认值。构造完成后不存在作用域链。
     """
 
     source: SourceSpec
@@ -188,10 +189,17 @@ class ResolvedConfig:
     def __init__(
         self,
         values: Mapping[str, Any] | None = None,
-        parent: ResolvedConfig | None = None,
+        parent: ResolvedConfig | None | object = _DEFAULT_PARENT,
         **overrides: Any,
     ) -> None:
-        supplied = dict(parent.values) if parent is not None else {}
+        if parent is _DEFAULT_PARENT:
+            resolved_parent: ResolvedConfig | None = DEFAULT_CONFIG
+        elif parent is None or isinstance(parent, ResolvedConfig):
+            resolved_parent = parent
+        else:
+            raise TypeError("parent must be ResolvedConfig or None")
+
+        supplied = dict(resolved_parent.values) if resolved_parent is not None else {}
         supplied.update(values or {})
         supplied.update(overrides)
 
@@ -329,7 +337,7 @@ _DEFAULT_VALUES: dict[str, Any] = {
     "danmaku.block_keyword_patterns": None,
 }
 
-DEFAULT_CONFIG = ResolvedConfig(_DEFAULT_VALUES)
+DEFAULT_CONFIG = ResolvedConfig(_DEFAULT_VALUES, parent=None)
 
 # 迁移期兼容名：不再存在 Scope 类型或 ROOT_SCOPE 的 parent chain。
 Scope: TypeAlias = ResolvedConfig
