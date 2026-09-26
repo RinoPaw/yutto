@@ -4,7 +4,6 @@ import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from yutto.config import ResolvedConfig
 from yutto.core.execution import resolve_fetch_workers
 from yutto.core.operation import (
     ReportLevel,
@@ -30,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from yutto.cli.event_renderer import CliApplicationEventRenderer
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScope, ExecutionScopeFactory
     from yutto.downloader.selector import StreamSelection
     from yutto.listing import MediaAncestry
