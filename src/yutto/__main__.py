@@ -51,6 +51,7 @@ def main() -> None:
     match command:
         case "download":
             try:
+                runtime = resolve_runtime_options(raw_values, config)
                 config_aliases = config.basic.aliases
                 aliases = raw_values.get("aliases", config_aliases)
                 cli_values, no_inherit = config_values_from_cli(
@@ -58,7 +59,6 @@ def main() -> None:
                     inherited_aliases=config_aliases,
                 )
                 command_config = configured.with_overrides(cli_values)
-                runtime = resolve_runtime_options(command_config)
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
