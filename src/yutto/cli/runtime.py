@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from yutto.cli.settings import scope_from_config
-from yutto.scope import Scope
+from yutto.cli.settings import resolved_config_from_settings
+from yutto.scope import ResolvedConfig, merge_configs
 
 if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RuntimeOptions:
-    """CLI process options after applying the active scope chain."""
+    """CLI process options read from one flat resolved config."""
 
     jobs: int
     ffmpeg_path: str | None
@@ -23,15 +23,15 @@ class RuntimeOptions:
 
 
 def resolve_runtime_options(
-    scope: Scope | dict[str, Any],
-    config: YuttoConfig | None = None,
+    config: ResolvedConfig | dict[str, Any],
+    settings: YuttoConfig | None = None,
 ) -> RuntimeOptions:
-    if not isinstance(scope, Scope):
-        if config is None:
-            raise TypeError("config is required when resolving a raw value mapping")
-        scope = Scope(scope, parent=scope_from_config(config))
+    if not isinstance(config, ResolvedConfig):
+        if settings is None:
+            raise TypeError("settings is required when resolving a raw value mapping")
+        config = merge_configs(resolved_config_from_settings(settings), ResolvedConfig(config))
 
-    jobs = scope.runtime.jobs
+    jobs = config.runtime.jobs
     try:
         resolved_jobs = int(jobs)
         if resolved_jobs < 1:
@@ -39,13 +39,13 @@ def resolve_runtime_options(
     except (ValueError, TypeError):
         raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）") from None
 
-    ffmpeg_path = scope.runtime.ffmpeg_path
+    ffmpeg_path = config.runtime.ffmpeg_path
 
     return RuntimeOptions(
         jobs=resolved_jobs,
         ffmpeg_path=None if ffmpeg_path is None else str(ffmpeg_path),
-        preview_formats=bool(scope.runtime.preview_formats),
-        no_color=bool(scope.runtime.no_color),
-        no_progress=bool(scope.runtime.no_progress),
-        debug=bool(scope.runtime.debug),
+        preview_formats=bool(config.runtime.preview_formats),
+        no_color=bool(config.runtime.no_color),
+        no_progress=bool(config.runtime.no_progress),
+        debug=bool(config.runtime.debug),
     )
