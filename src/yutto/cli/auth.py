@@ -24,8 +24,8 @@ from yutto.auth import (
     user_info_matches,
     validate_profile,
 )
+from yutto.config import MISSING, ResolvedConfig
 from yutto.exceptions import ErrorCode
-from yutto.scope import MISSING, Scope
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
 from yutto.utils.functional import as_sync
@@ -60,12 +60,12 @@ class AuthCommandOptions:
     timeout: int
 
 
-def resolve_auth_command_options(scope: Scope, auth_command: str | None) -> AuthCommandOptions:
-    """Resolve auth inputs from Scope while keeping command dispatch outside Scope."""
+def resolve_auth_command_options(config: ResolvedConfig, auth_command: str | None) -> AuthCommandOptions:
+    """Resolve auth inputs from one flat resolved config."""
     if auth_command is None:
         raise ValueError("auth command is missing")
 
-    auth_file = scope.auth.file
+    auth_file = config.auth.file
     if auth_file is MISSING or auth_file is None:
         resolved_auth_file = None
     elif isinstance(auth_file, Path):
@@ -75,23 +75,23 @@ def resolve_auth_command_options(scope: Scope, auth_command: str | None) -> Auth
 
     return AuthCommandOptions(
         auth_command=auth_command,
-        auth=str(_scope_value(scope.auth.cookie, "")),
+        auth=str(_config_value(config.auth.cookie, "")),
         auth_file=resolved_auth_file,
-        auth_profile=str(_scope_value(scope.auth.profile, "default")),
-        proxy=str(_scope_value(scope.network.proxy, "auto")),
-        mode=str(_scope_value(scope.auth.mode, "terminal")),
-        poll_interval=float(_scope_value(scope.auth.poll_interval, 2.0)),
-        timeout=int(_scope_value(scope.auth.timeout, 180)),
+        auth_profile=str(_config_value(config.auth.profile, "default")),
+        proxy=str(_config_value(config.network.proxy, "auto")),
+        mode=str(_config_value(config.auth.mode, "terminal")),
+        poll_interval=float(_config_value(config.auth.poll_interval, 2.0)),
+        timeout=int(_config_value(config.auth.timeout, 180)),
     )
 
 
-def _scope_value(value: Any, default: Any) -> Any:
+def _config_value(value: Any, default: Any) -> Any:
     return default if value is MISSING or value is None else value
 
 
 @as_sync
-async def run_auth(scope: Scope, auth_command: str | None) -> None:
-    options = resolve_auth_command_options(scope, auth_command)
+async def run_auth(config: ResolvedConfig, auth_command: str | None) -> None:
+    options = resolve_auth_command_options(config, auth_command)
 
     match options.auth_command:
         case "login":
