@@ -13,10 +13,10 @@ from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin
 
 from yutto.cli.settings import YuttoConfig
+from yutto.config import ResolvedConfig
 from yutto.core.result import DownloadResult, ResolveResult
 from yutto.runtime import TaskContext, TaskRuntime, TaskSnapshot, TaskState, monotonic_seq_allocator
-from yutto.scope import Scope
-from yutto.server.service import ServerPolicy, ServerPolicyOptions, scope_parser_from_settings
+from yutto.server.service import ServerPolicy, ServerPolicyOptions, config_parser_from_settings
 from yutto.server.websocket import (
     REQUEST_REJECTED_ERROR,
     WebSocketServerOptions,
@@ -37,8 +37,8 @@ if TYPE_CHECKING:
 class FakeDownloadTaskApi:
     def __init__(self, *, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
-        self.submissions: list[tuple[Scope, Scope]] = []
-        self.runtime = TaskRuntime[Scope, DownloadResult](
+        self.submissions: list[tuple[ResolvedConfig, ResolvedConfig]] = []
+        self.runtime = TaskRuntime[ResolvedConfig, DownloadResult](
             self._run,
             task_id_factory=lambda: "task-1",
             seq_allocator=seq_allocator,
@@ -52,21 +52,21 @@ class FakeDownloadTaskApi:
 
     async def submit(
         self,
-        scope: Scope,
+        config: ResolvedConfig,
         *,
-        execution_scope: Scope | None = None,
-    ) -> TaskSnapshot[Scope, DownloadResult]:
-        execution = scope if execution_scope is None else execution_scope
-        self.submissions.append((scope, execution))
-        return await self.runtime.submit(scope)
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, DownloadResult]:
+        execution = config if execution_config is None else execution_config
+        self.submissions.append((config, execution))
+        return await self.runtime.submit(config)
 
-    def get(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None:
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None:
         return self.runtime.get(task_id)
 
-    def list(self) -> tuple[TaskSnapshot[Scope, DownloadResult], ...]:
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, DownloadResult], ...]:
         return self.runtime.list()
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None:
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None:
         return await self.runtime.cancel(task_id)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
@@ -75,7 +75,7 @@ class FakeDownloadTaskApi:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, scope: Scope, context: TaskContext) -> DownloadResult:
+    async def _run(self, config: ResolvedConfig, context: TaskContext) -> DownloadResult:
         await self.release.wait()
         context.emit("progress", {"current": 1, "total": 1})
         return DownloadResult()
@@ -85,9 +85,9 @@ class FakeResolveTaskApi:
     def __init__(self, *, item_count: int = 0, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
         self.item_count = item_count
-        self.submissions: list[tuple[Scope, Scope]] = []
+        self.submissions: list[tuple[ResolvedConfig, ResolvedConfig]] = []
         ids = count(1)
-        self.runtime = TaskRuntime[Scope, ResolveResult](
+        self.runtime = TaskRuntime[ResolvedConfig, ResolveResult](
             self._run,
             task_id_factory=lambda: f"resolve-{next(ids)}",
             seq_allocator=seq_allocator,
@@ -101,21 +101,21 @@ class FakeResolveTaskApi:
 
     async def submit(
         self,
-        scope: Scope,
+        config: ResolvedConfig,
         *,
-        execution_scope: Scope | None = None,
-    ) -> TaskSnapshot[Scope, ResolveResult]:
-        execution = scope if execution_scope is None else execution_scope
-        self.submissions.append((scope, execution))
-        return await self.runtime.submit(scope)
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, ResolveResult]:
+        execution = config if execution_config is None else execution_config
+        self.submissions.append((config, execution))
+        return await self.runtime.submit(config)
 
-    def get(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None:
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None:
         return self.runtime.get(task_id)
 
-    def list(self) -> tuple[TaskSnapshot[Scope, ResolveResult], ...]:
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, ResolveResult], ...]:
         return self.runtime.list()
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None:
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None:
         return await self.runtime.cancel(task_id)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
@@ -124,11 +124,11 @@ class FakeResolveTaskApi:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, scope: Scope, context: TaskContext) -> ResolveResult:
+    async def _run(self, config: ResolvedConfig, context: TaskContext) -> ResolveResult:
         await self.release.wait()
         for index in range(self.item_count):
             context.emit("item_listed", {"avid": str(index), "url": f"https://example.com/{index}"})
-            # 与修复后的 DownloadManager.resolve_items 一致：事件生产逐条让出控制权
+            # 与修复后的 DownloadManager resolve 流程一致：事件生产逐条让出控制权
             await asyncio.sleep(0)
         return ResolveResult(items=())
 
@@ -154,7 +154,7 @@ async def start_server(
     token: str = "test-token",
     service: FakeDownloadTaskApi | None = None,
     resolve_service: FakeResolveTaskApi | None = None,
-    prepare_scope: Callable[[Scope], Scope] | None = None,
+    prepare_config: Callable[[ResolvedConfig], ResolvedConfig] | None = None,
 ) -> tuple[YuttoWebSocketServer, FakeDownloadTaskApi, str]:
     service = service or FakeDownloadTaskApi()
     server = YuttoWebSocketServer(
@@ -165,8 +165,8 @@ async def start_server(
             port=0,
             allowed_origins=allowed_origins,
         ),
-        prepare_scope=prepare_scope,
-        parse_scope=scope_parser_from_settings(YuttoConfig()),
+        prepare_config=prepare_config,
+        parse_config=config_parser_from_settings(YuttoConfig()),
         resolve_service=resolve_service,
     )
     await server.start()
@@ -324,7 +324,7 @@ async def test_server_policy_rejects_invalid_requests_before_task_submission(
     server, _, uri = await start_server(
         service=download_service,
         resolve_service=resolve_service,
-        prepare_scope=policy.prepare_scope,
+        prepare_config=policy.prepare_config,
     )
     try:
         async with connect(uri, proxy=None) as connection:
@@ -346,7 +346,7 @@ async def test_server_policy_rejects_invalid_requests_before_task_submission(
 
 @pytest.mark.processor
 @as_sync
-async def test_server_keeps_public_request_scope_separate_from_execution_scope(tmp_path: Path):
+async def test_server_keeps_public_request_config_separate_from_execution_config(tmp_path: Path):
     service = FakeDownloadTaskApi()
     policy = ServerPolicy(
         ServerPolicyOptions(
@@ -355,7 +355,7 @@ async def test_server_keeps_public_request_scope_separate_from_execution_scope(t
             auth_file=tmp_path / "auth.toml",
         )
     )
-    server, _, uri = await start_server(service=service, prepare_scope=policy.prepare_scope)
+    server, _, uri = await start_server(service=service, prepare_config=policy.prepare_config)
     try:
         async with connect(uri, proxy=None) as connection:
             await connection.send(rpc_request(1, "server.authenticate", {"token": "test-token"}))
@@ -379,11 +379,11 @@ async def test_server_keeps_public_request_scope_separate_from_execution_scope(t
 
             assert started["payload"]["output"]["directory"] == "shows/season-1"
             assert started["payload"]["output"]["temporary_directory"] == "work"
-            request_scope, execution_scope = service.submissions[0]
-            assert request_scope.output.directory == Path("shows/season-1")
-            assert request_scope.output.temporary_directory == Path("work")
-            assert execution_scope.output.directory == (tmp_path / "downloads/shows/season-1").resolve()
-            assert execution_scope.output.temporary_directory == (tmp_path / "temporary/work").resolve()
+            request_config, execution_config = service.submissions[0]
+            assert request_config.output.directory == Path("shows/season-1")
+            assert request_config.output.temporary_directory == Path("work")
+            assert execution_config.output.directory == (tmp_path / "downloads/shows/season-1").resolve()
+            assert execution_config.output.temporary_directory == (tmp_path / "temporary/work").resolve()
     finally:
         await server.close()
 
