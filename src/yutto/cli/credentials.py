@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 from typing import TYPE_CHECKING
 
-from yutto.config import ResolvedConfig
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from yutto.config import ResolvedConfig
 
 
 def resolve_credential_options(configs: Sequence[ResolvedConfig]) -> list[argparse.Namespace]:
