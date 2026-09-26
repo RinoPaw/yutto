@@ -51,59 +51,59 @@ _CREDENTIAL_FIELDS = frozenset(
     }
 )
 
-# The RPC payload is an explicit projection of ResolvedConfig. Adding an internal
-# config field therefore cannot silently extend the public wire schema.
+# Internal config paths are explicitly projected onto the stable RPC wire schema.
+# Credential material is intentionally omitted; only the profile reference is exposed.
 _CONFIG_WIRE_FIELDS = (
-    "source.value",
-    "selection.expression",
-    "selection.with_extra_episodes",
-    "selection.skip_preview",
-    "selection.published_since",
-    "selection.published_before",
-    "auth.profile",
-    "auth.login_strict",
-    "auth.vip_strict",
-    "resource.video",
-    "resource.audio",
-    "resource.danmaku",
-    "resource.subtitle",
-    "resource.metadata",
-    "resource.cover",
-    "resource.chapter_info",
-    "resource.save_cover",
-    "resource.ai_translation_language",
-    "stream.video_quality",
-    "stream.audio_quality",
-    "stream.video_codec",
-    "stream.audio_codec",
-    "stream.video_codec_priority",
-    "output.format",
-    "output.audio_only_format",
-    "output.directory",
-    "output.temporary_directory",
-    "output.overwrite",
-    "output.subpath_template",
-    "output.metadata_premiered_format",
-    "network.proxy",
-    "network.fetch_workers",
-    "network.download_workers",
-    "network.block_size",
-    "network.download_interval",
-    "network.banned_mirrors_pattern",
-    "danmaku.format",
-    "danmaku.font_size",
-    "danmaku.font",
-    "danmaku.opacity",
-    "danmaku.display_region_ratio",
-    "danmaku.speed",
-    "danmaku.block_top",
-    "danmaku.block_bottom",
-    "danmaku.block_scroll",
-    "danmaku.block_reverse",
-    "danmaku.block_fixed",
-    "danmaku.block_special",
-    "danmaku.block_colorful",
-    "danmaku.block_keyword_patterns",
+    ("source.value", "source.value"),
+    ("selection.expression", "selection.expression"),
+    ("selection.with_extra_episodes", "selection.with_extra_episodes"),
+    ("selection.skip_preview", "selection.skip_preview"),
+    ("selection.published_since", "selection.published_since"),
+    ("selection.published_before", "selection.published_before"),
+    ("credential.profile", "auth.profile"),
+    ("access.login_strict", "auth.login_strict"),
+    ("access.vip_strict", "auth.vip_strict"),
+    ("resource.video", "resource.video"),
+    ("resource.audio", "resource.audio"),
+    ("resource.danmaku", "resource.danmaku"),
+    ("resource.subtitle", "resource.subtitle"),
+    ("resource.metadata", "resource.metadata"),
+    ("resource.cover", "resource.cover"),
+    ("resource.chapter_info", "resource.chapter_info"),
+    ("resource.save_cover", "resource.save_cover"),
+    ("resource.ai_translation_language", "resource.ai_translation_language"),
+    ("stream.video_quality", "stream.video_quality"),
+    ("stream.audio_quality", "stream.audio_quality"),
+    ("stream.video_codec", "stream.video_codec"),
+    ("stream.audio_codec", "stream.audio_codec"),
+    ("stream.video_codec_priority", "stream.video_codec_priority"),
+    ("output.format", "output.format"),
+    ("output.audio_only_format", "output.audio_only_format"),
+    ("output.directory", "output.directory"),
+    ("output.temporary_directory", "output.temporary_directory"),
+    ("output.overwrite", "output.overwrite"),
+    ("output.subpath_template", "output.subpath_template"),
+    ("output.metadata_premiered_format", "output.metadata_premiered_format"),
+    ("network.proxy", "network.proxy"),
+    ("network.fetch_workers", "network.fetch_workers"),
+    ("network.download_workers", "network.download_workers"),
+    ("network.block_size", "network.block_size"),
+    ("network.download_interval", "network.download_interval"),
+    ("network.banned_mirrors_pattern", "network.banned_mirrors_pattern"),
+    ("danmaku.format", "danmaku.format"),
+    ("danmaku.font_size", "danmaku.font_size"),
+    ("danmaku.font", "danmaku.font"),
+    ("danmaku.opacity", "danmaku.opacity"),
+    ("danmaku.display_region_ratio", "danmaku.display_region_ratio"),
+    ("danmaku.speed", "danmaku.speed"),
+    ("danmaku.block_top", "danmaku.block_top"),
+    ("danmaku.block_bottom", "danmaku.block_bottom"),
+    ("danmaku.block_scroll", "danmaku.block_scroll"),
+    ("danmaku.block_reverse", "danmaku.block_reverse"),
+    ("danmaku.block_fixed", "danmaku.block_fixed"),
+    ("danmaku.block_special", "danmaku.block_special"),
+    ("danmaku.block_colorful", "danmaku.block_colorful"),
+    ("danmaku.block_keyword_patterns", "danmaku.block_keyword_patterns"),
 )
 
 
@@ -181,14 +181,14 @@ def _snapshot_result_to_json(result: object) -> JsonValue:
 def _config_to_json(config: ResolvedConfig) -> dict[str, JsonValue]:
     values = config.values
     result: dict[str, JsonValue] = {}
-    for path in _CONFIG_WIRE_FIELDS:
-        if path not in values:
+    for internal_path, wire_path in _CONFIG_WIRE_FIELDS:
+        if internal_path not in values:
             continue
-        section, field = path.split(".", 1)
-        value = values[path]
+        section, field = wire_path.split(".", 1)
+        value = values[internal_path]
         section_value = result.setdefault(section, {})
         assert isinstance(section_value, dict)
-        if path == "network.proxy" and isinstance(value, str):
+        if internal_path == "network.proxy" and isinstance(value, str):
             section_value[field] = _sanitize_proxy(value)
         else:
             section_value[field] = _wire_value(value)
