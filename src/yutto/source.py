@@ -29,6 +29,7 @@ from yutto.api.ugc import (
     get_ugc_video_tags,
     get_watch_later_entries,
 )
+from yutto.config import ResolvedConfig
 from yutto.exceptions import (
     HttpStatusError,
     MaxRetryError,
@@ -53,7 +54,6 @@ from yutto.media import (
     UgcVideo,
     UgcWatchLater,
 )
-from yutto.scope import Scope
 from yutto.selection import Selection, parse_selection
 from yutto.types import (
     AvId,
@@ -114,13 +114,13 @@ class MediaResolveResult(Generic[TMedia_co]):
 
 class MediaSource(ABC):
     @abstractmethod
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[Media]:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult[Media]:
         raise NotImplementedError
 
 
-def _publication_time_matches(timestamp: int, scope: Scope) -> bool:
-    since = scope.selection.published_since
-    before = scope.selection.published_before
+def _publication_time_matches(timestamp: int, config: ResolvedConfig) -> bool:
+    since = config.selection.published_since
+    before = config.selection.published_before
     return (since is None or timestamp >= since) and (before is None or timestamp < before)
 
 
@@ -156,14 +156,14 @@ class UgcVideoSource(MediaSource):
     id: AvId
     page: int | None = None
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcVideo]:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult[UgcVideo]:
         video_info = await get_ugc_video_info(execution, self.id)
         aid = video_info.aid
         tags = await get_ugc_video_tags(execution, aid)
         added_at = get_time_stamp_by_now()
         pages = video_info.pages
         diagnostics: list[MediaResolveDiagnostic] = []
-        selection_expression = scope.selection.expression
+        selection_expression = config.selection.expression
         selection = parse_selection(selection_expression) if selection_expression is not None else None
         if selection is not None:
             selected_pages = _select_items(list(enumerate(pages, start=1)), selection, diagnostics)
@@ -249,21 +249,21 @@ class UgcVideoSource(MediaSource):
 async def _resolve_ugc_videos(
     execution: ExecutionScope,
     indexed_videos: list[tuple[int, UgcVideoReference]],
-    video_scope: Scope,
+    video_config: ResolvedConfig,
 ) -> tuple[tuple[MediaEntry[UgcVideo], ...], tuple[MediaResolveFailure, ...], tuple[MediaResolveDiagnostic, ...]]:
     async def resolve_one(
         index: int,
         reference: UgcVideoReference,
     ) -> tuple[MediaEntry[UgcVideo], tuple[MediaResolveDiagnostic, ...]] | MediaResolveFailure | None:
         try:
-            result = await UgcVideoSource(id=reference.bvid).resolve(execution, video_scope)
+            result = await UgcVideoSource(id=reference.bvid).resolve(execution, video_config)
         except _EXPECTED_UGC_CHILD_ERRORS as error:
             return MediaResolveFailure(
                 path=(MediaResolveStep(index=index, source=reference.bvid),),
                 error=error,
             )
 
-        if not _publication_time_matches(result.media.metadata.published_at, video_scope):
+        if not _publication_time_matches(result.media.metadata.published_at, video_config):
             return None
 
         return (
@@ -298,7 +298,7 @@ async def _resolve_ugc_videos(
 
 def _ugc_candidates(
     items: tuple[UgcVideoReference, ...],
-    scope: Scope,
+    config: ResolvedConfig,
     selection: Selection,
     diagnostics: list[MediaResolveDiagnostic],
 ) -> list[tuple[int, UgcVideoReference]]:
@@ -306,7 +306,7 @@ def _ugc_candidates(
     indexed = [
         (index, item)
         for index, item in indexed
-        if item.published_at is None or _publication_time_matches(item.published_at, scope)
+        if item.published_at is None or _publication_time_matches(item.published_at, config)
     ]
     return _select_items(indexed, selection, diagnostics)
 
@@ -316,14 +316,14 @@ class UgcCollectionSource(MediaSource):
     id: CollectionId
     owner_id: MId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         collection = await get_collection(execution, self.id, self.owner_id)
         diagnostics: list[MediaResolveDiagnostic] = []
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_videos = _ugc_candidates(collection.videos, scope, selection, diagnostics)
-        video_scope = Scope({"selection.expression": "~"}, parent=scope)
-        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_scope)
+        selected_videos = _ugc_candidates(collection.videos, config, selection, diagnostics)
+        video_config = config.with_overrides({"selection.expression": "~"})
+        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
             media=UgcCollection(
@@ -340,17 +340,17 @@ class UgcCollectionSource(MediaSource):
 class UgcFavSource(MediaSource):
     id: FId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult[UgcFav]:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult[UgcFav]:
         info, videos = await asyncio.gather(
             get_favourite_info(execution, self.id),
             get_favourite_medias(execution, self.id),
         )
         diagnostics: list[MediaResolveDiagnostic] = []
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_videos = _ugc_candidates(videos, scope, selection, diagnostics)
-        video_scope = Scope({"selection.expression": "~"}, parent=scope)
-        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_scope)
+        selected_videos = _ugc_candidates(videos, config, selection, diagnostics)
+        video_config = config.with_overrides({"selection.expression": "~"})
+        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
 
         owner = info.owner
@@ -375,19 +375,19 @@ class UgcFavSource(MediaSource):
 class UgcAllFavouritesSource(MediaSource):
     id: MId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         folders = await get_all_favourite_folders(execution, self.id)
         diagnostics: list[MediaResolveDiagnostic] = []
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         selected_folders = _select_items(list(enumerate(folders, start=1)), selection, diagnostics)
-        child_scope = Scope({"selection.expression": "~"}, parent=scope)
+        child_config = config.with_overrides({"selection.expression": "~"})
         favourites: list[MediaEntry[UgcFav]] = []
         failures: list[MediaResolveFailure] = []
 
         for index, fid in selected_folders:
             try:
-                result = await UgcFavSource(id=fid).resolve(execution, child_scope)
+                result = await UgcFavSource(id=fid).resolve(execution, child_config)
             except _EXPECTED_UGC_CHILD_ERRORS as error:
                 failures.append(
                     MediaResolveFailure(
@@ -420,15 +420,15 @@ class UgcAllFavouritesSource(MediaSource):
 class UgcSeriesSource(MediaSource):
     id: SeriesId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         info = await get_series_info(execution, self.id)
         archives = await get_series_archives(execution, self.id, info.owner_id)
         diagnostics: list[MediaResolveDiagnostic] = []
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_videos = _ugc_candidates(archives, scope, selection, diagnostics)
-        video_scope = Scope({"selection.expression": "~"}, parent=scope)
-        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_scope)
+        selected_videos = _ugc_candidates(archives, config, selection, diagnostics)
+        video_config = config.with_overrides({"selection.expression": "~"})
+        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
             media=UgcSeries(
@@ -445,18 +445,18 @@ class UgcSeriesSource(MediaSource):
 class UgcSpaceSource(MediaSource):
     id: MId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         profile, archives = await get_space_profile_and_archives(
             execution,
             self.id,
-            stop_before_timestamp=scope.selection.published_since,
+            stop_before_timestamp=config.selection.published_since,
         )
         diagnostics: list[MediaResolveDiagnostic] = []
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_videos = _ugc_candidates(archives, scope, selection, diagnostics)
-        video_scope = Scope({"selection.expression": "~"}, parent=scope)
-        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_scope)
+        selected_videos = _ugc_candidates(archives, config, selection, diagnostics)
+        video_config = config.with_overrides({"selection.expression": "~"})
+        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
             media=UgcSpace(
@@ -477,14 +477,14 @@ class UgcSpaceSource(MediaSource):
 
 @dataclass(slots=True, kw_only=True)
 class UgcWatchLaterSource(MediaSource):
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         entries = await get_watch_later_entries(execution)
         diagnostics: list[MediaResolveDiagnostic] = []
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
-        selected_videos = _ugc_candidates(entries, scope, selection, diagnostics)
-        video_scope = Scope({"selection.expression": "~"}, parent=scope)
-        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_scope)
+        selected_videos = _ugc_candidates(entries, config, selection, diagnostics)
+        video_config = config.with_overrides({"selection.expression": "~"})
+        resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
             media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=resolved),
@@ -561,7 +561,7 @@ def _apply_container_metadata_to_episode(episode: BangumiEpisode, metadata: Item
 class BangumiEpisodeSource(MediaSource):
     id: EpisodeId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         result = await get_bangumi_season_by_episode(execution, self.id)
         all_episode_items = list(enumerate(result.episodes, start=1))
         anchor_item = next(((index, entry) for index, entry in all_episode_items if entry.episode_id == self.id), None)
@@ -569,7 +569,7 @@ class BangumiEpisodeSource(MediaSource):
             raise NotFoundError(f"未找到该番剧中的剧集（episode_id: {self.id}）")
 
         season_metadata = _make_bangumi_season_metadata(result)
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression) if expression is not None else None
         if selection is None:
             index, item = anchor_item
@@ -578,14 +578,14 @@ class BangumiEpisodeSource(MediaSource):
 
         episode_items = _indexed_bangumi_episode_items(
             result,
-            with_extra_episodes=scope.selection.with_extra_episodes,
+            with_extra_episodes=config.selection.with_extra_episodes,
         )
-        if scope.selection.skip_preview:
+        if config.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if not item.is_preview]
         episode_items = [
             (index, item)
             for index, item in episode_items
-            if item.published_at is None or _publication_time_matches(item.published_at, scope)
+            if item.published_at is None or _publication_time_matches(item.published_at, config)
         ]
         diagnostics: list[MediaResolveDiagnostic] = []
         episode_items = _select_items(episode_items, selection, diagnostics)
@@ -605,21 +605,21 @@ class BangumiEpisodeSource(MediaSource):
 class BangumiSeasonSource(MediaSource):
     id: SeasonId | MediaId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         season_id = await get_season_id_by_media(execution, self.id) if isinstance(self.id, MediaId) else self.id
         result = await get_bangumi_season(execution, season_id)
         episode_items = _indexed_bangumi_episode_items(
             result,
-            with_extra_episodes=scope.selection.with_extra_episodes,
+            with_extra_episodes=config.selection.with_extra_episodes,
         )
-        if scope.selection.skip_preview:
+        if config.selection.skip_preview:
             episode_items = [(index, item) for index, item in episode_items if not item.is_preview]
         episode_items = [
             (index, item)
             for index, item in episode_items
-            if item.published_at is None or _publication_time_matches(item.published_at, scope)
+            if item.published_at is None or _publication_time_matches(item.published_at, config)
         ]
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         diagnostics: list[MediaResolveDiagnostic] = []
         episode_items = _select_items(episode_items, selection, diagnostics)
@@ -654,14 +654,14 @@ def _parse_cheese_episode(item: CheeseEpisodeInfo) -> CheeseEpisode:
 
 def _cheese_episode_items(
     result: CheeseSeasonInfo,
-    scope: Scope,
+    config: ResolvedConfig,
     selection: Selection,
     diagnostics: list[MediaResolveDiagnostic],
 ) -> list[tuple[int, CheeseEpisodeInfo]]:
     items = [
         (index, item)
         for index, item in enumerate(result.episodes, start=1)
-        if item.published_at is None or _publication_time_matches(item.published_at, scope)
+        if item.published_at is None or _publication_time_matches(item.published_at, config)
     ]
     return _select_items(items, selection, diagnostics)
 
@@ -670,19 +670,19 @@ def _cheese_episode_items(
 class CheeseEpisodeSource(MediaSource):
     id: EpisodeId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         result = await get_cheese_season_by_episode(execution, self.id)
         indexed_items = list(enumerate(result.episodes, start=1))
         anchor_item = next(((index, entry) for index, entry in indexed_items if entry.episode_id == self.id), None)
         if anchor_item is None:
             raise NotFoundError(f"无法在课程 {result.title} 中找到剧集 ep{self.id}")
-        expression = scope.selection.expression
+        expression = config.selection.expression
         if expression is None:
             index, item = anchor_item
             return MediaResolveResult(media=_parse_cheese_episode(item), source_index=index)
         selection = parse_selection(expression)
         diagnostics: list[MediaResolveDiagnostic] = []
-        episode_items = _cheese_episode_items(result, scope, selection, diagnostics)
+        episode_items = _cheese_episode_items(result, config, selection, diagnostics)
         season_id = result.season_id or SeasonId(self.id.value)
         return MediaResolveResult(
             media=CheeseSeason(
@@ -700,12 +700,12 @@ class CheeseEpisodeSource(MediaSource):
 class CheeseSeasonSource(MediaSource):
     id: SeasonId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         result = await get_cheese_season(execution, self.id)
-        expression = scope.selection.expression
+        expression = config.selection.expression
         selection = parse_selection(expression if expression is not None else "~")
         diagnostics: list[MediaResolveDiagnostic] = []
-        episode_items = _cheese_episode_items(result, scope, selection, diagnostics)
+        episode_items = _cheese_episode_items(result, config, selection, diagnostics)
         return MediaResolveResult(
             media=CheeseSeason(
                 season_id=self.id,
@@ -722,11 +722,11 @@ async def _resolve_bangumi_or_cheese(
     bangumi: MediaSource,
     cheese: MediaSource,
     execution: ExecutionScope,
-    scope: Scope,
+    config: ResolvedConfig,
 ) -> MediaResolveResult:
     results = await asyncio.gather(
-        bangumi.resolve(execution, scope),
-        cheese.resolve(execution, scope),
+        bangumi.resolve(execution, config),
+        cheese.resolve(execution, config),
         return_exceptions=True,
     )
     successes: list[MediaResolveResult] = []
@@ -751,12 +751,12 @@ async def _resolve_bangumi_or_cheese(
 class AmbiguousEpisodeSource(MediaSource):
     id: EpisodeId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         return await _resolve_bangumi_or_cheese(
             BangumiEpisodeSource(id=self.id),
             CheeseEpisodeSource(id=self.id),
             execution,
-            scope,
+            config,
         )
 
 
@@ -764,12 +764,12 @@ class AmbiguousEpisodeSource(MediaSource):
 class AmbiguousSeasonSource(MediaSource):
     id: SeasonId
 
-    async def resolve(self, execution: ExecutionScope, scope: Scope) -> MediaResolveResult:
+    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult:
         return await _resolve_bangumi_or_cheese(
             BangumiSeasonSource(id=self.id),
             CheeseSeasonSource(id=self.id),
             execution,
-            scope,
+            config,
         )
 
 
