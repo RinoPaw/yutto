@@ -63,7 +63,7 @@ def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> Se
 
     values = vars(args)
     configured = resolved_config_from_settings(settings)
-    configured_runtime = resolve_runtime_options(configured)
+    configured_runtime = resolve_runtime_options(values, settings)
     configured_fetch_workers = resolve_fetch_workers(configured)
     configured_download_workers = resolve_download_workers(configured)
 
