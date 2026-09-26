@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from returns.result import Success
 
+from yutto.config import DEFAULT_CONFIG
 from yutto.exceptions import NotFoundError
 from yutto.media import UgcCollection, UgcFav, UgcSeries
-from yutto.scope import Scope
 from yutto.source import UgcCollectionSource, UgcFavSource, UgcSeriesSource
 from yutto.types import AId, BvId, CollectionId, FId, MId, SeriesId
 
@@ -16,13 +17,13 @@ if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
 
 _EXECUTION = cast("ExecutionScope", None)
-_DEFAULT_SCOPE = Scope()
+_DEFAULT_CONFIG = DEFAULT_CONFIG
 
 
 def _install_fetcher_stub(monkeypatch: pytest.MonkeyPatch, routes: dict[str, Any]) -> list[str]:
     calls: list[str] = []
 
-    async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+    async def fake_fetch_json(execution: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
         calls.append(url)
         for fragment, response in routes.items():
             if fragment in url:
@@ -73,8 +74,12 @@ def test_series_selects_video_then_resolves_all_pages_with_metadata(monkeypatch:
         },
     )
 
-    scope = Scope({"selection.expression": "2", "resource.metadata": True})
-    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_EXECUTION, scope))
+    config = replace(
+        DEFAULT_CONFIG,
+        selection=replace(DEFAULT_CONFIG.selection, expression="2"),
+        resource=replace(DEFAULT_CONFIG.resource, metadata=True),
+    )
+    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_EXECUTION, config))
 
     assert isinstance(result.media, UgcSeries)
     assert result.failures == ()
@@ -109,7 +114,7 @@ def test_collection_resolves_all_videos_by_default(monkeypatch: pytest.MonkeyPat
     )
 
     result = asyncio.run(
-        UgcCollectionSource(id=CollectionId("456"), owner_id=MId("123")).resolve(_EXECUTION, _DEFAULT_SCOPE)
+        UgcCollectionSource(id=CollectionId("456"), owner_id=MId("123")).resolve(_EXECUTION, _DEFAULT_CONFIG)
     )
 
     assert isinstance(result.media, UgcCollection)
@@ -146,7 +151,7 @@ def test_favourite_preserves_folder_owner_and_item_titles(monkeypatch: pytest.Mo
         },
     )
 
-    result = asyncio.run(UgcFavSource(id=FId("456")).resolve(_EXECUTION, _DEFAULT_SCOPE))
+    result = asyncio.run(UgcFavSource(id=FId("456")).resolve(_EXECUTION, _DEFAULT_CONFIG))
 
     assert isinstance(result.media, UgcFav)
     assert result.media.metadata.owner == "收藏者"
@@ -177,7 +182,7 @@ def test_series_keeps_successes_and_records_expected_child_failure(monkeypatch: 
         },
     )
 
-    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_EXECUTION, _DEFAULT_SCOPE))
+    result = asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_EXECUTION, _DEFAULT_CONFIG))
 
     assert isinstance(result.media, UgcSeries)
     assert [entry.media.metadata.title for entry in result.media.items] == ["第一个", "第三个"]
@@ -206,10 +211,6 @@ def test_series_programming_error_aborts_task_group(monkeypatch: pytest.MonkeyPa
         },
     )
 
+    config = replace(DEFAULT_CONFIG, selection=replace(DEFAULT_CONFIG.selection, expression="1~2"))
     with pytest.raises(TypeError, match="programming error"):
-        asyncio.run(
-            UgcSeriesSource(id=SeriesId("456")).resolve(
-                _EXECUTION,
-                Scope({"selection.expression": "1~2"}),
-            )
-        )
+        asyncio.run(UgcSeriesSource(id=SeriesId("456")).resolve(_EXECUTION, config))
