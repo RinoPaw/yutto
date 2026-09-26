@@ -83,9 +83,9 @@ def resolve_auth_command_options(
 
     return AuthCommandOptions(
         auth_command=auth_command,
-        auth=config.auth.cookie,
-        auth_file=config.auth.file,
-        auth_profile=config.auth.profile,
+        auth=config.credential.cookie,
+        auth_file=config.credential.file,
+        auth_profile=config.credential.profile,
         proxy=config.network.proxy,
         mode=mode,
         poll_interval=poll_interval,
