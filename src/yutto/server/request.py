@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from yutto.cli.settings import resolved_config_from_settings
+from yutto.config import ResolvedConfig
 from yutto.downloader.planner import MEBIBYTE
-from yutto.scope import ResolvedConfig
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import parse_local_timestamp
 
@@ -95,7 +95,7 @@ class DanmakuRequest(_RpcModel):
     block_keyword_patterns: list[str] | None = None
 
 
-class ScopeRequest(_RpcModel):
+class ConfigRequest(_RpcModel):
     source: SourceRequest
     access: AccessRequest = Field(default_factory=AccessRequest)
     batch: bool | None = None
@@ -117,7 +117,7 @@ def config_parser_from_settings(settings: YuttoConfig) -> Callable[[object], Res
 
     def parse(payload: object) -> ResolvedConfig:
         try:
-            request = ScopeRequest.model_validate(payload)
+            request = ConfigRequest.model_validate(payload)
         except ValidationError as error:
             raise ValueError(_request_validation_reason(error)) from error
         values = _config_values_from_request(request, configured)
@@ -125,11 +125,6 @@ def config_parser_from_settings(settings: YuttoConfig) -> Callable[[object], Res
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
-
-
-def scope_parser_from_settings(settings: YuttoConfig) -> Callable[[object], ResolvedConfig]:
-    """Compatibility wrapper for config_parser_from_settings."""
-    return config_parser_from_settings(settings)
 
 
 def _request_validation_reason(error: ValidationError) -> str:
@@ -155,7 +150,7 @@ def _request_validation_reason(error: ValidationError) -> str:
     return "invalid request"
 
 
-def _config_values_from_request(request: ScopeRequest, baseline: ResolvedConfig) -> dict[str, Any]:
+def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> dict[str, Any]:
     values: dict[str, Any] = {"source.value": request.source.url}
 
     _copy_present(
@@ -308,4 +303,4 @@ def _copy_present(model: BaseModel, paths: dict[str, str], target: dict[str, Any
             target[path] = getattr(model, field)
 
 
-__all__ = ["ScopeRequest", "config_parser_from_settings", "scope_parser_from_settings"]
+__all__ = ["ConfigRequest", "config_parser_from_settings"]
