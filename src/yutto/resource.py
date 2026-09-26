@@ -47,36 +47,36 @@ class ResourceManifest:
 
 
 def wants_video(config: ResolvedConfig) -> bool:
-    return bool(config.resource.video)
+    return config.resource.video
 
 
 def wants_audio(config: ResolvedConfig) -> bool:
-    return bool(config.resource.audio)
+    return config.resource.audio
 
 
 def wants_danmaku(config: ResolvedConfig) -> bool:
-    return bool(config.resource.danmaku)
+    return config.resource.danmaku
 
 
 def wants_subtitle(config: ResolvedConfig) -> bool:
-    return bool(config.resource.subtitle)
+    return config.resource.subtitle
 
 
 def wants_metadata(config: ResolvedConfig) -> bool:
-    return bool(config.resource.metadata)
+    return config.resource.metadata
 
 
 def wants_cover(config: ResolvedConfig) -> bool:
-    return bool(config.resource.cover)
+    return config.resource.cover
 
 
 def wants_chapter_info(config: ResolvedConfig) -> bool:
-    return bool(config.resource.chapter_info)
+    return config.resource.chapter_info
 
 
 def should_save_cover(config: ResolvedConfig) -> bool:
     cover = wants_cover(config)
-    save_cover = bool(config.resource.save_cover)
+    save_cover = config.resource.save_cover
     if save_cover and not cover:
         raise ValueError("save_cover requires cover")
     if cover and not any(
@@ -158,8 +158,6 @@ async def resolve_resource_manifest(
     cover = wants_cover(config)
     chapter_info = wants_chapter_info(config)
     ai_translation_language = config.resource.ai_translation_language
-    if ai_translation_language is not None and not isinstance(ai_translation_language, str):
-        raise ValueError("ai_translation_language must be a string or null")
 
     videos: tuple[VideoUrlMeta, ...] = ()
     audios: tuple[AudioUrlMeta, ...] = ()
