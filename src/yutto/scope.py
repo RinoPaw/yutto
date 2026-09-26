@@ -61,7 +61,7 @@ class AuthSpec:
 
     cookie: str = _missing()
     file: Path | str | None = _missing()
-    profile: str = _missing()
+    profile: str | None = _missing()
     sessdata: str = _missing()
     login_strict: bool = _missing()
     vip_strict: bool = _missing()
