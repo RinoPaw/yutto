@@ -24,7 +24,7 @@ from yutto.auth import (
     user_info_matches,
     validate_profile,
 )
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 from yutto.exceptions import ErrorCode
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
@@ -65,28 +65,16 @@ def resolve_auth_command_options(config: ResolvedConfig, auth_command: str | Non
     if auth_command is None:
         raise ValueError("auth command is missing")
 
-    auth_file = config.auth.file
-    if auth_file is MISSING or auth_file is None:
-        resolved_auth_file = None
-    elif isinstance(auth_file, Path):
-        resolved_auth_file = auth_file
-    else:
-        resolved_auth_file = Path(auth_file).expanduser()
-
     return AuthCommandOptions(
         auth_command=auth_command,
-        auth=str(_config_value(config.auth.cookie, "")),
-        auth_file=resolved_auth_file,
-        auth_profile=str(_config_value(config.auth.profile, "default")),
-        proxy=str(_config_value(config.network.proxy, "auto")),
-        mode=str(_config_value(config.auth.mode, "terminal")),
-        poll_interval=float(_config_value(config.auth.poll_interval, 2.0)),
-        timeout=int(_config_value(config.auth.timeout, 180)),
+        auth=config.auth.cookie,
+        auth_file=config.auth.file,
+        auth_profile=config.auth.profile,
+        proxy=config.network.proxy,
+        mode=config.auth.mode,
+        poll_interval=config.auth.poll_interval,
+        timeout=config.auth.timeout,
     )
-
-
-def _config_value(value: Any, default: Any) -> Any:
-    return default if value is MISSING or value is None else value
 
 
 @as_sync
