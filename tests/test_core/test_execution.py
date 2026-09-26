@@ -4,15 +4,15 @@ from typing import Any, cast
 
 import pytest
 
+from yutto.config import ResolvedConfig, SourceSpec
 from yutto.core.execution import ExecutionScope, RequestExecutionScopeFactory
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.functional import as_sync
 
 pytestmark = pytest.mark.processor
 
 
-def make_scope() -> Scope:
-    return Scope({"source.value": "BV1scope"}, parent=ROOT_SCOPE)
+def make_config() -> ResolvedConfig:
+    return ResolvedConfig(source=SourceSpec(value="BV1scope"))
 
 
 @pytest.mark.parametrize(
@@ -38,9 +38,9 @@ def test_execution_scope_rejects_non_positive_workers(
 @as_sync
 async def test_scope_factory_opens_fresh_sessions_limiters_and_caches():
     factory = RequestExecutionScopeFactory()
-    scope = make_scope()
+    config = make_config()
 
-    async with factory.open(scope) as first_scope:
+    async with factory.open(config) as first_scope:
         first_session = first_scope.session
         first_fetch_limiter = first_scope.fetch_limiter
         assert first_scope.download_workers == 8
@@ -49,7 +49,7 @@ async def test_scope_factory_opens_fresh_sessions_limiters_and_caches():
 
     assert first_session.is_closed
 
-    async with factory.open(scope) as second_scope:
+    async with factory.open(config) as second_scope:
         assert second_scope.session is not first_session
         assert second_scope.fetch_limiter is not first_fetch_limiter
         assert second_scope.download_workers == 8
@@ -61,14 +61,14 @@ async def test_scope_factory_opens_fresh_sessions_limiters_and_caches():
 async def test_scope_factory_closes_session_when_on_open_fails():
     sessions: list[Any] = []
 
-    async def fail_on_open(execution: ExecutionScope, scope: Scope) -> None:
+    async def fail_on_open(execution: ExecutionScope, config: ResolvedConfig) -> None:
         sessions.append(execution.session)
         raise RuntimeError("on_open failed")
 
     factory = RequestExecutionScopeFactory(on_open=fail_on_open)
 
     with pytest.raises(RuntimeError, match="on_open failed"):
-        async with factory.open(make_scope()):
+        async with factory.open(make_config()):
             pytest.fail("scope should not be yielded")
 
     assert len(sessions) == 1
