@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.scope import ResolvedConfig, merge_configs
+from yutto.scope import ResolvedConfig
 
 if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
@@ -29,7 +29,7 @@ def resolve_runtime_options(
     if not isinstance(config, ResolvedConfig):
         if settings is None:
             raise TypeError("settings is required when resolving a raw value mapping")
-        config = merge_configs(resolved_config_from_settings(settings), ResolvedConfig(config))
+        config = resolved_config_from_settings(settings).with_overrides(config)
 
     jobs = config.runtime.jobs
     try:
