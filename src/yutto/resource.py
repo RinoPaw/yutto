@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias, cast
+from typing import TYPE_CHECKING, TypeAlias
 
 from yutto.api.danmaku import get_protobuf_danmaku_urls, get_xml_danmaku_url
 from yutto.api.player import (
@@ -97,7 +97,7 @@ def resolve_danmaku_format(scope: Scope) -> DanmakuSaveType:
     value = scope.danmaku.format
     if value not in {"xml", "ass", "protobuf"}:
         raise ValueError(f"unsupported danmaku format: {value}")
-    return cast("DanmakuSaveType", value)
+    return value
 
 
 async def get_bangumi_video_playurl(
