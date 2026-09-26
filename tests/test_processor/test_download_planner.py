@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 from tests.test_processor.test_download_result import make_audio, make_config, make_resource_only_entry
-from yutto.config import ResolvedConfig
 from yutto.core.events import DownloadMediaSelected, SelectedAudioStream, SelectedVideoStream
 from yutto.core.operation import bind_download_event_sink
 from yutto.downloader.executor import emit_streams_selected
@@ -16,6 +15,7 @@ from yutto.stream import resolve_audio_codecs
 from yutto.types import VideoUrlMeta
 
 if TYPE_CHECKING:
+    from yutto.config import ResolvedConfig
     from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, VideoCodec
 
