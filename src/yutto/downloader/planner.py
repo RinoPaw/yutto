@@ -11,8 +11,8 @@ from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import TIME_FULL_FMT
 
 if TYPE_CHECKING:
+    from yutto.config import ResolvedConfig
     from yutto.resource import ResourceManifest
-    from yutto.scope import Scope
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType
@@ -70,7 +70,7 @@ class MetadataPlan:
 
 @dataclass(frozen=True, slots=True)
 class DownloadResources:
-    """Frozen write policy derived from Scope and ResourceManifest."""
+    """Frozen write policy derived from ResolvedConfig and ResourceManifest."""
 
     subtitle_languages: tuple[str, ...]
     has_danmaku: bool
@@ -109,56 +109,56 @@ class DownloadPlan:
 
 
 class DownloadPlanner:
-    """Turn a ResourceManifest plus a path and Scope into a pure download plan."""
+    """Turn a ResourceManifest plus a path and resolved config into a pure download plan."""
 
-    def plan(self, resources: ResourceManifest, path: Path, scope: Scope) -> DownloadPlan:
-        selection = select_streams(resources, scope)
+    def plan(self, resources: ResourceManifest, path: Path, config: ResolvedConfig) -> DownloadPlan:
+        selection = select_streams(resources, config)
         video_meta = selection.video
         audio_meta = selection.audio
-        suffix = resolve_output_suffix(video_meta, audio_meta, scope)
-        output_directory, temporary_directory = resolve_output_directories(scope)
+        suffix = resolve_output_suffix(video_meta, audio_meta, config)
+        output_directory, temporary_directory = resolve_output_directories(config)
         paths = resolve_paths(output_directory, temporary_directory, path, suffix)
 
-        _, video_save_codec = resolve_video_codecs(scope)
+        _, video_save_codec = resolve_video_codecs(config)
         attach_hvc1_tag = should_attach_hvc1_tag(video_meta, video_save_codec)
         if video_meta is not None and video_meta.codec == video_save_codec:
             video_save_codec = "copy"
 
-        _, requested_audio_save_codec = resolve_audio_codecs(scope)
+        _, requested_audio_save_codec = resolve_audio_codecs(config)
         audio_save_codec = (
             resolve_audio_save_codec(audio_meta.codec, requested_audio_save_codec, suffix)
             if audio_meta is not None
             else requested_audio_save_codec
         )
 
-        fixed = bool(scope.danmaku.block_fixed)
+        fixed = bool(config.danmaku.block_fixed)
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
-            danmaku_save_type=resolve_danmaku_format(scope) if resources.danmaku_urls else None,
-            has_metadata=wants_metadata(scope),
+            danmaku_save_type=resolve_danmaku_format(config) if resources.danmaku_urls else None,
+            has_metadata=wants_metadata(config),
             has_cover=resources.cover_url is not None,
             has_chapter_info=resources.chapter_info_url is not None,
-            save_cover=should_save_cover(scope),
+            save_cover=should_save_cover(config),
             danmaku_width=video_meta.width if video_meta is not None else 1920,
             danmaku_height=video_meta.height if video_meta is not None else 1080,
             metadata=MetadataPlan(
-                published_at=_text(scope.output.metadata_premiered_format),
+                published_at=_text(config.output.metadata_premiered_format),
                 added_at=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
-                font_size=_optional_int(scope.danmaku.font_size),
-                font=_text(scope.danmaku.font),
-                opacity=_float(scope.danmaku.opacity),
-                display_region_ratio=_float(scope.danmaku.display_region_ratio),
-                speed=_float(scope.danmaku.speed),
-                block_top=bool(scope.danmaku.block_top) or fixed,
-                block_bottom=bool(scope.danmaku.block_bottom) or fixed,
-                block_scroll=bool(scope.danmaku.block_scroll),
-                block_reverse=bool(scope.danmaku.block_reverse),
-                block_special=bool(scope.danmaku.block_special),
-                block_colorful=bool(scope.danmaku.block_colorful),
-                block_keyword_patterns=_patterns(scope.danmaku.block_keyword_patterns),
+                font_size=_optional_int(config.danmaku.font_size),
+                font=_text(config.danmaku.font),
+                opacity=_float(config.danmaku.opacity),
+                display_region_ratio=_float(config.danmaku.display_region_ratio),
+                speed=_float(config.danmaku.speed),
+                block_top=bool(config.danmaku.block_top) or fixed,
+                block_bottom=bool(config.danmaku.block_bottom) or fixed,
+                block_scroll=bool(config.danmaku.block_scroll),
+                block_reverse=bool(config.danmaku.block_reverse),
+                block_special=bool(config.danmaku.block_special),
+                block_colorful=bool(config.danmaku.block_colorful),
+                block_keyword_patterns=_patterns(config.danmaku.block_keyword_patterns),
             ),
         )
         return DownloadPlan(
@@ -173,23 +173,23 @@ class DownloadPlanner:
             requires_audio_transcode_notice=(
                 audio_meta is not None and audio_save_codec not in {requested_audio_save_codec, "copy"}
             ),
-            overwrite=bool(scope.output.overwrite),
-            block_size=resolve_block_size_bytes(scope),
-            banned_mirrors_pattern=_optional_text(scope.network.banned_mirrors_pattern),
+            overwrite=bool(config.output.overwrite),
+            block_size=resolve_block_size_bytes(config),
+            banned_mirrors_pattern=_optional_text(config.network.banned_mirrors_pattern),
             resources=resource_plan,
         )
 
 
-def resolve_output_directories(scope: Scope) -> tuple[Path, Path]:
-    directory = scope.output.directory
+def resolve_output_directories(config: ResolvedConfig) -> tuple[Path, Path]:
+    directory = config.output.directory
     output_directory = Path() if directory is None else Path(directory)
-    temporary = scope.output.temporary_directory
+    temporary = config.output.temporary_directory
     temporary_directory = output_directory if temporary is None else Path(temporary)
     return output_directory, temporary_directory
 
 
-def resolve_block_size_bytes(scope: Scope) -> int:
-    value = scope.network.block_size
+def resolve_block_size_bytes(config: ResolvedConfig) -> int:
+    value = config.network.block_size
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("block_size must be a positive number")
     size = int(value * MEBIBYTE)
@@ -216,10 +216,10 @@ def resolve_paths(base_output_dir: Path, base_temporary_dir: Path, path: Path, o
     )
 
 
-def resolve_output_suffix(video: VideoUrlMeta | None, audio: AudioUrlMeta | None, scope: Scope) -> str:
-    output_format = resolve_output_format(scope.output.format)
-    audio_only_format = resolve_audio_only_output_format(scope.output.audio_only_format)
-    _, audio_save_codec = resolve_audio_codecs(scope)
+def resolve_output_suffix(video: VideoUrlMeta | None, audio: AudioUrlMeta | None, config: ResolvedConfig) -> str:
+    output_format = resolve_output_format(config.output.format)
+    audio_only_format = resolve_audio_only_output_format(config.output.audio_only_format)
+    _, audio_save_codec = resolve_audio_codecs(config)
     if video is None:
         if audio_only_format != "infer":
             return f".{audio_only_format}"
@@ -279,7 +279,7 @@ def resolve_audio_save_codec(audio_codec: str, audio_save_codec: str, container_
 
 def _text(value: object) -> str:
     if not isinstance(value, str):
-        raise ValueError("expected a string Scope value")
+        raise ValueError("expected a string config value")
     return value
 
 
@@ -287,13 +287,13 @@ def _optional_text(value: object) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise ValueError("expected a string Scope value")
+        raise ValueError("expected a string config value")
     return value
 
 
 def _float(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("expected a numeric Scope value")
+        raise ValueError("expected a numeric config value")
     return float(value)
 
 
@@ -301,7 +301,7 @@ def _optional_int(value: object) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("expected an integer Scope value")
+        raise ValueError("expected an integer config value")
     return value
 
 
