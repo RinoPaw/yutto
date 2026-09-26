@@ -155,12 +155,12 @@ def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig
 
     access = request.access
     if "auth_profile" in access.model_fields_set:
-        values["auth.profile"] = "default" if access.auth_profile is None else access.auth_profile
+        values["credential.profile"] = "default" if access.auth_profile is None else access.auth_profile
     _copy_present_bools(
         access,
         {
-            "login_strict": "auth.login_strict",
-            "vip_strict": "auth.vip_strict",
+            "login_strict": "access.login_strict",
+            "vip_strict": "access.vip_strict",
         },
         values,
     )
