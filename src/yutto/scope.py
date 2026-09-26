@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -17,83 +17,83 @@ class _Missing:
 
 
 MISSING = _Missing()
+_T = TypeVar("_T")
 
-ScopeText: TypeAlias = str | None | _Missing
-ScopeBool: TypeAlias = bool | None | _Missing
-ScopeInt: TypeAlias = int | None | _Missing
-ScopeFloat: TypeAlias = float | int | None | _Missing
-ScopePath: TypeAlias = Path | str | None | _Missing
+
+def _missing() -> _T:
+    """Expose MISSING only as an input-stage runtime default, not as a consumer type."""
+    return cast("_T", MISSING)
 
 
 @dataclass(frozen=True, slots=True)
 class SourceSpec:
     """下载源。"""
 
-    value: ScopeText = MISSING
+    value: str | None = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class SelectionSpec:
     """一个下载源内部的内容选择规则。"""
 
-    expression: ScopeText = MISSING
-    with_extra_episodes: ScopeBool = MISSING
-    skip_preview: ScopeBool = MISSING
-    published_since: ScopeInt = MISSING
-    published_before: ScopeInt = MISSING
+    expression: str | None = _missing()
+    with_extra_episodes: bool = _missing()
+    skip_preview: bool = _missing()
+    published_since: int | None = _missing()
+    published_before: int | None = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeSpec:
     """一次 yutto 调用自身的运行策略。"""
 
-    jobs: ScopeInt = MISSING
-    ffmpeg_path: ScopeText = MISSING
-    preview_formats: ScopeBool = MISSING
-    no_color: ScopeBool = MISSING
-    no_progress: ScopeBool = MISSING
-    debug: ScopeBool = MISSING
+    jobs: int = _missing()
+    ffmpeg_path: str | None = _missing()
+    preview_formats: bool = _missing()
+    no_color: bool = _missing()
+    no_progress: bool = _missing()
+    debug: bool = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class AuthSpec:
     """认证来源、访问校验以及 auth 命令参数。"""
 
-    cookie: ScopeText = MISSING
-    file: ScopePath = MISSING
-    profile: ScopeText = MISSING
-    sessdata: ScopeText = MISSING
-    login_strict: ScopeBool = MISSING
-    vip_strict: ScopeBool = MISSING
-    mode: ScopeText = MISSING
-    poll_interval: ScopeFloat = MISSING
-    timeout: ScopeInt = MISSING
+    cookie: str = _missing()
+    file: Path | str | None = _missing()
+    profile: str = _missing()
+    sessdata: str = _missing()
+    login_strict: bool = _missing()
+    vip_strict: bool = _missing()
+    mode: str = _missing()
+    poll_interval: float = _missing()
+    timeout: int = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class ResourceSpec:
     """下载产物中需要获取、处理或保留的资源。"""
 
-    video: ScopeBool = MISSING
-    audio: ScopeBool = MISSING
-    danmaku: ScopeBool = MISSING
-    subtitle: ScopeBool = MISSING
-    metadata: ScopeBool = MISSING
-    cover: ScopeBool = MISSING
-    chapter_info: ScopeBool = MISSING
-    save_cover: ScopeBool = MISSING
-    ai_translation_language: ScopeText = MISSING
+    video: bool = _missing()
+    audio: bool = _missing()
+    danmaku: bool = _missing()
+    subtitle: bool = _missing()
+    metadata: bool = _missing()
+    cover: bool = _missing()
+    chapter_info: bool = _missing()
+    save_cover: bool = _missing()
+    ai_translation_language: str | None = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class StreamSpec:
     """音视频流质量与编码偏好。"""
 
-    video_quality: ScopeInt = MISSING
-    audio_quality: ScopeInt = MISSING
-    video_codec: ScopeText = MISSING
-    audio_codec: ScopeText = MISSING
-    video_codec_priority: tuple[str, ...] | None | _Missing = MISSING
+    video_quality: int = _missing()
+    audio_quality: int = _missing()
+    video_codec: str = _missing()
+    audio_codec: str = _missing()
+    video_codec_priority: tuple[str, ...] | None = _missing()
 
     def __post_init__(self) -> None:
         if isinstance(self.video_codec_priority, list):
@@ -104,45 +104,45 @@ class StreamSpec:
 class OutputSpec:
     """输出目录、封装格式与命名策略。"""
 
-    format: ScopeText = MISSING
-    audio_only_format: ScopeText = MISSING
-    directory: ScopePath = MISSING
-    temporary_directory: ScopePath = MISSING
-    overwrite: ScopeBool = MISSING
-    subpath_template: ScopeText = MISSING
-    metadata_premiered_format: ScopeText = MISSING
+    format: str = _missing()
+    audio_only_format: str = _missing()
+    directory: Path | str = _missing()
+    temporary_directory: Path | str | None = _missing()
+    overwrite: bool = _missing()
+    subpath_template: str = _missing()
+    metadata_premiered_format: str = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class NetworkSpec:
     """网络访问、传输并发与下载节奏。"""
 
-    proxy: ScopeText = MISSING
-    fetch_workers: ScopeInt = MISSING
-    download_workers: ScopeInt = MISSING
-    block_size: ScopeFloat = MISSING
-    download_interval: ScopeInt = MISSING
-    banned_mirrors_pattern: ScopeText = MISSING
+    proxy: str = _missing()
+    fetch_workers: int = _missing()
+    download_workers: int = _missing()
+    block_size: float | int = _missing()
+    download_interval: int = _missing()
+    banned_mirrors_pattern: str | None = _missing()
 
 
 @dataclass(frozen=True, slots=True)
 class DanmakuSpec:
     """弹幕序列化、渲染与过滤参数。"""
 
-    format: ScopeText = MISSING
-    font_size: ScopeInt = MISSING
-    font: ScopeText = MISSING
-    opacity: ScopeFloat = MISSING
-    display_region_ratio: ScopeFloat = MISSING
-    speed: ScopeFloat = MISSING
-    block_top: ScopeBool = MISSING
-    block_bottom: ScopeBool = MISSING
-    block_scroll: ScopeBool = MISSING
-    block_reverse: ScopeBool = MISSING
-    block_fixed: ScopeBool = MISSING
-    block_special: ScopeBool = MISSING
-    block_colorful: ScopeBool = MISSING
-    block_keyword_patterns: tuple[str, ...] | None | _Missing = MISSING
+    format: str = _missing()
+    font_size: int | None = _missing()
+    font: str = _missing()
+    opacity: float | int = _missing()
+    display_region_ratio: float | int = _missing()
+    speed: float | int = _missing()
+    block_top: bool = _missing()
+    block_bottom: bool = _missing()
+    block_scroll: bool = _missing()
+    block_reverse: bool = _missing()
+    block_fixed: bool = _missing()
+    block_special: bool = _missing()
+    block_colorful: bool = _missing()
+    block_keyword_patterns: tuple[str, ...] | None = _missing()
 
     def __post_init__(self) -> None:
         if isinstance(self.block_keyword_patterns, list):
