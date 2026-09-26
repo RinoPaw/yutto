@@ -52,14 +52,14 @@ def resolve_video_quality(scope: Scope) -> VideoQuality:
     value = scope.stream.video_quality
     if isinstance(value, bool) or not isinstance(value, int) or value not in video_quality_priority_default:
         raise ValueError(f"unsupported video quality: {value}")
-    return cast("VideoQuality", value)
+    return value
 
 
 def resolve_audio_quality(scope: Scope) -> AudioQuality:
     value = scope.stream.audio_quality
     if isinstance(value, bool) or not isinstance(value, int) or value not in audio_quality_priority_default:
         raise ValueError(f"unsupported audio quality: {value}")
-    return cast("AudioQuality", value)
+    return value
 
 
 def resolve_video_codecs(scope: Scope) -> tuple[VideoCodec, str]:
