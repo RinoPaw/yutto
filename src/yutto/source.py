@@ -491,7 +491,7 @@ class UgcWatchLaterSource(MediaSource):
         resolved, failures, child_diagnostics = await _resolve_ugc_videos(execution, selected_videos, video_config)
         diagnostics.extend(child_diagnostics)
         return MediaResolveResult(
-            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看", items=resolved)),
+            media=UgcWatchLater(metadata=ItemMetaData(title="稍后再看"), items=resolved),
             failures=failures,
             diagnostics=tuple(diagnostics),
         )
