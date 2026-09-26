@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias, TypeVar
 
+from yutto.config import ResolvedConfig
 from yutto.core.result import DownloadResult, ItemResult, ResolveFailure, ResolveResult
 from yutto.media import (
     BangumiEpisode,
@@ -23,7 +24,6 @@ from yutto.media import (
     UgcVideo,
     UgcWatchLater,
 )
-from yutto.scope import Scope
 from yutto.types import BilibiliId
 
 if TYPE_CHECKING:
@@ -51,9 +51,9 @@ _CREDENTIAL_FIELDS = frozenset(
     }
 )
 
-# The RPC payload is an explicit projection of Scope. Adding an internal Scope
-# field therefore cannot silently extend the public wire schema.
-_SCOPE_WIRE_FIELDS = (
+# The RPC payload is an explicit projection of ResolvedConfig. Adding an internal
+# config field therefore cannot silently extend the public wire schema.
+_CONFIG_WIRE_FIELDS = (
     "source.value",
     "selection.expression",
     "selection.with_extra_episodes",
@@ -172,8 +172,8 @@ def replay_to_json(replay: EventReplay) -> dict[str, object]:
 
 
 def _snapshot_payload_to_json(payload: object) -> JsonValue:
-    if isinstance(payload, Scope):
-        return _scope_to_json(payload)
+    if isinstance(payload, ResolvedConfig):
+        return _config_to_json(payload)
     raise TypeError(f"unsupported RPC task payload: {type(payload).__name__}")
 
 
@@ -187,14 +187,14 @@ def _snapshot_result_to_json(result: object) -> JsonValue:
     raise TypeError(f"unsupported RPC task result: {type(result).__name__}")
 
 
-def _scope_to_json(scope: Scope) -> dict[str, JsonValue]:
-    flattened = scope.flatten()
+def _config_to_json(config: ResolvedConfig) -> dict[str, JsonValue]:
+    values = config.values
     result: dict[str, JsonValue] = {}
-    for path in _SCOPE_WIRE_FIELDS:
-        if path not in flattened:
+    for path in _CONFIG_WIRE_FIELDS:
+        if path not in values:
             continue
         section, field = path.split(".", 1)
-        value = flattened[path]
+        value = values[path]
         section_value = result.setdefault(section, {})
         assert isinstance(section_value, dict)
         if path == "network.proxy" and isinstance(value, str):
