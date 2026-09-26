@@ -12,11 +12,11 @@ if TYPE_CHECKING:
 
     from yutto._native import YuttoSession
     from yutto.auth import AuthInfo
-    from yutto.scope import Scope
+    from yutto.scope import ResolvedConfig
 
 
 class ExecutionScope:
-    """Runtime resources owned by one parameter Scope execution."""
+    """Runtime resources owned by one resolved configuration execution."""
 
     session: YuttoSession
     fetch_limiter: asyncio.Semaphore
@@ -52,19 +52,19 @@ class ExecutionScope:
             yield
 
 
-def resolve_network_proxy(scope: Scope) -> str:
-    value = scope.network.proxy
+def resolve_network_proxy(config: ResolvedConfig) -> str:
+    value = config.network.proxy
     if not isinstance(value, str):
         raise ValueError("proxy must be a string")
     return value
 
 
-def resolve_fetch_workers(scope: Scope) -> int:
-    return _resolve_worker_count(scope.network.fetch_workers, "fetch_workers")
+def resolve_fetch_workers(config: ResolvedConfig) -> int:
+    return _resolve_worker_count(config.network.fetch_workers, "fetch_workers")
 
 
-def resolve_download_workers(scope: Scope) -> int:
-    return _resolve_worker_count(scope.network.download_workers, "download_workers")
+def resolve_download_workers(config: ResolvedConfig) -> int:
+    return _resolve_worker_count(config.network.download_workers, "download_workers")
 
 
 def _resolve_worker_count(value: object, name: str) -> int:
@@ -74,9 +74,9 @@ def _resolve_worker_count(value: object, name: str) -> int:
 
 
 class ExecutionScopeFactory(Protocol):
-    """Open all runtime resources required by one parameter Scope."""
+    """Open runtime resources required by one resolved configuration."""
 
-    def open(self, scope: Scope) -> AbstractAsyncContextManager[ExecutionScope]: ...
+    def open(self, config: ResolvedConfig) -> AbstractAsyncContextManager[ExecutionScope]: ...
 
 
 class RequestExecutionScopeFactory:
@@ -84,19 +84,19 @@ class RequestExecutionScopeFactory:
 
     def __init__(
         self,
-        credential_resolver: Callable[[Scope], AuthInfo | None] | None = None,
+        credential_resolver: Callable[[ResolvedConfig], AuthInfo | None] | None = None,
         *,
-        on_open: Callable[[ExecutionScope, Scope], Awaitable[None]] | None = None,
+        on_open: Callable[[ExecutionScope, ResolvedConfig], Awaitable[None]] | None = None,
         enforce_output_boundary: bool = False,
     ):
-        self._credential_resolver = credential_resolver or (lambda scope: None)
+        self._credential_resolver = credential_resolver or (lambda config: None)
         self._on_open = on_open
         self._enforce_output_boundary = enforce_output_boundary
 
     @asynccontextmanager
-    async def open(self, scope: Scope) -> AsyncIterator[ExecutionScope]:
-        proxy, trust_env = resolve_proxy(resolve_network_proxy(scope))
-        auth = self._credential_resolver(scope)
+    async def open(self, config: ResolvedConfig) -> AsyncIterator[ExecutionScope]:
+        proxy, trust_env = resolve_proxy(resolve_network_proxy(config))
+        auth = self._credential_resolver(config)
         cookies = cookies_from_auth(auth)
 
         async with create_client(
@@ -106,10 +106,10 @@ class RequestExecutionScopeFactory:
         ) as session:
             execution = ExecutionScope(
                 session,
-                fetch_workers=resolve_fetch_workers(scope),
-                download_workers=resolve_download_workers(scope),
+                fetch_workers=resolve_fetch_workers(config),
+                download_workers=resolve_download_workers(config),
                 enforce_output_boundary=self._enforce_output_boundary,
             )
             if self._on_open is not None:
-                await self._on_open(execution, scope)
+                await self._on_open(execution, config)
             yield execution
