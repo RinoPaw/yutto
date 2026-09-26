@@ -3,17 +3,18 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 import yutto.utils.ffmpeg as ffmpeg_module
+from yutto.config import DEFAULT_CONFIG, SourceSpec
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner, should_attach_hvc1_tag
 from yutto.exceptions import PostprocessingError, WrongArgumentError
 from yutto.resource import ResourceManifest
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 from yutto.utils.functional import Singleton, as_sync
@@ -90,23 +91,27 @@ def make_audio_plan(
 ) -> DownloadPlan:
     path = Path("output")
     resources = ResourceManifest(audio_requested=True, audios=(make_audio(),))
-    scope = Scope(
-        {
-            "source.value": "BV1muxer",
-            "resource.video": False,
-            "resource.audio": True,
-            "resource.danmaku": False,
-            "resource.subtitle": False,
-            "resource.metadata": False,
-            "resource.cover": False,
-            "resource.chapter_info": False,
-            "stream.audio_codec": f"mp4a:{audio_save_codec}",
-            "output.directory": tmp_path,
-            "output.temporary_directory": tmp_path,
-        },
-        parent=ROOT_SCOPE,
+    config = replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1muxer"),
+        resource=replace(
+            DEFAULT_CONFIG.resource,
+            video=False,
+            audio=True,
+            danmaku=False,
+            subtitle=False,
+            metadata=False,
+            cover=False,
+            chapter_info=False,
+        ),
+        stream=replace(DEFAULT_CONFIG.stream, audio_codec=f"mp4a:{audio_save_codec}"),
+        output=replace(
+            DEFAULT_CONFIG.output,
+            directory=tmp_path,
+            temporary_directory=tmp_path,
+        ),
     )
-    return DownloadPlanner().plan(resources, path, scope)
+    return DownloadPlanner().plan(resources, path, config)
 
 
 def make_audio_input(tmp_path: Path) -> Path:
