@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
 
-from yutto.cli.settings import resolved_config_from_settings
 from yutto.config import ResolvedConfig
-
-if TYPE_CHECKING:
-    from yutto.cli.settings import YuttoConfig
 
 
 @dataclass(frozen=True)
@@ -22,15 +17,7 @@ class RuntimeOptions:
     debug: bool
 
 
-def resolve_runtime_options(
-    config: ResolvedConfig | dict[str, Any],
-    settings: YuttoConfig | None = None,
-) -> RuntimeOptions:
-    if not isinstance(config, ResolvedConfig):
-        if settings is None:
-            raise TypeError("settings is required when resolving a raw value mapping")
-        config = resolved_config_from_settings(settings).with_overrides(config)
-
+def resolve_runtime_options(config: ResolvedConfig) -> RuntimeOptions:
     jobs = config.runtime.jobs
     if jobs < 1:
         raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）")
