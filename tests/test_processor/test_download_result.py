@@ -10,13 +10,13 @@ import pytest
 from returns.result import Success
 
 import yutto.downloader.executor as executor_module
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig, SourceSpec
 from yutto.core.execution import ExecutionScope
 from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.downloader import process_download
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.exceptions import PostprocessingError
 from yutto.resource import ResourceManifest
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.types import AudioUrlMeta
 from yutto.utils.danmaku import write_danmaku
 from yutto.utils.functional import as_sync
@@ -35,7 +35,7 @@ def _execution_scope(session: Any) -> ExecutionScope:
     return ExecutionScope(session, fetch_workers=1, download_workers=1)
 
 
-def make_scope(
+def make_config(
     tmp_path: Path,
     *,
     video: bool = False,
@@ -43,23 +43,30 @@ def make_scope(
     save_cover: bool = True,
     metadata: bool = True,
     chapter_info: bool = False,
-) -> Scope:
-    return Scope(
-        {
-            "source.value": "BV1test",
-            "resource.video": video,
-            "resource.audio": audio,
-            "resource.metadata": metadata,
-            "resource.chapter_info": chapter_info,
-            "resource.save_cover": save_cover,
-            "stream.video_quality": 80,
-            "stream.video_codec": "avc:copy",
-            "stream.audio_quality": 30280,
-            "stream.audio_codec": "mp4a:copy",
-            "output.directory": tmp_path / "output",
-            "output.temporary_directory": tmp_path / "temporary",
-        },
-        parent=ROOT_SCOPE,
+) -> ResolvedConfig:
+    return replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1test"),
+        resource=replace(
+            DEFAULT_CONFIG.resource,
+            video=video,
+            audio=audio,
+            metadata=metadata,
+            chapter_info=chapter_info,
+            save_cover=save_cover,
+        ),
+        stream=replace(
+            DEFAULT_CONFIG.stream,
+            video_quality=80,
+            video_codec="avc:copy",
+            audio_quality=30280,
+            audio_codec="mp4a:copy",
+        ),
+        output=replace(
+            DEFAULT_CONFIG.output,
+            directory=tmp_path / "output",
+            temporary_directory=tmp_path / "temporary",
+        ),
     )
 
 
@@ -99,17 +106,17 @@ def make_media_entry() -> ResourceManifest:
 
 @pytest.fixture(autouse=True)
 def stub_resource_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fetch_json(_scope: ExecutionScope, url: str):
+    async def fetch_json(_execution: ExecutionScope, url: str):
         if "subtitle" in url:
             return Success({"body": [{"content": "测试", "from": 0, "to": 1}]})
         if "chapters" in url:
             return Success({"data": {"view_points": [{"from": 0, "to": 1, "content": "chapter"}]}})
         return Success({})
 
-    async def fetch_text(_scope: ExecutionScope, _url: str, *, encoding: str | None = None):
+    async def fetch_text(_execution: ExecutionScope, _url: str, *, encoding: str | None = None):
         return Success("<i />")
 
-    async def fetch_bin(_scope: ExecutionScope, _url: str):
+    async def fetch_bin(_execution: ExecutionScope, _url: str):
         return Success(b"cover")
 
     monkeypatch.setattr(executor_module.Fetcher, "fetch_json", fetch_json)
@@ -136,7 +143,7 @@ async def test_interrupted_mux_cleans_transfer_owned_files(
             return subprocess.CompletedProcess(args, 1, b"", b"ffmpeg failed")
 
     async def download_files(
-        _scope: ExecutionScope,
+        _execution: ExecutionScope,
         _sources,
         *,
         block_size: int,
@@ -156,7 +163,7 @@ async def test_interrupted_mux_cleans_transfer_owned_files(
             make_media_entry(),
             make_metadata(),
             ENTRY_PATH,
-            make_scope(tmp_path, audio=True, chapter_info=True),
+            make_config(tmp_path, audio=True, chapter_info=True),
         )
     )
     if cancelled:
@@ -185,7 +192,7 @@ async def test_resource_only_download_returns_final_artifacts_without_temporary_
         make_resource_only_entry(),
         make_metadata(),
         ENTRY_PATH,
-        make_scope(tmp_path),
+        make_config(tmp_path),
     )
 
     output_dir = tmp_path / "output/series"
@@ -217,7 +224,7 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
         entry,
         make_metadata(),
         ENTRY_PATH,
-        make_scope(tmp_path, audio=True, metadata=False, chapter_info=True),
+        make_config(tmp_path, audio=True, metadata=False, chapter_info=True),
     )
 
     assert result == ItemResult(
@@ -251,7 +258,7 @@ async def test_missing_requested_audio_does_not_start_media_transfer(
         entry,
         make_metadata(),
         ENTRY_PATH,
-        make_scope(tmp_path, audio=True, save_cover=False, metadata=False),
+        make_config(tmp_path, audio=True, save_cover=False, metadata=False),
     )
 
     assert result == ItemResult(
