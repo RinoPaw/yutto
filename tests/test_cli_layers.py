@@ -6,10 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from yutto.cli.compat import normalize_argv
-from yutto.cli.input import expand_download_scopes, scope_values_from_cli
+from yutto.cli.input import apply_cli_overrides, expand_download_configs
 from yutto.cli.parser import build_parser
-from yutto.cli.settings import YuttoConfig, scope_from_config
-from yutto.scope import Scope
+from yutto.cli.settings import YuttoConfig, resolved_config_from_settings
+from yutto.config import ResolvedConfig
 
 if TYPE_CHECKING:
     import argparse
@@ -23,10 +23,15 @@ def _parse_download(arguments: list[str]) -> argparse.Namespace:
     return build_parser().parse_args(normalize_argv(arguments))
 
 
-def _scope_from_args(arguments: list[str], config: YuttoConfig | None = None) -> Scope:
-    config_scope = scope_from_config(config or YuttoConfig())
-    values, _ = scope_values_from_cli(vars(_parse_download(arguments)))
-    return Scope(values, parent=config_scope)
+def _config_from_args(arguments: list[str], settings: YuttoConfig | None = None) -> ResolvedConfig:
+    settings = settings or YuttoConfig()
+    configured = resolved_config_from_settings(settings)
+    config, _ = apply_cli_overrides(
+        configured,
+        vars(_parse_download(arguments)),
+        inherited_aliases=settings.basic.aliases,
+    )
+    return config
 
 
 def test_download_parser_emits_only_explicit_cli_values():
@@ -46,31 +51,31 @@ def test_yutto_config_is_immutable():
 
 
 def test_cli_overrides_config_while_unmentioned_config_values_survive():
-    config = YuttoConfig.model_validate(
+    settings = YuttoConfig.model_validate(
         {
-            "basic": {"num_workers": 12},
+            "basic": {"download_workers": 12},
             "resource": {"require_metadata": True, "require_cover": True},
         }
     )
 
-    scope = _scope_from_args(["BV1xx411c7mD", "--num-workers", "16", "--no-cover"], config)
+    config = _config_from_args(["BV1xx411c7mD", "--num-workers", "16", "--no-cover"], settings)
 
-    assert scope.network.download_workers == 16
-    assert scope.resource.metadata is True
-    assert scope.resource.cover is False
+    assert config.network.download_workers == 16
+    assert config.resource.metadata is True
+    assert config.resource.cover is False
 
 
-def test_empty_config_uses_root_scope_defaults():
-    scope = _scope_from_args(["BV1xx411c7mD"])
+def test_empty_config_uses_resolved_defaults():
+    config = _config_from_args(["BV1xx411c7mD"])
 
-    assert scope.network.download_workers == 8
-    assert scope.stream.video_quality == 127
-    assert scope.resource.video is True
-    assert scope.resource.metadata is False
+    assert config.network.download_workers == 8
+    assert config.stream.video_quality == 127
+    assert config.resource.video is True
+    assert config.resource.metadata is False
 
 
 def test_explicit_auto_priority_clears_configured_codec_priority():
-    config = YuttoConfig.model_validate(
+    settings = YuttoConfig.model_validate(
         {
             "basic": {
                 "vcodec": "avc:copy",
@@ -79,12 +84,12 @@ def test_explicit_auto_priority_clears_configured_codec_priority():
         }
     )
 
-    scope = _scope_from_args(["BV1xx411c7mD", "--download-vcodec-priority", "auto"], config)
+    config = _config_from_args(["BV1xx411c7mD", "--download-vcodec-priority", "auto"], settings)
 
-    assert scope.stream.video_codec_priority is None
+    assert config.stream.video_codec_priority is None
 
 
-def test_task_list_inheritance_merges_explicit_values(tmp_path: Path):
+def test_task_list_inheritance_applies_eager_typed_overrides(tmp_path: Path):
     task_list = tmp_path / "downloads.txt"
     task_list.write_text(
         "\n".join(
@@ -96,7 +101,8 @@ def test_task_list_inheritance_merges_explicit_values(tmp_path: Path):
         encoding="utf-8",
     )
     parser = build_parser()
-    config = scope_from_config(YuttoConfig())
+    settings = YuttoConfig()
+    configured = resolved_config_from_settings(settings)
     outer_raw = vars(
         parser.parse_args(
             normalize_argv(
@@ -110,16 +116,16 @@ def test_task_list_inheritance_merges_explicit_values(tmp_path: Path):
             )
         )
     )
-    outer_values, no_inherit = scope_values_from_cli(outer_raw)
+    outer, no_inherit = apply_cli_overrides(configured, outer_raw)
 
-    scopes = expand_download_scopes(
-        Scope(outer_values, parent=config),
+    configs = expand_download_configs(
+        outer,
         parser,
-        config,
+        configured,
         no_inherit=no_inherit,
     )
 
-    assert [(scope.source.value, scope.network.proxy, scope.network.fetch_workers) for scope in scopes] == [
+    assert [(config.source.value, config.network.proxy, config.network.fetch_workers) for config in configs] == [
         ("BV1first", "no", 2),
         ("BV1second", "auto", 5),
     ]
