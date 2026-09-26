@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from yutto.config import ResolvedConfig
@@ -58,17 +58,19 @@ class _FormatGroup:
 
 def build_format_probe_config(config: ResolvedConfig) -> ResolvedConfig:
     """Return a config that resolves only stream resources needed for format preview."""
-    return config.with_overrides(
-        {
-            "resource.video": True,
-            "resource.audio": True,
-            "resource.danmaku": False,
-            "resource.subtitle": False,
-            "resource.metadata": False,
-            "resource.cover": False,
-            "resource.chapter_info": False,
-            "resource.save_cover": False,
-        }
+    return replace(
+        config,
+        resource=replace(
+            config.resource,
+            video=True,
+            audio=True,
+            danmaku=False,
+            subtitle=False,
+            metadata=False,
+            cover=False,
+            chapter_info=False,
+            save_cover=False,
+        ),
     )
 
 
@@ -120,41 +122,46 @@ def emit_grouped_manifest_report(
     *,
     total_items: int,
 ) -> None:
-    """Emit grouped preview context and formats through the download report channel."""
-    if not entries:
-        return
-
-    groups = _group_format_entries(entries)
-    if len(entries) == 1 and total_items == 1:
-        entry = entries[0]
-        emit_download_report(entry.title)
-        emit_manifest_formats(entry.manifest, entry.selection)
-        return
-
-    for group_index, group in enumerate(groups, start=1):
-        emit_download_report(f"格式组 {group_index}/{len(groups)}（{len(group.entries)} 个条目）")
-        emit_download_report(_format_group_members(group, total_items))
-        first = group.entries[0]
-        emit_manifest_formats(group.manifest, first.selection)
+    for line in format_grouped_manifest_lines(entries, total_items=total_items):
+        emit_download_report(line, ReportLevel.PLAIN)
 
 
-async def resolve_format_manifests(
-    execution: ExecutionScope,
-    items: Sequence[MediaItem],
-    config: ResolvedConfig,
-) -> tuple[ResourceManifest | BaseException, ...]:
-    """Resolve format manifests concurrently while respecting the configured fetch-worker limit."""
-    if not items:
-        return ()
+def _group_format_entries(entries: Sequence[FormatListingEntry]) -> list[_FormatGroup]:
+    groups: list[_FormatGroup] = []
+    by_signature: dict[FormatSignature, _FormatGroup] = {}
+    for entry in entries:
+        signature = manifest_format_signature(entry.manifest)
+        group = by_signature.get(signature)
+        if group is None:
+            group = _FormatGroup(manifest=entry.manifest, entries=[])
+            by_signature[signature] = group
+            groups.append(group)
+        group.entries.append(entry)
+    return groups
 
-    probe_limiter = asyncio.Semaphore(min(resolve_fetch_workers(config), len(items)))
 
-    async def resolve_one(item: MediaItem) -> ResourceManifest:
-        async with probe_limiter:
-            return await resolve_resource_manifest(execution, item, config)
+def _format_group_members(group: _FormatGroup, total_items: int) -> str:
+    entries = group.entries
+    if len(entries) == total_items:
+        return "适用于：全部条目"
 
-    results = await asyncio.gather(*(resolve_one(item) for item in items), return_exceptions=True)
-    return tuple(results)
+    pages_by_parent: dict[int, list[int]] = {}
+    parent_titles: dict[int, str] = {}
+    standalone: list[FormatListingEntry] = []
+    for entry in entries:
+        if entry.parent_key is None or entry.page is None:
+            standalone.append(entry)
+            continue
+        pages_by_parent.setdefault(entry.parent_key, []).append(entry.page)
+        if entry.parent_title:
+            parent_titles[entry.parent_key] = entry.parent_title
+
+    labels: list[str] = []
+    for parent_key, pages in pages_by_parent.items():
+        title = parent_titles.get(parent_key, f"条目 {parent_key}")
+        labels.append(f"{title}（{format_index_ranges(pages, prefix='P')}）")
+    labels.extend(entry.title for entry in standalone)
+    return "适用于：" + "；".join(labels)
 
 
 def _format_range(start: int, end: int, prefix: str) -> str:
@@ -163,108 +170,87 @@ def _format_range(start: int, end: int, prefix: str) -> str:
     return f"{prefix}{start}-{prefix}{end}"
 
 
-def _group_format_entries(entries: Sequence[FormatListingEntry]) -> tuple[_FormatGroup, ...]:
-    groups: dict[FormatSignature, _FormatGroup] = {}
-    for entry in entries:
-        signature = manifest_format_signature(entry.manifest)
-        group = groups.get(signature)
-        if group is None:
-            group = _FormatGroup(manifest=entry.manifest, entries=[])
-            groups[signature] = group
-        group.entries.append(entry)
-    return tuple(groups.values())
-
-
-def _format_group_members(group: _FormatGroup, total_items: int) -> str:
-    entries = group.entries
-    first = entries[0]
-    if (
-        first.parent_key is not None
-        and first.page is not None
-        and all(entry.parent_key == first.parent_key and entry.page is not None for entry in entries)
-    ):
-        pages = [entry.page for entry in entries if entry.page is not None]
-        parent_title = first.parent_title or first.title
-        return f"{parent_title}: {format_index_ranges(pages, prefix='P')}"
-
-    indexes = [entry.index for entry in entries]
-    range_text = format_index_ranges(indexes)
-    if len(entries) == 1:
-        return f"[{first.index}/{total_items}] {first.title}"
-    return f"条目 {range_text}/{total_items}: {first.title} … {entries[-1].title}"
-
-
-def _make_listing_entry(
-    index: int,
-    ancestry: MediaAncestry,
-    relation_index: int | None,
-    item: MediaItem,
-    manifest: ResourceManifest,
-    selection: StreamSelection,
-) -> FormatListingEntry:
-    parent = ancestry[-1] if ancestry else None
-    if isinstance(item, UgcPage) and isinstance(parent, UgcVideo):
-        return FormatListingEntry(
-            index=index,
-            title=item.metadata.title,
-            manifest=manifest,
-            selection=selection,
-            parent_key=id(parent),
-            parent_title=parent.metadata.title,
-            page=relation_index,
-        )
-    return FormatListingEntry(index=index, title=item.metadata.title, manifest=manifest, selection=selection)
-
-
 @as_sync
 async def run_preview_formats(
     scope_factory: ExecutionScopeFactory,
     configs: Sequence[ResolvedConfig],
     renderer: CliApplicationEventRenderer,
 ) -> None:
-    """Preview stream formats for resolved configs without downloading media."""
-    manager = DownloadManager()
-    listed_streams = False
-
+    """Resolve configs, fetch stream manifests, and print the grouped format matrix."""
     async with renderer:
         with bind_download_event_sink(renderer), bind_download_report_sink(renderer.report):
             for config in configs:
                 async with scope_factory.open(config) as execution:
-                    probe_config = build_format_probe_config(config)
-                    result = await manager.resolve_config(execution, probe_config)
-                    if result.media is None:
-                        continue
+                    await _preview_one_config(execution, config)
 
-                    resolved_items = tuple(iter_media_items(result.media, source_index=result.source_index))
-                    if not resolved_items:
-                        continue
-                    items = tuple(item for _, _, item in resolved_items)
-                    if len(items) > 1:
-                        concurrency = min(resolve_fetch_workers(probe_config), len(items))
-                        emit_download_report(f"正在探测 {len(items)} 个条目的可用格式（并发 {concurrency}）…")
 
-                    outcomes = await resolve_format_manifests(execution, items, probe_config)
-                    entries: list[FormatListingEntry] = []
-                    for index, ((ancestry, relation_index, item), outcome) in enumerate(
-                        zip(resolved_items, outcomes, strict=True),
-                        start=1,
-                    ):
-                        if isinstance(outcome, _FORMAT_RESOLUTION_ERRORS):
-                            prefix = f"[{index}/{len(items)}] " if len(items) > 1 else ""
-                            emit_download_report(f"{prefix}{item.metadata.title}")
-                            emit_download_report(str(outcome), ReportLevel.ERROR)
-                            continue
-                        if isinstance(outcome, BaseException):
-                            raise outcome
+async def _preview_one_config(execution: ExecutionScope, config: ResolvedConfig) -> None:
+    probe_config = build_format_probe_config(config)
+    manager = DownloadManager()
+    resolved = await manager.resolve_config(execution, probe_config)
+    items = list(iter_media_items(resolved.media))
+    if not items:
+        emit_download_report("没有可预览格式的媒体条目", ReportLevel.WARNING)
+        return
 
-                        selection = select_streams(outcome, config)
-                        entries.append(_make_listing_entry(index, ancestry, relation_index, item, outcome, selection))
-                        listed_streams = listed_streams or bool(outcome.videos or outcome.audios)
+    entries = await _resolve_format_entries(execution, items, probe_config)
+    if entries:
+        emit_grouped_manifest_report(entries, total_items=len(items))
 
-                    emit_grouped_manifest_report(entries, total_items=len(items))
 
-            if listed_streams:
-                emit_download_report(
-                    "* 表示按当前参数实际会选择的流。视频使用 -q/--video-quality 和 --vcodec；"
-                    "音频使用 -aq/--audio-quality 和 --acodec。"
-                )
+async def _resolve_format_entries(
+    execution: ExecutionScope,
+    items: Sequence[tuple[MediaAncestry, MediaItem]],
+    config: ResolvedConfig,
+) -> list[FormatListingEntry]:
+    limiter = asyncio.Semaphore(resolve_fetch_workers(config))
+
+    async def resolve_entry(
+        index: int,
+        ancestry: MediaAncestry,
+        item: MediaItem,
+    ) -> FormatListingEntry | None:
+        async with limiter:
+            try:
+                manifest = await resolve_resource_manifest(execution, item, config)
+            except _FORMAT_RESOLUTION_ERRORS as error:
+                emit_download_report(error.message, ReportLevel.ERROR)
+                return None
+        selection = select_streams(manifest, config)
+        parent_key, parent_title, page = _format_parent_context(ancestry, item)
+        return FormatListingEntry(
+            index=index,
+            title=_format_entry_title(item, index),
+            manifest=manifest,
+            selection=selection,
+            parent_key=parent_key,
+            parent_title=parent_title,
+            page=page,
+        )
+
+    results = await asyncio.gather(
+        *(resolve_entry(index, ancestry, item) for index, (ancestry, item) in enumerate(items, start=1))
+    )
+    return [entry for entry in results if entry is not None]
+
+
+def _format_parent_context(
+    ancestry: MediaAncestry,
+    item: MediaItem,
+) -> tuple[int | None, str | None, int | None]:
+    if not isinstance(item, UgcPage) or len(ancestry) < 2:
+        return None, None, None
+
+    video = ancestry[-1].parent
+    if not isinstance(video, UgcVideo) or len(video.items) <= 1:
+        return None, None, None
+
+    relation = ancestry[-2].entry
+    return id(video), relation.display_title or video.metadata.title, item.page
+
+
+def _format_entry_title(item: MediaItem, index: int) -> str:
+    title = item.metadata.title or f"条目 {index}"
+    if isinstance(item, UgcPage):
+        return f"{title}（P{item.page}）"
+    return title
