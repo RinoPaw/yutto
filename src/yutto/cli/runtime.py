@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.scope import ResolvedConfig
+from yutto.config import ResolvedConfig
 
 if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
