@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.output_formats import AudioOnlyOutputFormat, OutputFormat
-from yutto.scope import ROOT_SCOPE, Scope
+from yutto.scope import DEFAULT_CONFIG, ResolvedConfig, merge_configs
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 from yutto.utils.time import parse_local_timestamp
@@ -104,11 +104,7 @@ class YuttoAuthConfig(_ConfigModel):
 
 
 class YuttoConfig(_ConfigModel):
-    """Values explicitly supplied by persistent configuration.
-
-    Application defaults live in ``ROOT_SCOPE``. An empty config object therefore
-    contributes no local overrides while still inheriting those defaults.
-    """
+    """Values explicitly supplied by persistent configuration."""
 
     basic: YuttoBasicConfig = Field(default_factory=YuttoBasicConfig)
     resource: YuttoResourceConfig = Field(default_factory=YuttoResourceConfig)
@@ -117,7 +113,7 @@ class YuttoConfig(_ConfigModel):
     auth: YuttoAuthConfig = Field(default_factory=YuttoAuthConfig)
 
 
-_BASIC_SCOPE_PATHS = {
+_BASIC_CONFIG_PATHS = {
     "download_workers": "network.download_workers",
     "jobs": "runtime.jobs",
     "fetch_workers": "network.fetch_workers",
@@ -147,7 +143,7 @@ _BASIC_SCOPE_PATHS = {
     "no_progress": "runtime.no_progress",
     "debug": "runtime.debug",
 }
-_RESOURCE_SCOPE_PATHS = {
+_RESOURCE_CONFIG_PATHS = {
     "require_video": "resource.video",
     "require_audio": "resource.audio",
     "require_danmaku": "resource.danmaku",
@@ -157,7 +153,7 @@ _RESOURCE_SCOPE_PATHS = {
     "require_chapter_info": "resource.chapter_info",
     "save_cover": "resource.save_cover",
 }
-_DANMAKU_SCOPE_PATHS = {
+_DANMAKU_CONFIG_PATHS = {
     "danmaku_font_size": "danmaku.font_size",
     "danmaku_font": "danmaku.font",
     "danmaku_opacity": "danmaku.opacity",
@@ -172,34 +168,34 @@ _DANMAKU_SCOPE_PATHS = {
     "danmaku_block_colorful": "danmaku.block_colorful",
     "danmaku_block_keyword_patterns": "danmaku.block_keyword_patterns",
 }
-_SELECTION_SCOPE_PATHS = {
+_SELECTION_CONFIG_PATHS = {
     "with_extra_episodes": "selection.with_extra_episodes",
     "skip_preview": "selection.skip_preview",
     "published_since": "selection.published_since",
     "published_before": "selection.published_before",
 }
-_AUTH_SCOPE_PATHS = {
+_AUTH_CONFIG_PATHS = {
     "auth": "auth.cookie",
     "auth_file": "auth.file",
     "auth_profile": "auth.profile",
 }
 
 
-def scope_from_config(config: YuttoConfig) -> Scope:
-    """把持久配置中显式设置的值转换成一层 Scope。"""
+def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
+    """Merge explicit persistent settings over application defaults."""
     values: dict[str, Any] = {}
     for field_name in config.basic.model_fields_set:
         if field_name == "aliases":
             continue
-        path = _BASIC_SCOPE_PATHS.get(field_name)
+        path = _BASIC_CONFIG_PATHS.get(field_name)
         if path is None:
-            raise TypeError(f"config field without Scope mapping: {field_name}")
+            raise TypeError(f"config field without canonical mapping: {field_name}")
         values[path] = getattr(config.basic, field_name)
 
-    _copy_explicit(values, config.resource, _RESOURCE_SCOPE_PATHS)
-    _copy_explicit(values, config.danmaku, _DANMAKU_SCOPE_PATHS)
-    _copy_explicit(values, config.batch, _SELECTION_SCOPE_PATHS)
-    _copy_explicit(values, config.auth, _AUTH_SCOPE_PATHS)
+    _copy_explicit(values, config.resource, _RESOURCE_CONFIG_PATHS)
+    _copy_explicit(values, config.danmaku, _DANMAKU_CONFIG_PATHS)
+    _copy_explicit(values, config.batch, _SELECTION_CONFIG_PATHS)
+    _copy_explicit(values, config.auth, _AUTH_CONFIG_PATHS)
 
     for path in ("selection.published_since", "selection.published_before"):
         value = values.get(path)
@@ -211,14 +207,19 @@ def scope_from_config(config: YuttoConfig) -> Scope:
         if value is not None:
             values[path] = Path(value).expanduser()
 
-    return Scope(values, parent=ROOT_SCOPE)
+    return merge_configs(DEFAULT_CONFIG, ResolvedConfig(values))
+
+
+def scope_from_config(config: YuttoConfig) -> ResolvedConfig:
+    """Compatibility wrapper for callers not yet renamed to resolved_config_from_settings."""
+    return resolved_config_from_settings(config)
 
 
 def _copy_explicit(target: dict[str, Any], model: BaseModel, paths: Mapping[str, str]) -> None:
     for field_name in model.model_fields_set:
         path = paths.get(field_name)
         if path is None:
-            raise TypeError(f"config field without Scope mapping: {field_name}")
+            raise TypeError(f"config field without canonical mapping: {field_name}")
         target[path] = getattr(model, field_name)
 
 
