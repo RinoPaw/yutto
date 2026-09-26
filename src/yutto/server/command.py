@@ -9,14 +9,14 @@ from typing import TYPE_CHECKING
 
 from yutto.auth import default_auth_file
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import scope_from_config
+from yutto.cli.settings import resolved_config_from_settings
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import resolve_download_workers, resolve_fetch_workers
 from yutto.core.task_service import DownloadTaskService, ResolveTaskService
 from yutto.download_manager import DownloadManager
 from yutto.downloader.path_leases import DownloadPathLeasePool
 from yutto.runtime import TaskCapacityPool, monotonic_seq_allocator
-from yutto.server.request import scope_parser_from_settings
+from yutto.server.request import config_parser_from_settings
 from yutto.server.service import ServerPolicy, ServerPolicyOptions
 from yutto.server.websocket import WebSocketServerOptions, YuttoWebSocketServer
 from yutto.utils.console.logger import Logger
@@ -59,17 +59,17 @@ class ServeOptions:
 
 
 def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> ServeOptions:
-    """Resolve sparse CLI overrides and configured Scope into server startup facts."""
+    """Resolve sparse CLI overrides and persistent settings into server startup facts."""
 
     values = vars(args)
-    configured_scope = scope_from_config(settings)
-    configured_runtime = resolve_runtime_options(configured_scope)
-    configured_fetch_workers = resolve_fetch_workers(configured_scope)
-    configured_download_workers = resolve_download_workers(configured_scope)
+    configured = resolved_config_from_settings(settings)
+    configured_runtime = resolve_runtime_options(configured)
+    configured_fetch_workers = resolve_fetch_workers(configured)
+    configured_download_workers = resolve_download_workers(configured)
 
-    configured_download_root = Path(configured_scope.output.directory).expanduser()
-    configured_tmp_root = configured_scope.output.temporary_directory
-    configured_auth_file = configured_scope.auth.file
+    configured_download_root = Path(configured.output.directory).expanduser()
+    configured_tmp_root = configured.output.temporary_directory
+    configured_auth_file = configured.auth.file
 
     options = ServeOptions(
         request_settings=settings,
@@ -183,9 +183,9 @@ def build_server(
             allowed_audio_save_codecs=frozenset([*ffmpeg.audio_encodecs, "copy"]),
         )
     )
-    parse_scope = scope_parser_from_settings(options.request_settings)
-    default_scope = parse_scope({"source": {"url": "yutto-server-default-validation"}})
-    prepared_default = policy.prepare_scope(default_scope)
+    parse_config = config_parser_from_settings(options.request_settings)
+    default_config = parse_config({"source": {"url": "yutto-server-default-validation"}})
+    prepared_default = policy.prepare_scope(default_config)
     policy.resolve_credentials(prepared_default)
     scope_factory = policy.build_scope_factory()
 
@@ -223,7 +223,7 @@ def build_server(
             allowed_origins=options.allow_origin,
         ),
         prepare_scope=policy.prepare_scope,
-        parse_scope=parse_scope,
+        parse_scope=parse_config,
         resolve_service=resolve_service,
     )
 
