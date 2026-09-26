@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.config import ResolvedConfig
 from yutto.downloader.planner import MEBIBYTE
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import parse_local_timestamp
@@ -16,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from yutto.cli.settings import YuttoConfig
+    from yutto.config import ResolvedConfig
 
 
 # Sparse RPC models use None only as the internal default for omitted fields.
