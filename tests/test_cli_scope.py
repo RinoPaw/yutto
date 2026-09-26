@@ -5,29 +5,26 @@ from typing import TYPE_CHECKING
 from yutto.cli.auth import resolve_auth_command_options
 from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
-from yutto.cli.input import config_values_from_cli, expand_download_configs
+from yutto.cli.input import expand_download_scopes, scope_values_from_cli
 from yutto.cli.parser import build_parser
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import YuttoConfig, resolved_config_from_settings
-from yutto.scope import MISSING, ResolvedConfig, merge_configs
+from yutto.cli.settings import YuttoConfig, scope_from_config
+from yutto.scope import MISSING, Scope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_config_merge_preserves_explicit_none_without_parent_chain():
-    configured = ResolvedConfig({"network.proxy": "config", "output.temporary_directory": "config"})
-    cli = merge_configs(
-        configured,
-        ResolvedConfig({"network.proxy": "cli", "output.temporary_directory": None}),
-    )
+def test_scope_uses_lexical_shadowing_and_preserves_explicit_none():
+    configured = Scope({"network.proxy": "config", "output.temporary_directory": "config"})
+    cli = Scope({"network.proxy": "cli", "output.temporary_directory": None}, parent=configured)
 
     assert cli.network.proxy == "cli"
     assert cli.output.temporary_directory is None
     assert cli.stream.video_quality is MISSING
 
 
-def test_persistent_settings_map_to_resolved_config_specs():
+def test_config_scope_maps_persistent_names_to_scope_specs():
     config = YuttoConfig.model_validate(
         {
             "basic": {
@@ -41,17 +38,17 @@ def test_persistent_settings_map_to_resolved_config_specs():
         }
     )
 
-    resolved = resolved_config_from_settings(config)
+    scope = scope_from_config(config)
 
-    assert resolved.network.download_workers == 12
-    assert resolved.output.metadata_premiered_format == "%Y-%m-%d"
-    assert resolved.runtime.ffmpeg_path == "/opt/ffmpeg"
-    assert resolved.danmaku.font_size == 36
-    assert isinstance(resolved.selection.published_since, int)
-    assert resolved.auth.profile == "work"
+    assert scope.network.download_workers == 12
+    assert scope.output.metadata_premiered_format == "%Y-%m-%d"
+    assert scope.runtime.ffmpeg_path == "/opt/ffmpeg"
+    assert scope.danmaku.font_size == 36
+    assert scope.selection.published_since == "2026-01-01"
+    assert scope.auth.profile == "work"
 
 
-def test_no_inherit_uses_persistent_baseline_instead_of_outer_config(tmp_path: Path):
+def test_no_inherit_cuts_parent_cli_scope_but_keeps_config_scope(tmp_path: Path):
     task_list = tmp_path / "downloads.txt"
     task_list.write_text(
         "\n".join(
@@ -64,7 +61,7 @@ def test_no_inherit_uses_persistent_baseline_instead_of_outer_config(tmp_path: P
     )
     parser = build_parser()
     config = YuttoConfig.model_validate({"basic": {"proxy": "config-proxy"}})
-    configured = resolved_config_from_settings(config)
+    configured = scope_from_config(config)
     raw = vars(
         parser.parse_args(
             normalize_argv(
@@ -78,10 +75,10 @@ def test_no_inherit_uses_persistent_baseline_instead_of_outer_config(tmp_path: P
             )
         )
     )
-    values, no_inherit = config_values_from_cli(raw)
-    outer = merge_configs(configured, ResolvedConfig(values))
+    values, no_inherit = scope_values_from_cli(raw)
+    outer = Scope(values, parent=configured)
 
-    first, second = expand_download_configs(outer, parser, configured, no_inherit=no_inherit)
+    first, second = expand_download_scopes(outer, parser, configured, no_inherit=no_inherit)
 
     assert first.network.proxy == "no"
     assert first.network.fetch_workers == 2
@@ -89,7 +86,7 @@ def test_no_inherit_uses_persistent_baseline_instead_of_outer_config(tmp_path: P
     assert second.network.fetch_workers == 5
 
 
-def test_resolved_config_feeds_runtime_and_credentials():
+def test_scope_feeds_runtime_and_credentials_from_one_chain():
     config = YuttoConfig.model_validate(
         {
             "basic": {
@@ -100,18 +97,16 @@ def test_resolved_config_feeds_runtime_and_credentials():
             "auth": {"auth_profile": "config-profile"},
         }
     )
-    configured = resolved_config_from_settings(config)
-    cli = merge_configs(
-        configured,
-        ResolvedConfig(
-            {
-                "source.value": "BV1xx411c7mD",
-                "runtime.jobs": 5,
-                "network.proxy": "no",
-                "stream.video_codec_priority": None,
-                "auth.profile": "cli-profile",
-            }
-        ),
+    configured = scope_from_config(config)
+    cli = Scope(
+        {
+            "source.value": "BV1xx411c7mD",
+            "runtime.jobs": 5,
+            "network.proxy": "no",
+            "stream.video_codec_priority": None,
+            "auth.profile": "cli-profile",
+        },
+        parent=configured,
     )
 
     runtime = resolve_runtime_options(cli)
@@ -124,7 +119,7 @@ def test_resolved_config_feeds_runtime_and_credentials():
     assert credentials.auth_profile == "cli-profile"
 
 
-def test_auth_command_uses_same_resolved_config():
+def test_auth_command_uses_the_same_scope_chain():
     config = YuttoConfig.model_validate(
         {
             "basic": {"proxy": "config-proxy"},
@@ -134,15 +129,13 @@ def test_auth_command_uses_same_resolved_config():
             },
         }
     )
-    configured = resolved_config_from_settings(config)
-    cli = merge_configs(
-        configured,
-        ResolvedConfig(
-            {
-                "auth.profile": "cli-profile",
-                "auth.mode": "web",
-            }
-        ),
+    configured = scope_from_config(config)
+    cli = Scope(
+        {
+            "auth.profile": "cli-profile",
+            "auth.mode": "web",
+        },
+        parent=configured,
     )
 
     options = resolve_auth_command_options(cli, "login")
@@ -156,13 +149,13 @@ def test_auth_command_uses_same_resolved_config():
     assert options.timeout == 180
 
 
-def test_empty_settings_resolve_application_defaults():
-    resolved = resolved_config_from_settings(YuttoConfig())
-    config = merge_configs(resolved, ResolvedConfig({"source.value": "BV1xx411c7mD"}))
+def test_empty_scope_inherits_root_defaults():
+    configured = scope_from_config(YuttoConfig())
+    cli = Scope({"source.value": "BV1xx411c7mD"}, parent=configured)
 
-    runtime = resolve_runtime_options(config)
+    runtime = resolve_runtime_options(cli)
 
-    assert config.network.download_workers == 8
-    assert config.stream.video_quality == 127
+    assert cli.network.download_workers == 8
+    assert cli.stream.video_quality == 127
     assert runtime.jobs == 1
     assert runtime.ffmpeg_path is None
