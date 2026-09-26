@@ -53,10 +53,7 @@ class ExecutionScope:
 
 
 def resolve_network_proxy(config: ResolvedConfig) -> str:
-    value = config.network.proxy
-    if not isinstance(value, str):
-        raise ValueError("proxy must be a string")
-    return value
+    return config.network.proxy
 
 
 def resolve_fetch_workers(config: ResolvedConfig) -> int:
@@ -67,8 +64,8 @@ def resolve_download_workers(config: ResolvedConfig) -> int:
     return _resolve_worker_count(config.network.download_workers, "download_workers")
 
 
-def _resolve_worker_count(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+def _resolve_worker_count(value: int, name: str) -> int:
+    if value < 1:
         raise ValueError(f"{name} must be at least 1")
     return value
 
