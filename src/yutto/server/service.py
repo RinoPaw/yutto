@@ -7,7 +7,7 @@ from string import Formatter
 from typing import TYPE_CHECKING
 
 from yutto.auth import load_auth, validate_profile
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 from yutto.core.execution import (
     RequestExecutionScopeFactory,
     resolve_download_workers,
@@ -84,12 +84,10 @@ class ServerPolicy:
         self._validate_block_size(config)
         self._validate_save_codecs(config)
         self._validate_config_values(config)
-        self._validate_subpath_template(_config_text(config.output.subpath_template, "{auto}"))
+        self._validate_subpath_template(config.output.subpath_template)
 
-        directory = config.output.directory
-        request_directory = Path() if directory is MISSING or directory is None else Path(directory)
         output_directory = self._resolve_request_path(
-            request_directory,
+            config.output.directory,
             root=self.options.download_root,
             field="output.directory",
         )
@@ -97,9 +95,9 @@ class ServerPolicy:
         temporary = config.output.temporary_directory
         temporary_directory = (
             self.options.tmp_root
-            if temporary is MISSING or temporary is None
+            if temporary is None
             else self._resolve_request_path(
-                Path(temporary),
+                temporary,
                 root=self.options.tmp_root,
                 field="output.temporary_directory",
             )
@@ -121,7 +119,7 @@ class ServerPolicy:
     def resolve_credentials(self, config: ResolvedConfig) -> AuthInfo | None:
         """Resolve one auth profile without attaching credentials to the config."""
         try:
-            return load_auth(self.options.auth_file, _auth_profile(config))
+            return load_auth(self.options.auth_file, config.auth.profile)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
@@ -147,7 +145,7 @@ class ServerPolicy:
     @staticmethod
     def _validate_auth_profile(config: ResolvedConfig) -> None:
         try:
-            validate_profile(_auth_profile(config))
+            validate_profile(config.auth.profile)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
@@ -255,20 +253,3 @@ class ServerPolicy:
             raise ServerPolicyError("output.subpath_template format spec contains an unsafe fill")
         if any(int(width) > 256 for width in re.findall(r"\d+", format_spec)):
             raise ServerPolicyError("output.subpath_template format width is too large")
-
-
-def _auth_profile(config: ResolvedConfig) -> str:
-    value = config.auth.profile
-    if value is MISSING or value is None:
-        return "default"
-    if not isinstance(value, str):
-        raise ValueError("auth profile must be a string")
-    return value
-
-
-def _config_text(value: object, default: str) -> str:
-    if value is MISSING:
-        return default
-    if not isinstance(value, str):
-        raise ValueError("expected a string config value")
-    return value
