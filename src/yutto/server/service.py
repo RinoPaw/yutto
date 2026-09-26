@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from string import Formatter
 from typing import TYPE_CHECKING
@@ -77,7 +77,7 @@ class ServerPolicy:
         self.options = options
 
     def prepare_config(self, config: ResolvedConfig) -> ResolvedConfig:
-        """Return a flat config with server-owned absolute output paths applied."""
+        """Return a config with server-owned absolute output paths applied."""
         self._validate_workers(config)
         self._validate_proxy(config)
         self._validate_auth_profile(config)
@@ -102,11 +102,13 @@ class ServerPolicy:
                 field="output.temporary_directory",
             )
         )
-        return config.with_overrides(
-            {
-                "output.directory": output_directory,
-                "output.temporary_directory": temporary_directory,
-            }
+        return replace(
+            config,
+            output=replace(
+                config.output,
+                directory=output_directory,
+                temporary_directory=temporary_directory,
+            ),
         )
 
     def build_execution_factory(self) -> RequestExecutionScopeFactory:
