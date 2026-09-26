@@ -125,7 +125,5 @@ __all__ = [
     "video_codec_map",
     "video_codec_priority_default",
     "video_quality_map",
-    "video_codec_priority_default",
-    "video_quality_map",
     "video_quality_priority_default",
 ]
