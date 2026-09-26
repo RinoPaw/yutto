@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from yutto.core.events import DownloadBatchStarted, DownloadRequestQueued, NullDownloadEventSink
 from yutto.core.operation import bind_download_event_sink, emit_download_event
-from yutto.scope import MISSING, Scope
+from yutto.scope import MISSING, ResolvedConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -18,7 +18,7 @@ class DownloadWorkflow(Protocol):
     async def execute(
         self,
         scope_factory: ExecutionScopeFactory,
-        scopes: Sequence[Scope],
+        configs: Sequence[ResolvedConfig],
     ) -> DownloadResult: ...
 
 
@@ -26,7 +26,7 @@ class ResolveWorkflow(Protocol):
     async def execute_resolve(
         self,
         scope_factory: ExecutionScopeFactory,
-        scopes: Sequence[Scope],
+        configs: Sequence[ResolvedConfig],
     ) -> ResolveResult: ...
 
 
@@ -46,13 +46,13 @@ class YuttoApplication:
         self.resolve_workflow = resolve_workflow
         self.event_sink = event_sink if event_sink is not None else NullDownloadEventSink()
 
-    async def download_all(self, scopes: Sequence[Scope]) -> DownloadResult:
+    async def download_all(self, configs: Sequence[ResolvedConfig]) -> DownloadResult:
         with bind_download_event_sink(self.event_sink):
-            total = len(scopes)
+            total = len(configs)
             if total > 1:
                 emit_download_event(DownloadBatchStarted(total=total))
-                for index, scope in enumerate(scopes, start=1):
-                    source = scope.source.value
+                for index, config in enumerate(configs, start=1):
+                    source = config.source.value
                     emit_download_event(
                         DownloadRequestQueued(
                             url="" if source is MISSING or source is None else str(source),
@@ -60,16 +60,16 @@ class YuttoApplication:
                             total=total,
                         )
                     )
-            return await self.workflow.execute(self.scope_factory, scopes)
+            return await self.workflow.execute(self.scope_factory, configs)
 
-    async def download(self, scope: Scope) -> DownloadResult:
-        return await self.download_all([scope])
+    async def download(self, config: ResolvedConfig) -> DownloadResult:
+        return await self.download_all([config])
 
-    async def resolve_all(self, scopes: Sequence[Scope]) -> ResolveResult:
+    async def resolve_all(self, configs: Sequence[ResolvedConfig]) -> ResolveResult:
         if self.resolve_workflow is None:
             raise RuntimeError("this application was built without a resolve workflow")
         with bind_download_event_sink(self.event_sink):
-            return await self.resolve_workflow.execute_resolve(self.scope_factory, scopes)
+            return await self.resolve_workflow.execute_resolve(self.scope_factory, configs)
 
-    async def resolve(self, scope: Scope) -> ResolveResult:
-        return await self.resolve_all([scope])
+    async def resolve(self, config: ResolvedConfig) -> ResolveResult:
+        return await self.resolve_all([config])
