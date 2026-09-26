@@ -32,20 +32,14 @@ def resolve_runtime_options(
         config = resolved_config_from_settings(settings).with_overrides(config)
 
     jobs = config.runtime.jobs
-    try:
-        resolved_jobs = int(jobs)
-        if resolved_jobs < 1:
-            raise ValueError
-    except (ValueError, TypeError):
-        raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）") from None
-
-    ffmpeg_path = config.runtime.ffmpeg_path
+    if jobs < 1:
+        raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）")
 
     return RuntimeOptions(
-        jobs=resolved_jobs,
-        ffmpeg_path=None if ffmpeg_path is None else str(ffmpeg_path),
-        preview_formats=bool(config.runtime.preview_formats),
-        no_color=bool(config.runtime.no_color),
-        no_progress=bool(config.runtime.no_progress),
-        debug=bool(config.runtime.debug),
+        jobs=jobs,
+        ffmpeg_path=config.runtime.ffmpeg_path,
+        preview_formats=config.runtime.preview_formats,
+        no_color=config.runtime.no_color,
+        no_progress=config.runtime.no_progress,
+        debug=config.runtime.debug,
     )
