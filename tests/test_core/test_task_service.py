@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from yutto.config import ResolvedConfig, SourceSpec
 from yutto.core.events import (
     DownloadArtifactCreated,
     DownloadBatchStarted,
@@ -24,7 +25,6 @@ from yutto.core.operation import emit_download_event
 from yutto.core.result import DownloadResult, ItemSkipReason
 from yutto.core.task_service import DownloadTaskService, _encode_runtime_event
 from yutto.runtime import TaskState
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
@@ -40,8 +40,8 @@ def task_ids() -> Iterator[str]:
         yield f"download-{index}"
 
 
-def make_scope(url: str) -> Scope:
-    return Scope({"source.value": url}, parent=ROOT_SCOPE)
+def make_config(url: str) -> ResolvedConfig:
+    return ResolvedConfig(source=SourceSpec(value=url))
 
 
 class RecordingApplication:
@@ -56,7 +56,7 @@ class RecordingApplication:
         self.calls = calls
         self.result = DownloadResult()
 
-    async def download(self, scope: Scope) -> DownloadResult:
+    async def download(self, config: ResolvedConfig) -> DownloadResult:
         self.event_sink.emit(DownloadStageChanged(name=DownloadStage.RESOLVING))
         self.event_sink.emit(
             DownloadMediaSelected(
@@ -71,12 +71,12 @@ class RecordingApplication:
                 audio=None,
             )
         )
-        self.calls.append((self.scope_factory, str(scope.source.value)))
+        self.calls.append((self.scope_factory, str(config.source.value)))
         return self.result
 
 
 @as_sync
-async def test_download_task_service_runs_scopes_in_order_and_bridges_events():
+async def test_download_task_service_runs_configs_in_order_and_bridges_events():
     ids = task_ids()
     scope_factory = RequestExecutionScopeFactory()
     calls: list[tuple[ExecutionScopeFactory, str]] = []
@@ -93,8 +93,8 @@ async def test_download_task_service_runs_scopes_in_order_and_bridges_events():
         task_id_factory=lambda: next(ids),
     )
     async with service:
-        first = await service.submit(make_scope("BV1first"))
-        second = await service.submit(make_scope("BV1second"))
+        first = await service.submit(make_config("BV1first"))
+        second = await service.submit(make_config("BV1second"))
         first_done = await service.runtime.wait(first.task_id)
         second_done = await service.runtime.wait(second.task_id)
 
@@ -130,7 +130,7 @@ async def test_download_task_service_runs_up_to_worker_count_concurrently():
     max_active = 0
 
     class ConcurrentApplication:
-        async def download(self, scope: Scope) -> DownloadResult:
+        async def download(self, config: ResolvedConfig) -> DownloadResult:
             nonlocal active, max_active
             active += 1
             max_active = max(max_active, active)
@@ -148,8 +148,8 @@ async def test_download_task_service_runs_up_to_worker_count_concurrently():
         worker_count=2,
     )
     async with service:
-        first = await service.submit(make_scope("BV1first"))
-        second = await service.submit(make_scope("BV1second"))
+        first = await service.submit(make_config("BV1first"))
+        second = await service.submit(make_config("BV1second"))
         await asyncio.wait_for(both_started.wait(), timeout=1)
         release.set()
         first_done, second_done = await asyncio.gather(
