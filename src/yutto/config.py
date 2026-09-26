@@ -26,19 +26,25 @@ class SelectionSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class AuthSpec:
-    """认证来源与下载访问校验。"""
+class CredentialSpec:
+    """一次任务使用的认证来源与 profile 选择。"""
 
     cookie: str = ""
     file: Path | None = None
     profile: str = "default"
     sessdata: str = ""
-    login_strict: bool = False
-    vip_strict: bool = False
 
     def __post_init__(self) -> None:
         if isinstance(self.file, str):
             object.__setattr__(self, "file", Path(self.file).expanduser())
+
+
+@dataclass(frozen=True, slots=True)
+class AccessSpec:
+    """一次任务对登录状态与会员权限的要求。"""
+
+    login_strict: bool = False
+    vip_strict: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +143,8 @@ class DanmakuSpec:
 _SPEC_TYPES: dict[str, type[Any]] = {
     "source": SourceSpec,
     "selection": SelectionSpec,
-    "auth": AuthSpec,
+    "credential": CredentialSpec,
+    "access": AccessSpec,
     "resource": ResourceSpec,
     "stream": StreamSpec,
     "output": OutputSpec,
@@ -155,13 +162,14 @@ _SPEC_ANNOTATIONS = {section: get_type_hints(spec_type) for section, spec_type i
 class ResolvedConfig:
     """完整、扁平、类型已归一化的一次下载/解析任务配置。
 
-    对象只保存 8 个任务 Spec。默认值由 Spec 自身定义，构造时立即应用；
+    对象只保存 9 个任务 Spec。默认值由 Spec 自身定义，构造时立即应用；
     后续覆盖通过 ``with_overrides`` 显式完成，不存在运行时继承链。
     """
 
     source: SourceSpec
     selection: SelectionSpec
-    auth: AuthSpec
+    credential: CredentialSpec
+    access: AccessSpec
     resource: ResourceSpec
     stream: StreamSpec
     output: OutputSpec
@@ -199,7 +207,8 @@ class ResolvedConfig:
 
         object.__setattr__(self, "source", resolved_specs["source"])
         object.__setattr__(self, "selection", resolved_specs["selection"])
-        object.__setattr__(self, "auth", resolved_specs["auth"])
+        object.__setattr__(self, "credential", resolved_specs["credential"])
+        object.__setattr__(self, "access", resolved_specs["access"])
         object.__setattr__(self, "resource", resolved_specs["resource"])
         object.__setattr__(self, "stream", resolved_specs["stream"])
         object.__setattr__(self, "output", resolved_specs["output"])
@@ -300,7 +309,8 @@ DEFAULT_CONFIG = ResolvedConfig()
 
 
 __all__ = [
-    "AuthSpec",
+    "AccessSpec",
+    "CredentialSpec",
     "DEFAULT_CONFIG",
     "DanmakuSpec",
     "NetworkSpec",
