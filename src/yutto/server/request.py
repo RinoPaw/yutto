@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -18,8 +18,14 @@ if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
 
 
+# Sparse RPC models use None only as the internal default for omitted fields.
+# Non-nullable annotations reject an explicit JSON null; model_fields_set keeps
+# omission distinct from a supplied value.
+_OMITTED: Any = None
+
+
 class _RpcModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, validate_default=False)
 
 
 class SourceRequest(_RpcModel):
@@ -27,80 +33,80 @@ class SourceRequest(_RpcModel):
 
 
 class AccessRequest(_RpcModel):
-    auth_profile: str | None = None
-    login_strict: bool | None = None
-    vip_strict: bool | None = None
+    auth_profile: str = _OMITTED
+    login_strict: bool = _OMITTED
+    vip_strict: bool = _OMITTED
 
 
 class SelectionRequest(_RpcModel):
     expression: str | None = None
-    skip_preview: bool | None = None
+    skip_preview: bool = _OMITTED
     start_time: str | None = None
     end_time: str | None = None
 
 
 class ResourcesRequest(_RpcModel):
-    video: bool | None = None
-    audio: bool | None = None
-    danmaku: bool | None = None
-    subtitle: bool | None = None
-    metadata: bool | None = None
-    cover: bool | None = None
-    chapter_info: bool | None = None
-    save_cover: bool | None = None
+    video: bool = _OMITTED
+    audio: bool = _OMITTED
+    danmaku: bool = _OMITTED
+    subtitle: bool = _OMITTED
+    metadata: bool = _OMITTED
+    cover: bool = _OMITTED
+    chapter_info: bool = _OMITTED
+    save_cover: bool = _OMITTED
     ai_translation_language: str | None = None
 
 
 class StreamRequest(_RpcModel):
-    video_quality: int | None = None
-    audio_quality: int | None = None
-    video_download_codec: str | None = None
-    video_save_codec: str | None = None
+    video_quality: int = _OMITTED
+    audio_quality: int = _OMITTED
+    video_download_codec: str = _OMITTED
+    video_save_codec: str = _OMITTED
     video_download_codec_priority: list[str] | None = None
-    audio_download_codec: str | None = None
-    audio_save_codec: str | None = None
+    audio_download_codec: str = _OMITTED
+    audio_save_codec: str = _OMITTED
 
 
 class OutputRequest(_RpcModel):
-    directory: str | None = None
+    directory: str = _OMITTED
     temporary_directory: str | None = None
-    format: str | None = None
-    audio_only_format: str | None = None
-    overwrite: bool | None = None
-    subpath_template: str | None = None
-    metadata_format_premiered: str | None = None
+    format: str = _OMITTED
+    audio_only_format: str = _OMITTED
+    overwrite: bool = _OMITTED
+    subpath_template: str = _OMITTED
+    metadata_format_premiered: str = _OMITTED
 
 
 class NetworkRequest(_RpcModel):
-    proxy: str | None = None
-    fetch_workers: int | None = None
-    download_workers: int | None = None
-    block_size_bytes: int | float | None = None
-    download_interval: int | None = None
+    proxy: str = _OMITTED
+    fetch_workers: int = _OMITTED
+    download_workers: int = _OMITTED
+    block_size_bytes: int | float = _OMITTED
+    download_interval: int = _OMITTED
     banned_mirrors_pattern: str | None = None
 
 
 class DanmakuRequest(_RpcModel):
-    format: str | None = None
+    format: str = _OMITTED
     font_size: int | None = None
-    font: str | None = None
-    opacity: int | float | None = None
-    display_region_ratio: int | float | None = None
-    speed: int | float | None = None
-    block_top: bool | None = None
-    block_bottom: bool | None = None
-    block_scroll: bool | None = None
-    block_reverse: bool | None = None
-    block_special: bool | None = None
-    block_colorful: bool | None = None
+    font: str = _OMITTED
+    opacity: int | float = _OMITTED
+    display_region_ratio: int | float = _OMITTED
+    speed: int | float = _OMITTED
+    block_top: bool = _OMITTED
+    block_bottom: bool = _OMITTED
+    block_scroll: bool = _OMITTED
+    block_reverse: bool = _OMITTED
+    block_special: bool = _OMITTED
+    block_colorful: bool = _OMITTED
     block_keyword_patterns: list[str] | None = None
 
 
 class ConfigRequest(_RpcModel):
     source: SourceRequest
     access: AccessRequest = Field(default_factory=AccessRequest)
-    batch: bool | None = None
-    with_extra_episodes: bool | None = None
+    batch: bool = _OMITTED
+    with_extra_episodes: bool = _OMITTED
     selection: SelectionRequest = Field(default_factory=SelectionRequest)
     resources: ResourcesRequest = Field(default_factory=ResourcesRequest)
     stream: StreamRequest = Field(default_factory=StreamRequest)
@@ -162,21 +168,18 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
     access = baseline.access
     access_request = request.access
     if "auth_profile" in access_request.model_fields_set:
-        credential = replace(
-            credential,
-            profile="default" if access_request.auth_profile is None else access_request.auth_profile,
-        )
+        credential = replace(credential, profile=access_request.auth_profile)
     if "login_strict" in access_request.model_fields_set:
-        access = replace(access, login_strict=bool(access_request.login_strict))
+        access = replace(access, login_strict=access_request.login_strict)
     if "vip_strict" in access_request.model_fields_set:
-        access = replace(access, vip_strict=bool(access_request.vip_strict))
+        access = replace(access, vip_strict=access_request.vip_strict)
 
     selection_request = request.selection
     selection_updates: dict[str, object] = {}
     if "expression" in selection_request.model_fields_set:
         selection_updates["expression"] = selection_request.expression
     if "skip_preview" in selection_request.model_fields_set:
-        selection_updates["skip_preview"] = bool(selection_request.skip_preview)
+        selection_updates["skip_preview"] = selection_request.skip_preview
     if "start_time" in selection_request.model_fields_set:
         value = selection_request.start_time
         selection_updates["published_since"] = None if value is None else parse_local_timestamp(value)
@@ -184,39 +187,28 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
         value = selection_request.end_time
         selection_updates["published_before"] = None if value is None else parse_local_timestamp(value)
     if "with_extra_episodes" in request.model_fields_set:
-        selection_updates["with_extra_episodes"] = bool(request.with_extra_episodes)
+        selection_updates["with_extra_episodes"] = request.with_extra_episodes
     if request.batch is True and "expression" not in selection_request.model_fields_set:
         selection_updates["expression"] = "~"
     selection = replace(baseline.selection, **selection_updates)
 
-    resources = request.resources
-    resource_updates = _present_updates(
-        resources,
-        {
-            "video": "video",
-            "audio": "audio",
-            "danmaku": "danmaku",
-            "subtitle": "subtitle",
-            "metadata": "metadata",
-            "cover": "cover",
-            "chapter_info": "chapter_info",
-            "save_cover": "save_cover",
-            "ai_translation_language": "ai_translation_language",
-        },
+    resource = replace(
+        baseline.resource,
+        **_present_updates(
+            request.resources,
+            {
+                "video": "video",
+                "audio": "audio",
+                "danmaku": "danmaku",
+                "subtitle": "subtitle",
+                "metadata": "metadata",
+                "cover": "cover",
+                "chapter_info": "chapter_info",
+                "save_cover": "save_cover",
+                "ai_translation_language": "ai_translation_language",
+            },
+        ),
     )
-    for field in (
-        "video",
-        "audio",
-        "danmaku",
-        "subtitle",
-        "metadata",
-        "cover",
-        "chapter_info",
-        "save_cover",
-    ):
-        if field in resource_updates:
-            resource_updates[field] = bool(resource_updates[field])
-    resource = replace(baseline.resource, **resource_updates)
 
     stream_request = request.stream
     stream_updates = _present_updates(
@@ -225,8 +217,6 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "video_quality": "video_quality",
             "audio_quality": "audio_quality",
         },
-        allow_none=False,
-        section="stream",
     )
     if "video_download_codec_priority" in stream_request.model_fields_set:
         priority = stream_request.video_download_codec_priority
@@ -239,8 +229,6 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             else default_download
         )
         save = stream_request.video_save_codec if "video_save_codec" in stream_request.model_fields_set else default_save
-        if download is None or save is None:
-            raise ValueError("video codec fields must not be null")
         stream_updates["video_codec"] = f"{download}:{save}"
     if {"audio_download_codec", "audio_save_codec"} & stream_request.model_fields_set:
         default_download, default_save = resolve_audio_codecs(baseline)
@@ -250,8 +238,6 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             else default_download
         )
         save = stream_request.audio_save_codec if "audio_save_codec" in stream_request.model_fields_set else default_save
-        if download is None or save is None:
-            raise ValueError("audio codec fields must not be null")
         stream_updates["audio_codec"] = f"{download}:{save}"
     stream = replace(baseline.stream, **stream_updates)
 
@@ -261,22 +247,16 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
         {
             "format": "format",
             "audio_only_format": "audio_only_format",
+            "overwrite": "overwrite",
             "subpath_template": "subpath_template",
             "metadata_format_premiered": "metadata_premiered_format",
         },
-        allow_none=False,
-        section="output",
     )
     if "directory" in output_request.model_fields_set:
-        if output_request.directory is None:
-            raise ValueError("output.directory must not be null")
         output_updates["directory"] = Path(output_request.directory)
     if "temporary_directory" in output_request.model_fields_set:
-        output_updates["temporary_directory"] = (
-            None if output_request.temporary_directory is None else Path(output_request.temporary_directory)
-        )
-    if "overwrite" in output_request.model_fields_set:
-        output_updates["overwrite"] = bool(output_request.overwrite)
+        temporary_directory = output_request.temporary_directory
+        output_updates["temporary_directory"] = None if temporary_directory is None else Path(temporary_directory)
     output = replace(baseline.output, **output_updates)
 
     network_request = request.network
@@ -287,15 +267,10 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "fetch_workers": "fetch_workers",
             "download_workers": "download_workers",
             "download_interval": "download_interval",
+            "banned_mirrors_pattern": "banned_mirrors_pattern",
         },
-        allow_none=False,
-        section="network",
     )
-    if "banned_mirrors_pattern" in network_request.model_fields_set:
-        network_updates["banned_mirrors_pattern"] = network_request.banned_mirrors_pattern
     if "block_size_bytes" in network_request.model_fields_set:
-        if network_request.block_size_bytes is None:
-            raise ValueError("network.block_size_bytes must not be null")
         network_updates["block_size"] = float(network_request.block_size_bytes) / MEBIBYTE
     network = replace(baseline.network, **network_updates)
 
@@ -304,29 +279,22 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
         danmaku_request,
         {
             "format": "format",
+            "font_size": "font_size",
             "font": "font",
             "opacity": "opacity",
             "display_region_ratio": "display_region_ratio",
             "speed": "speed",
+            "block_top": "block_top",
+            "block_bottom": "block_bottom",
+            "block_scroll": "block_scroll",
+            "block_reverse": "block_reverse",
+            "block_special": "block_special",
+            "block_colorful": "block_colorful",
         },
-        allow_none=False,
-        section="danmaku",
     )
-    if "font_size" in danmaku_request.model_fields_set:
-        danmaku_updates["font_size"] = danmaku_request.font_size
     for field in ("opacity", "display_region_ratio", "speed"):
         if field in danmaku_updates:
             danmaku_updates[field] = float(danmaku_updates[field])
-    for field in (
-        "block_top",
-        "block_bottom",
-        "block_scroll",
-        "block_reverse",
-        "block_special",
-        "block_colorful",
-    ):
-        if field in danmaku_request.model_fields_set:
-            danmaku_updates[field] = bool(getattr(danmaku_request, field))
     if "block_keyword_patterns" in danmaku_request.model_fields_set:
         patterns = danmaku_request.block_keyword_patterns
         danmaku_updates["block_keyword_patterns"] = None if patterns is None else tuple(patterns)
@@ -346,22 +314,12 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
     )
 
 
-def _present_updates(
-    model: BaseModel,
-    fields: dict[str, str],
-    *,
-    allow_none: bool = True,
-    section: str = "request",
-) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for source, target in fields.items():
-        if source not in model.model_fields_set:
-            continue
-        value = getattr(model, source)
-        if value is None and not allow_none:
-            raise ValueError(f"{section}.{source} must not be null")
-        result[target] = value
-    return result
+def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, object]:
+    return {
+        target: getattr(model, source)
+        for source, target in fields.items()
+        if source in model.model_fields_set
+    }
 
 
 __all__ = ["ConfigRequest", "config_parser_from_settings"]
