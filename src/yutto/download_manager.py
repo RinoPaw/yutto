@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.auth import validate_user_info
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import (
@@ -167,12 +167,6 @@ def _raise_all_resolve_failures(failures: tuple[MediaResolveFailure, ...]) -> No
     raise ResolveFailedError(f"解析未得到任何条目：{len(failures)} 个子项解析失败（详见日志）")
 
 
-def _int_value(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
-    return value
-
-
 class DownloadManager:
     """Execute resolved configs with bounded item concurrency and one runtime context per config."""
 
@@ -247,10 +241,9 @@ class DownloadManager:
     ) -> tuple[ItemResult, ...]:
         result = await self.resolve_config(execution, config)
 
-        subpath_template = str(config.output.subpath_template)
         path_entries = resolve_media_paths(
             result.media,
-            subpath_template=subpath_template,
+            subpath_template=config.output.subpath_template,
             source_index=result.source_index,
         )
         download_list = tuple((entry.ancestry, entry.item) for entry in path_entries)
@@ -261,12 +254,10 @@ class DownloadManager:
             prepared.append((entry.ancestry, entry.item, path, current_display_group))
             current_display_group = _display_group(entry.ancestry)
 
-        download_interval = _int_value(config.network.download_interval, "download_interval")
+        download_interval = config.network.download_interval
         if download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {download_interval} 秒")
 
-        login_strict = bool(config.auth.login_strict)
-        vip_strict = bool(config.auth.vip_strict)
         output_directory, temporary_directory = resolve_output_directories(config)
 
         results: list[ItemResult | None] = [None] * len(prepared)
@@ -287,7 +278,7 @@ class DownloadManager:
             async with self._item_limiter:
                 if not await validate_user_info(
                     execution,
-                    {"is_login": login_strict, "vip_status": vip_strict},
+                    {"is_login": config.auth.login_strict, "vip_status": config.auth.vip_strict},
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
@@ -347,10 +338,10 @@ class DownloadManager:
         config: ResolvedConfig,
     ) -> MediaResolveResult:
         """Resolve Parser -> MediaSource -> Media for one resolved config."""
-        value = config.source.value
-        if value is MISSING or value is None:
+        source_text = config.source.value
+        if source_text is None:
             raise ValueError("download source is missing")
-        source_text = str(value).strip()
+        source_text = source_text.strip()
         source = parse(source_text)
         if source is None:
             source = await resolve_redirected_source(execution, source_text)
@@ -360,8 +351,8 @@ class DownloadManager:
         if not await validate_user_info(
             execution,
             {
-                "is_login": bool(config.auth.login_strict),
-                "vip_status": bool(config.auth.vip_strict),
+                "is_login": config.auth.login_strict,
+                "vip_status": config.auth.vip_strict,
             },
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
