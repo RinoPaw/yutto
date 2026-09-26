@@ -48,28 +48,28 @@ def resolve_video_quality(config: ResolvedConfig) -> VideoQuality:
     value = config.stream.video_quality
     if value not in video_quality_priority_default:
         raise ValueError(f"unsupported video quality: {value}")
-    return cast("VideoQuality", value)
+    return value
 
 
 def resolve_audio_quality(config: ResolvedConfig) -> AudioQuality:
     value = config.stream.audio_quality
     if value not in audio_quality_priority_default:
         raise ValueError(f"unsupported audio quality: {value}")
-    return cast("AudioQuality", value)
+    return value
 
 
 def resolve_video_codecs(config: ResolvedConfig) -> tuple[VideoCodec, str]:
     download_codec, save_codec = _split_codec_pair(config.stream.video_codec, "vcodec")
     if download_codec not in video_codec_priority_default:
         raise ValueError(f"unsupported video download codec: {download_codec}")
-    return cast("VideoCodec", download_codec), save_codec
+    return download_codec, save_codec
 
 
 def resolve_audio_codecs(config: ResolvedConfig) -> tuple[AudioCodec, str]:
     download_codec, save_codec = _split_codec_pair(config.stream.audio_codec, "acodec")
     if download_codec not in audio_codec_priority_default:
         raise ValueError(f"unsupported audio download codec: {download_codec}")
-    return cast("AudioCodec", download_codec), save_codec
+    return download_codec, save_codec
 
 
 def resolve_video_codec_priority(config: ResolvedConfig) -> Sequence[VideoCodec] | None:
@@ -123,6 +123,8 @@ __all__ = [
     "resolve_video_codecs",
     "resolve_video_quality",
     "video_codec_map",
+    "video_codec_priority_default",
+    "video_quality_map",
     "video_codec_priority_default",
     "video_quality_map",
     "video_quality_priority_default",
