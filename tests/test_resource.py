@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from yutto.api.player import PlayUrlInfo, SubtitleInfo, SubtitleTrack, TranslationLanguage
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig, SourceSpec
 from yutto.core.operation import bind_download_report_sink
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest, resolve_resource_manifest
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.types import AId, CId
 from yutto.utils.metadata import ItemMetaData
 
@@ -19,8 +20,12 @@ if TYPE_CHECKING:
 _EXECUTION = cast("ExecutionScope", None)
 
 
-def _scope(values: dict[str, object]) -> Scope:
-    return Scope(values, parent=ROOT_SCOPE)
+def _config(**resource_updates: object) -> ResolvedConfig:
+    return replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1D84y1t76J"),
+        resource=replace(DEFAULT_CONFIG.resource, **resource_updates),
+    )
 
 
 def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,15 +44,8 @@ def test_ugc_resource_manifest_uses_page_aid(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("yutto.resource.get_ugc_playurl", fake_playurl)
     monkeypatch.setattr("yutto.resource._resolve_danmaku", fake_danmaku)
 
-    scope = _scope(
-        {
-            "source.value": "BV1D84y1t76J",
-            "resource.subtitle": False,
-            "resource.cover": False,
-            "resource.chapter_info": False,
-        }
-    )
-    manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, scope))
+    config = _config(subtitle=False, cover=False, chapter_info=False)
+    manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, config))
 
     assert isinstance(manifest, ResourceManifest)
     assert page.aid == aid
@@ -69,14 +67,14 @@ def test_resource_manifest_distinguishes_unrequested_from_requested_empty(monkey
 
     monkeypatch.setattr("yutto.resource.get_ugc_playurl", fake_playurl)
     common = {
-        "resource.audio": False,
-        "resource.subtitle": False,
-        "resource.danmaku": False,
-        "resource.cover": False,
-        "resource.chapter_info": False,
+        "audio": False,
+        "subtitle": False,
+        "danmaku": False,
+        "cover": False,
+        "chapter_info": False,
     }
-    requested = asyncio.run(resolve_resource_manifest(_EXECUTION, page, _scope({**common, "resource.video": True})))
-    unrequested = asyncio.run(resolve_resource_manifest(_EXECUTION, page, _scope({**common, "resource.video": False})))
+    requested = asyncio.run(resolve_resource_manifest(_EXECUTION, page, _config(**common, video=True)))
+    unrequested = asyncio.run(resolve_resource_manifest(_EXECUTION, page, _config(**common, video=False)))
 
     assert requested.video_requested is True
     assert requested.videos == ()
@@ -90,17 +88,8 @@ def test_resource_manifest_keeps_cover_as_url() -> None:
         cid=CId(123),
         metadata=ItemMetaData(title="P1", thumb="https://example.test/cover.jpg"),
     )
-    scope = _scope(
-        {
-            "source.value": "BV1D84y1t76J",
-            "resource.video": False,
-            "resource.audio": False,
-            "resource.subtitle": False,
-            "resource.danmaku": False,
-            "resource.chapter_info": False,
-        }
-    )
-    manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, scope))
+    config = _config(video=False, audio=False, subtitle=False, danmaku=False, chapter_info=False)
+    manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, config))
 
     assert manifest.cover_url == "https://example.test/cover.jpg"
     assert not hasattr(manifest, "cover_data")
@@ -123,17 +112,9 @@ def test_resource_resolution_returns_diagnostics_without_rendering_them(monkeypa
     monkeypatch.setattr("yutto.resource.get_subtitle_info", fake_subtitle_info)
 
     reports: list[str] = []
-    scope = _scope(
-        {
-            "source.value": "BV1D84y1t76J",
-            "resource.danmaku": False,
-            "resource.cover": False,
-            "resource.chapter_info": False,
-            "resource.ai_translation_language": "en",
-        }
-    )
+    config = _config(danmaku=False, cover=False, chapter_info=False, ai_translation_language="en")
     with bind_download_report_sink(lambda message, *_args: reports.append(message)):
-        manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, scope))
+        manifest = asyncio.run(resolve_resource_manifest(_EXECUTION, page, config))
 
     assert reports == []
     assert manifest.translation_languages == (language,)
