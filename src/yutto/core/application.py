@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 from yutto.core.events import DownloadBatchStarted, DownloadRequestQueued, NullDownloadEventSink
 from yutto.core.operation import bind_download_event_sink, emit_download_event
 
@@ -55,7 +55,7 @@ class YuttoApplication:
                     source = config.source.value
                     emit_download_event(
                         DownloadRequestQueued(
-                            url="" if source is MISSING or source is None else str(source),
+                            url="" if source is None else source,
                             index=index,
                             total=total,
                         )
