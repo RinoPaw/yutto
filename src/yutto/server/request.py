@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from yutto.cli.settings import resolved_config_from_settings
 from yutto.downloader.planner import MEBIBYTE
-from yutto.scope import ResolvedConfig, merge_configs
+from yutto.scope import ResolvedConfig
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import parse_local_timestamp
 
@@ -121,7 +121,7 @@ def config_parser_from_settings(settings: YuttoConfig) -> Callable[[object], Res
         except ValidationError as error:
             raise ValueError(_request_validation_reason(error)) from error
         values = _config_values_from_request(request, configured)
-        return merge_configs(configured, ResolvedConfig(values))
+        return configured.with_overrides(values)
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
