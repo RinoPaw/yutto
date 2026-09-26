@@ -119,7 +119,7 @@ class ServerPolicy:
     def resolve_credentials(self, config: ResolvedConfig) -> AuthInfo | None:
         """Resolve one auth profile without attaching credentials to the config."""
         try:
-            return load_auth(self.options.auth_file, config.auth.profile)
+            return load_auth(self.options.auth_file, config.credential.profile)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
@@ -145,7 +145,7 @@ class ServerPolicy:
     @staticmethod
     def _validate_auth_profile(config: ResolvedConfig) -> None:
         try:
-            validate_profile(config.auth.profile)
+            validate_profile(config.credential.profile)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
