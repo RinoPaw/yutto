@@ -29,12 +29,6 @@ _CLI_CONFIG_PATHS = {
     "skip_preview": "selection.skip_preview",
     "publication_start_time": "selection.published_since",
     "publication_end_time": "selection.published_before",
-    "jobs": "runtime.jobs",
-    "ffmpeg_path": "runtime.ffmpeg_path",
-    "preview_formats": "runtime.preview_formats",
-    "no_color": "runtime.no_color",
-    "no_progress": "runtime.no_progress",
-    "debug": "runtime.debug",
     "auth": "auth.cookie",
     "auth_file": "auth.file",
     "auth_profile": "auth.profile",
@@ -86,7 +80,22 @@ _CLI_CONFIG_PATHS = {
     "danmaku_block_colorful": "danmaku.block_colorful",
     "danmaku_block_keyword_patterns": "danmaku.block_keyword_patterns",
 }
-_CLI_CONTROL_FIELDS = frozenset({"command", "auth_command", "config", "no_inherit", "batch", "aliases"})
+_CLI_CONTROL_FIELDS = frozenset(
+    {
+        "command",
+        "auth_command",
+        "config",
+        "no_inherit",
+        "batch",
+        "aliases",
+        "jobs",
+        "ffmpeg_path",
+        "preview_formats",
+        "no_color",
+        "no_progress",
+        "debug",
+    }
+)
 
 
 def path_from_cli(path: str) -> Path:
