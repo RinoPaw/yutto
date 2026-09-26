@@ -4,15 +4,17 @@ import asyncio
 import hmac
 import ipaddress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Protocol, TypeAlias
 
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
 from yutto.__version__ import VERSION
+from yutto.cli.settings import YuttoConfig
 from yutto.config import ResolvedConfig
 from yutto.runtime import TaskCapacityError
+from yutto.server.request import config_parser_from_settings
 from yutto.server.rpc import JsonRpcDispatcher, JsonRpcError, encode_notification
 from yutto.server.service import event_to_json, replay_to_json, snapshot_summary_to_json, snapshot_to_json
 
@@ -159,7 +161,7 @@ class YuttoWebSocketServer:
         self.options = options
         self._token_bytes = options.token.encode("utf-8")
         self._prepare_config = prepare_config or (lambda config: config)
-        self._parse_config = parse_config or _parse_canonical_config
+        self._parse_config = parse_config or config_parser_from_settings(YuttoConfig())
         self._server: Server | None = None
 
     @property
@@ -438,12 +440,6 @@ class YuttoWebSocketServer:
                 await connection.send(message)
             finally:
                 outgoing.task_done()
-
-
-def _parse_canonical_config(payload: object) -> ResolvedConfig:
-    if not isinstance(payload, dict):
-        raise TypeError("request must be an object")
-    return ResolvedConfig(cast("dict[str, object]", payload))
 
 
 def _is_loopback_host(host: str) -> bool:
