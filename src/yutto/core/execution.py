@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
     from yutto._native import YuttoSession
     from yutto.auth import AuthInfo
-    from yutto.scope import ResolvedConfig
+    from yutto.config import ResolvedConfig
 
 
 class ExecutionScope:
