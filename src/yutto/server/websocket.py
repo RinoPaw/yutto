@@ -11,8 +11,8 @@ from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin
 
 from yutto.__version__ import VERSION
+from yutto.config import MISSING, ResolvedConfig
 from yutto.runtime import TaskCapacityError
-from yutto.scope import MISSING, Scope
 from yutto.server.rpc import JsonRpcDispatcher, JsonRpcError, encode_notification
 from yutto.server.service import event_to_json, replay_to_json, snapshot_summary_to_json, snapshot_to_json
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from yutto.core.result import DownloadResult, ResolveResult
     from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
 
-    _AnyTaskSnapshot: TypeAlias = TaskSnapshot[Scope, DownloadResult] | TaskSnapshot[Scope, ResolveResult]
+    _AnyTaskSnapshot: TypeAlias = TaskSnapshot[ResolvedConfig, DownloadResult] | TaskSnapshot[ResolvedConfig, ResolveResult]
 
 
 AUTHENTICATION_ERROR = -32001
@@ -40,16 +40,16 @@ class DownloadTaskApi(Protocol):
 
     async def submit(
         self,
-        scope: Scope,
+        config: ResolvedConfig,
         *,
-        execution_scope: Scope | None = None,
-    ) -> TaskSnapshot[Scope, DownloadResult]: ...
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, DownloadResult]: ...
 
-    def get(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None: ...
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None: ...
 
-    def list(self) -> tuple[TaskSnapshot[Scope, DownloadResult], ...]: ...
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, DownloadResult], ...]: ...
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, DownloadResult] | None: ...
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None: ...
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None: ...
 
@@ -63,16 +63,16 @@ class ResolveTaskApi(Protocol):
 
     async def submit(
         self,
-        scope: Scope,
+        config: ResolvedConfig,
         *,
-        execution_scope: Scope | None = None,
-    ) -> TaskSnapshot[Scope, ResolveResult]: ...
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, ResolveResult]: ...
 
-    def get(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None: ...
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None: ...
 
-    def list(self) -> tuple[TaskSnapshot[Scope, ResolveResult], ...]: ...
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, ResolveResult], ...]: ...
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[Scope, ResolveResult] | None: ...
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None: ...
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None: ...
 
@@ -150,16 +150,16 @@ class YuttoWebSocketServer:
         task_service: DownloadTaskApi,
         options: WebSocketServerOptions,
         *,
-        prepare_scope: Callable[[Scope], Scope] | None = None,
-        parse_scope: Callable[[object], Scope] | None = None,
+        prepare_config: Callable[[ResolvedConfig], ResolvedConfig] | None = None,
+        parse_config: Callable[[object], ResolvedConfig] | None = None,
         resolve_service: ResolveTaskApi | None = None,
     ):
         self._task_service = task_service
         self._resolve_service = resolve_service
         self.options = options
         self._token_bytes = options.token.encode("utf-8")
-        self._prepare_scope = prepare_scope or (lambda scope: scope)
-        self._parse_scope = parse_scope or _parse_canonical_scope
+        self._prepare_config = prepare_config or (lambda config: config)
+        self._parse_config = parse_config or _parse_canonical_config
         self._server: Server | None = None
 
     @property
@@ -304,11 +304,11 @@ class YuttoWebSocketServer:
 
         @dispatcher.method("download.start")
         async def download_start(request: dict[str, object]) -> dict[str, object]:
-            request_scope, execution_scope = self._parse_and_prepare(request)
+            request_config, execution_config = self._parse_and_prepare(request)
             try:
                 snapshot = await self._task_service.submit(
-                    request_scope,
-                    execution_scope=execution_scope,
+                    request_config,
+                    execution_config=execution_config,
                 )
             except TaskCapacityError as error:
                 raise JsonRpcError(SERVER_BUSY_ERROR, "server task capacity reached") from error
@@ -319,11 +319,11 @@ class YuttoWebSocketServer:
 
             @dispatcher.method("resolve.start")
             async def resolve_start(request: dict[str, object]) -> dict[str, object]:
-                request_scope, execution_scope = self._parse_and_prepare(request)
+                request_config, execution_config = self._parse_and_prepare(request)
                 try:
                     snapshot = await resolve_service.submit(
-                        request_scope,
-                        execution_scope=execution_scope,
+                        request_config,
+                        execution_config=execution_config,
                     )
                 except TaskCapacityError as error:
                     raise JsonRpcError(SERVER_BUSY_ERROR, "server task capacity reached") from error
@@ -400,13 +400,13 @@ class YuttoWebSocketServer:
 
         return dispatcher
 
-    def _parse_and_prepare(self, request: dict[str, object]) -> tuple[Scope, Scope]:
+    def _parse_and_prepare(self, request: dict[str, object]) -> tuple[ResolvedConfig, ResolvedConfig]:
         try:
-            parsed = self._parse_scope(request)
+            parsed = self._parse_config(request)
         except (TypeError, ValueError) as error:
             raise JsonRpcError(-32602, "Invalid params", {"reason": str(error)}) from error
         try:
-            prepared = self._prepare_scope(parsed)
+            prepared = self._prepare_config(parsed)
         except ValueError as error:
             raise JsonRpcError(
                 REQUEST_REJECTED_ERROR,
@@ -440,10 +440,10 @@ class YuttoWebSocketServer:
                 outgoing.task_done()
 
 
-def _parse_canonical_scope(payload: object) -> Scope:
+def _parse_canonical_config(payload: object) -> ResolvedConfig:
     if not isinstance(payload, dict):
         raise TypeError("request must be an object")
-    return Scope(cast("dict[str, object]", payload))
+    return ResolvedConfig(cast("dict[str, object]", payload))
 
 
 def _is_loopback_host(host: str) -> bool:
