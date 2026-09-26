@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from yutto.cli.settings import scope_from_config
+from yutto.cli.settings import resolved_config_from_settings
 from yutto.downloader.planner import MEBIBYTE
-from yutto.scope import Scope
+from yutto.scope import ResolvedConfig, merge_configs
 from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import parse_local_timestamp
 
@@ -108,22 +108,28 @@ class ScopeRequest(_RpcModel):
     danmaku: DanmakuRequest = Field(default_factory=DanmakuRequest)
 
 
-def scope_parser_from_settings(settings: YuttoConfig) -> Callable[[object], Scope]:
-    """Build the validated server wire-format -> Scope adapter with config inheritance."""
-    configured_values = dict(scope_from_config(settings).flatten())
+def config_parser_from_settings(settings: YuttoConfig) -> Callable[[object], ResolvedConfig]:
+    """Build the validated server wire-format -> flat config adapter."""
+    configured_values = dict(resolved_config_from_settings(settings).values)
     configured_values.pop("output.directory", None)
     configured_values.pop("output.temporary_directory", None)
-    configured = Scope(configured_values)
+    configured = ResolvedConfig(configured_values)
 
-    def parse(payload: object) -> Scope:
+    def parse(payload: object) -> ResolvedConfig:
         try:
             request = ScopeRequest.model_validate(payload)
         except ValidationError as error:
             raise ValueError(_request_validation_reason(error)) from error
-        return Scope(_scope_values_from_request(request, configured), parent=configured)
+        values = _config_values_from_request(request, configured)
+        return merge_configs(configured, ResolvedConfig(values))
 
     parse({"source": {"url": "yutto-server-default-validation"}})
     return parse
+
+
+def scope_parser_from_settings(settings: YuttoConfig) -> Callable[[object], ResolvedConfig]:
+    """Compatibility wrapper for config_parser_from_settings."""
+    return config_parser_from_settings(settings)
 
 
 def _request_validation_reason(error: ValidationError) -> str:
@@ -149,7 +155,7 @@ def _request_validation_reason(error: ValidationError) -> str:
     return "invalid request"
 
 
-def _scope_values_from_request(request: ScopeRequest, parent: Scope) -> dict[str, Any]:
+def _config_values_from_request(request: ScopeRequest, baseline: ResolvedConfig) -> dict[str, Any]:
     values: dict[str, Any] = {"source.value": request.source.url}
 
     _copy_present(
@@ -214,7 +220,7 @@ def _scope_values_from_request(request: ScopeRequest, parent: Scope) -> dict[str
         priority = stream.video_download_codec_priority
         values["stream.video_codec_priority"] = None if priority is None else tuple(priority)
     if {"video_download_codec", "video_save_codec"} & stream.model_fields_set:
-        default_download, default_save = resolve_video_codecs(parent)
+        default_download, default_save = resolve_video_codecs(baseline)
         download = (
             stream.video_download_codec if "video_download_codec" in stream.model_fields_set else default_download
         )
@@ -223,7 +229,7 @@ def _scope_values_from_request(request: ScopeRequest, parent: Scope) -> dict[str
             raise ValueError("video codec fields must not be null")
         values["stream.video_codec"] = f"{download}:{save}"
     if {"audio_download_codec", "audio_save_codec"} & stream.model_fields_set:
-        default_download, default_save = resolve_audio_codecs(parent)
+        default_download, default_save = resolve_audio_codecs(baseline)
         download = (
             stream.audio_download_codec if "audio_download_codec" in stream.model_fields_set else default_download
         )
@@ -302,4 +308,4 @@ def _copy_present(model: BaseModel, paths: dict[str, str], target: dict[str, Any
             target[path] = getattr(model, field)
 
 
-__all__ = ["ScopeRequest", "scope_parser_from_settings"]
+__all__ = ["ScopeRequest", "config_parser_from_settings", "scope_parser_from_settings"]
