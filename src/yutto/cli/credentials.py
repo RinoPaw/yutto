@@ -14,10 +14,10 @@ def resolve_credential_options(configs: Sequence[ResolvedConfig]) -> list[argpar
 
     return [
         argparse.Namespace(
-            auth=item.auth.cookie,
-            auth_file=item.auth.file,
-            auth_profile=item.auth.profile,
-            sessdata=item.auth.sessdata,
+            auth=item.credential.cookie,
+            auth_file=item.credential.file,
+            auth_profile=item.credential.profile,
+            sessdata=item.credential.sessdata,
         )
         for item in configs
     ]
