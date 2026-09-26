@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.auth import validate_user_info
+from yutto.config import MISSING, ResolvedConfig
 from yutto.core.events import DownloadStage, DownloadStageChanged
 from yutto.core.operation import ReportColor, ReportLevel, emit_download_event, emit_download_report
 from yutto.core.result import (
@@ -33,7 +34,6 @@ from yutto.media import BangumiEpisode, CheeseEpisode, UgcFav, UgcPage, UgcVideo
 from yutto.parser import parse
 from yutto.path_templates import create_unique_path_resolver
 from yutto.resource import ResourceManifest, resolve_resource_manifest
-from yutto.scope import MISSING, Scope
 from yutto.url_resolver import resolve_redirected_source
 
 if TYPE_CHECKING:
@@ -105,13 +105,13 @@ def _report_resolve_diagnostics(diagnostics: tuple[MediaResolveDiagnostic, ...])
             )
 
 
-def _report_resource_manifest(manifest: ResourceManifest, item: MediaItem, scope: Scope) -> None:
+def _report_resource_manifest(manifest: ResourceManifest, item: MediaItem, config: ResolvedConfig) -> None:
     if not isinstance(item, (UgcPage, BangumiEpisode, CheeseEpisode)):
         raise TypeError(f"unsupported resource media item: {type(item).__name__}")
 
     aid = item.aid
     cid = item.cid
-    requested_language = scope.resource.ai_translation_language
+    requested_language = config.resource.ai_translation_language
     languages = manifest.translation_languages
     if languages:
         emit_download_report("该视频已启用的 AI 原声翻译语言列表：")
@@ -174,7 +174,7 @@ def _int_value(value: object, name: str) -> int:
 
 
 class DownloadManager:
-    """Execute parameter scopes with bounded item concurrency and one runtime context per scope."""
+    """Execute resolved configs with bounded item concurrency and one runtime context per config."""
 
     def __init__(self, *, jobs: int = 1, path_leases: DownloadPathLeasePool | None = None):
         if jobs < 1:
@@ -187,28 +187,28 @@ class DownloadManager:
     async def execute(
         self,
         scope_factory: ExecutionScopeFactory,
-        scopes: Sequence[Scope],
+        configs: Sequence[ResolvedConfig],
     ) -> DownloadResult:
-        results: list[tuple[ItemResult, ...] | None] = [None] * len(scopes)
+        results: list[tuple[ItemResult, ...] | None] = [None] * len(configs)
         next_index = 0
         failed = False
 
-        async def run_scopes() -> None:
+        async def run_configs() -> None:
             nonlocal failed, next_index
-            while not failed and next_index < len(scopes):
+            while not failed and next_index < len(configs):
                 index = next_index
                 next_index += 1
-                parameter_scope = scopes[index]
+                config = configs[index]
                 try:
-                    async with scope_factory.open(parameter_scope) as execution:
-                        results[index] = await self.process_scope(execution, parameter_scope)
+                    async with scope_factory.open(config) as execution:
+                        results[index] = await self.process_config(execution, config)
                 except BaseException:
                     failed = True
                     raise
 
         tasks = [
-            asyncio.create_task(run_scopes(), name=f"yutto-scope-worker-{index}")
-            for index in range(min(self.jobs, len(scopes)))
+            asyncio.create_task(run_configs(), name=f"yutto-config-worker-{index}")
+            for index in range(min(self.jobs, len(configs)))
         ]
         await _gather_cancelling(tasks)
         return DownloadResult(items=tuple(item for result in results if result is not None for item in result))
@@ -216,13 +216,13 @@ class DownloadManager:
     async def execute_resolve(
         self,
         scope_factory: ExecutionScopeFactory,
-        scopes: Sequence[Scope],
+        configs: Sequence[ResolvedConfig],
     ) -> ResolveResult:
         media: list[Media] = []
         failures: list[MediaResolveFailure] = []
-        for parameter_scope in scopes:
-            async with scope_factory.open(parameter_scope) as execution:
-                result = await self.resolve_scope(execution, parameter_scope)
+        for config in configs:
+            async with scope_factory.open(config) as execution:
+                result = await self.resolve_config(execution, config)
                 failures.extend(result.failures)
                 media.append(result.media)
 
@@ -240,14 +240,14 @@ class DownloadManager:
         )
         return ResolveResult(items=tuple(media), failures=resolved_failures)
 
-    async def process_scope(
+    async def process_config(
         self,
         execution: ExecutionScope,
-        scope: Scope,
+        config: ResolvedConfig,
     ) -> tuple[ItemResult, ...]:
-        result = await self.resolve_scope(execution, scope)
+        result = await self.resolve_config(execution, config)
 
-        subpath_template = str(scope.output.subpath_template)
+        subpath_template = str(config.output.subpath_template)
         path_entries = resolve_media_paths(
             result.media,
             subpath_template=subpath_template,
@@ -261,13 +261,13 @@ class DownloadManager:
             prepared.append((entry.ancestry, entry.item, path, current_display_group))
             current_display_group = _display_group(entry.ancestry)
 
-        download_interval = _int_value(scope.network.download_interval, "download_interval")
+        download_interval = _int_value(config.network.download_interval, "download_interval")
         if download_interval > 0 and len(prepared) > 1:
             emit_download_report(f"下载任务启动间隔 {download_interval} 秒")
 
-        login_strict = bool(scope.auth.login_strict)
-        vip_strict = bool(scope.auth.vip_strict)
-        output_directory, temporary_directory = resolve_output_directories(scope)
+        login_strict = bool(config.auth.login_strict)
+        vip_strict = bool(config.auth.vip_strict)
+        output_directory, temporary_directory = resolve_output_directories(config)
 
         results: list[ItemResult | None] = [None] * len(prepared)
         start_turns = [asyncio.Event() for _ in prepared]
@@ -292,7 +292,7 @@ class DownloadManager:
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
                 try:
-                    manifest = await resolve_resource_manifest(execution, item, scope)
+                    manifest = await resolve_resource_manifest(execution, item, config)
                 except (NoAccessPermissionError, HttpStatusError, UnSupportedTypeError, NotFoundError) as error:
                     emit_download_report(error.message, ReportLevel.ERROR)
                     results[index] = ItemResult(
@@ -307,7 +307,7 @@ class DownloadManager:
                     if index + 1 < len(start_turns):
                         start_turns[index + 1].set()
                     return
-                _report_resource_manifest(manifest, item, scope)
+                _report_resource_manifest(manifest, item, config)
                 if execution.enforce_output_boundary:
                     ensure_output_path_is_scoped(path, output_directory, temporary_directory)
                 if len(download_list) > 1:
@@ -325,7 +325,7 @@ class DownloadManager:
                     manifest,
                     item.metadata,
                     path,
-                    scope,
+                    config,
                     path_leases=self.path_leases,
                 )
                 results[index] = item_result.model_copy(update={"planned_path": path})
@@ -341,13 +341,13 @@ class DownloadManager:
         emit_download_report("", ReportLevel.PLAIN)
         return tuple(result for result in results if result is not None)
 
-    async def resolve_scope(
+    async def resolve_config(
         self,
         execution: ExecutionScope,
-        scope: Scope,
+        config: ResolvedConfig,
     ) -> MediaResolveResult:
-        """Resolve Parser -> MediaSource -> Media for one parameter Scope."""
-        value = scope.source.value
+        """Resolve Parser -> MediaSource -> Media for one resolved config."""
+        value = config.source.value
         if value is MISSING or value is None:
             raise ValueError("download source is missing")
         source_text = str(value).strip()
@@ -360,13 +360,13 @@ class DownloadManager:
         if not await validate_user_info(
             execution,
             {
-                "is_login": bool(scope.auth.login_strict),
-                "vip_status": bool(scope.auth.vip_strict),
+                "is_login": bool(config.auth.login_strict),
+                "vip_status": bool(config.auth.vip_strict),
             },
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
-        result = await source.resolve(execution, scope)
+        result = await source.resolve(execution, config)
         _report_resolve_failures(result.failures)
         _report_resolve_diagnostics(result.diagnostics)
         return result
