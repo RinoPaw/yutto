@@ -10,8 +10,8 @@ import yutto.server.command as server_command_module
 from yutto.api.player import get_subtitle_lines
 from yutto.cli.parser import build_parser
 from yutto.cli.settings import YuttoConfig
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig
 from yutto.exceptions import ApiResponseError, NoAccessPermissionError
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.source import AmbiguousEpisodeSource, BangumiEpisodeSource, CheeseEpisodeSource, MediaResolveResult
 from yutto.types import EpisodeId
 
@@ -20,21 +20,21 @@ if TYPE_CHECKING:
     from yutto.media import Media
 
 _EXECUTION = cast("ExecutionScope", None)
-_SCOPE = Scope(parent=ROOT_SCOPE)
+_CONFIG = DEFAULT_CONFIG
 
 
 def test_ambiguous_source_does_not_hide_unexpected_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     async def resolve_bangumi(
         self: BangumiEpisodeSource,
         execution: ExecutionScope,
-        scope: Scope,
+        config: ResolvedConfig,
     ) -> MediaResolveResult[Media]:
         return MediaResolveResult(media=cast("Media", object()))
 
     async def resolve_cheese(
         self: CheeseEpisodeSource,
         execution: ExecutionScope,
-        scope: Scope,
+        config: ResolvedConfig,
     ) -> MediaResolveResult[Media]:
         raise NoAccessPermissionError("cheese probe failed")
 
@@ -42,7 +42,7 @@ def test_ambiguous_source_does_not_hide_unexpected_failure(monkeypatch: pytest.M
     monkeypatch.setattr(CheeseEpisodeSource, "resolve", resolve_cheese)
 
     with pytest.raises(NoAccessPermissionError, match="cheese probe failed"):
-        asyncio.run(AmbiguousEpisodeSource(id=EpisodeId("123")).resolve(_EXECUTION, _SCOPE))
+        asyncio.run(AmbiguousEpisodeSource(id=EpisodeId("123")).resolve(_EXECUTION, _CONFIG))
 
 
 def test_malformed_player_response_has_protocol_error_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
