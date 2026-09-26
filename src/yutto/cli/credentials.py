@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.scope import MISSING, ResolvedConfig
+from yutto.config import MISSING, ResolvedConfig
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
