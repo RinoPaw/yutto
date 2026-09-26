@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig
 from yutto.media.quality import AudioQuality, VideoQuality
 from yutto.output_formats import AudioOnlyOutputFormat, OutputFormat
-from yutto.scope import DEFAULT_CONFIG, ResolvedConfig
 from yutto.utils.console.logger import Logger
 from yutto.utils.paths import user_config_home
 from yutto.utils.time import parse_local_timestamp
@@ -208,11 +208,6 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
             values[path] = Path(value).expanduser()
 
     return DEFAULT_CONFIG.with_overrides(values)
-
-
-def scope_from_config(config: YuttoConfig) -> ResolvedConfig:
-    """Compatibility wrapper for callers not yet renamed to resolved_config_from_settings."""
-    return resolved_config_from_settings(config)
 
 
 def _copy_explicit(target: dict[str, Any], model: BaseModel, paths: Mapping[str, str]) -> None:
