@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
-from yutto.cli.settings import scope_from_config
+from yutto.cli.settings import resolved_config_from_settings
 from yutto.core.operation import emit_download_report
-from yutto.scope import MISSING, Scope
+from yutto.scope import MISSING, ResolvedConfig, merge_configs
 from yutto.utils.console.logger import Logger
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from yutto.cli.settings import YuttoConfig
 
 
-_CLI_SCOPE_PATHS = {
+_CLI_CONFIG_PATHS = {
     "source": "source.value",
     "selection_expr": "selection.expression",
     "with_extra_episodes": "selection.with_extra_episodes",
@@ -125,7 +125,7 @@ def file_scheme_parser(url: str) -> list[str]:
     return result
 
 
-def scope_values_from_cli(
+def config_values_from_cli(
     values: Mapping[str, Any],
     *,
     inherited_aliases: Mapping[str, str] | None = None,
@@ -137,7 +137,7 @@ def scope_values_from_cli(
     for name, value in values.items():
         if name in _CLI_CONTROL_FIELDS:
             continue
-        path = _CLI_SCOPE_PATHS.get(name)
+        path = _CLI_CONFIG_PATHS.get(name)
         if path is None:
             unknown.append(name)
             continue
@@ -158,28 +158,37 @@ def scope_values_from_cli(
     return result, bool(values.get("no_inherit", False))
 
 
-def expand_download_scopes(
-    scope: Scope,
+def scope_values_from_cli(
+    values: Mapping[str, Any],
+    *,
+    inherited_aliases: Mapping[str, str] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Compatibility wrapper for config_values_from_cli."""
+    return config_values_from_cli(values, inherited_aliases=inherited_aliases)
+
+
+def expand_download_configs(
+    config: ResolvedConfig,
     parser: argparse.ArgumentParser,
-    config: Scope,
+    baseline: ResolvedConfig,
     *,
     no_inherit: bool = False,
     aliases: Mapping[str, str] | None = None,
     config_aliases: Mapping[str, str] | None = None,
-) -> list[Scope]:
-    """Expand task lists by eagerly merging child overrides into flat configs."""
+) -> list[ResolvedConfig]:
+    """Expand task lists by eagerly merging each child into a flat config."""
 
-    source = scope.source.value
+    source = config.source.value
     if source is MISSING or source is None:
         raise ValueError("download source is missing")
     source = str(source)
 
-    current = Scope({"source.value": source}, parent=scope)
+    current = merge_configs(config, ResolvedConfig({"source.value": source}))
 
     if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
         return [current]
 
-    result: list[Scope] = []
+    result: list[ResolvedConfig] = []
     for line in file_scheme_parser(source):
         child_raw = vars(parser.parse_args(normalize_argv(shlex.split(line))))
         if child_raw.get("command") != "download":
@@ -188,24 +197,44 @@ def expand_download_scopes(
         child_no_inherit = bool(child_raw.get("no_inherit", False))
         inherited_aliases = config_aliases if no_inherit or child_no_inherit else aliases
         child_aliases = child_raw.get("aliases", inherited_aliases)
-        child_values, child_no_inherit = scope_values_from_cli(
+        child_values, child_no_inherit = config_values_from_cli(
             child_raw,
             inherited_aliases=inherited_aliases,
         )
-        base = config if no_inherit or child_no_inherit else current
-        child = Scope(child_values, parent=base)
-        Logger.debug(f"列表参数: {_config_delta(child, config)}")
+        base = baseline if no_inherit or child_no_inherit else current
+        child = merge_configs(base, ResolvedConfig(child_values))
+        Logger.debug(f"列表参数: {_config_delta(child, baseline)}")
         result.extend(
-            expand_download_scopes(
+            expand_download_configs(
                 child,
                 parser,
-                config,
+                baseline,
                 no_inherit=child_no_inherit,
                 aliases=child_aliases,
                 config_aliases=config_aliases,
             )
         )
     return result
+
+
+def expand_download_scopes(
+    scope: ResolvedConfig,
+    parser: argparse.ArgumentParser,
+    config: ResolvedConfig,
+    *,
+    no_inherit: bool = False,
+    aliases: Mapping[str, str] | None = None,
+    config_aliases: Mapping[str, str] | None = None,
+) -> list[ResolvedConfig]:
+    """Compatibility wrapper for expand_download_configs."""
+    return expand_download_configs(
+        scope,
+        parser,
+        config,
+        no_inherit=no_inherit,
+        aliases=aliases,
+        config_aliases=config_aliases,
+    )
 
 
 def expand_download_values(
@@ -215,26 +244,27 @@ def expand_download_values(
 ) -> list[dict[str, Any]]:
     """Return canonical overrides for expanded download tasks."""
 
-    configured = scope_from_config(config)
+    configured = resolved_config_from_settings(config)
     config_aliases = config.basic.aliases
     aliases = values.get("aliases", config_aliases)
-    scope_values, no_inherit = scope_values_from_cli(values, inherited_aliases=config_aliases)
-    scopes = expand_download_scopes(
-        Scope(scope_values, parent=configured),
+    cli_values, no_inherit = config_values_from_cli(values, inherited_aliases=config_aliases)
+    command_config = merge_configs(configured, ResolvedConfig(cli_values))
+    configs = expand_download_configs(
+        command_config,
         parser,
         configured,
         no_inherit=no_inherit,
         aliases=aliases,
         config_aliases=config_aliases,
     )
-    return [_config_delta(scope, configured) for scope in scopes]
+    return [_config_delta(item, configured) for item in configs]
 
 
-def _config_delta(scope: Scope, baseline: Scope) -> dict[str, Any]:
+def _config_delta(config: ResolvedConfig, baseline: ResolvedConfig) -> dict[str, Any]:
     """Return the effective overrides relative to a flat baseline config."""
     baseline_values = baseline.values
     return {
         path: value
-        for path, value in scope.values.items()
+        for path, value in config.values.items()
         if path not in baseline_values or baseline_values[path] != value
     }
