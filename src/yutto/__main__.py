@@ -14,16 +14,16 @@ from yutto.cli.input import config_values_from_cli, expand_download_configs
 from yutto.cli.parser import build_parser
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import resolve_config, resolved_config_from_settings, search_for_settings_file
+from yutto.config import ResolvedConfig
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, YuttoBaseException
-from yutto.scope import ResolvedConfig
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
-from yutto.validator import configure_cli, resolve_credentials, validate_download_scope
+from yutto.validator import configure_cli, resolve_credentials, validate_download_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,7 +81,7 @@ def main() -> None:
                             FFmpeg.setup_ffmpeg_path(runtime.ffmpeg_path)
                         ffmpeg = FFmpeg()
                         for task in tasks:
-                            validate_download_scope(task, ffmpeg)
+                            validate_download_config(task, ffmpeg)
 
                     credential_options = resolve_credential_options(tasks)
                     auth_list = [resolve_credentials(options) for options in credential_options]
