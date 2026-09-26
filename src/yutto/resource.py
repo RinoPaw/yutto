@@ -18,8 +18,8 @@ from yutto.exceptions import UnSupportedTypeError
 from yutto.media import BangumiEpisode, CheeseEpisode, MediaItem, UgcPage
 
 if TYPE_CHECKING:
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScope
-    from yutto.scope import Scope
     from yutto.types import AId, AudioUrlMeta, CId, VideoUrlMeta
     from yutto.utils.danmaku import DanmakuSaveType, DanmakuSourceType
 
@@ -46,55 +46,55 @@ class ResourceManifest:
     invalid_subtitle_languages: tuple[str, ...] = ()
 
 
-def wants_video(scope: Scope) -> bool:
-    return bool(scope.resource.video)
+def wants_video(config: ResolvedConfig) -> bool:
+    return bool(config.resource.video)
 
 
-def wants_audio(scope: Scope) -> bool:
-    return bool(scope.resource.audio)
+def wants_audio(config: ResolvedConfig) -> bool:
+    return bool(config.resource.audio)
 
 
-def wants_danmaku(scope: Scope) -> bool:
-    return bool(scope.resource.danmaku)
+def wants_danmaku(config: ResolvedConfig) -> bool:
+    return bool(config.resource.danmaku)
 
 
-def wants_subtitle(scope: Scope) -> bool:
-    return bool(scope.resource.subtitle)
+def wants_subtitle(config: ResolvedConfig) -> bool:
+    return bool(config.resource.subtitle)
 
 
-def wants_metadata(scope: Scope) -> bool:
-    return bool(scope.resource.metadata)
+def wants_metadata(config: ResolvedConfig) -> bool:
+    return bool(config.resource.metadata)
 
 
-def wants_cover(scope: Scope) -> bool:
-    return bool(scope.resource.cover)
+def wants_cover(config: ResolvedConfig) -> bool:
+    return bool(config.resource.cover)
 
 
-def wants_chapter_info(scope: Scope) -> bool:
-    return bool(scope.resource.chapter_info)
+def wants_chapter_info(config: ResolvedConfig) -> bool:
+    return bool(config.resource.chapter_info)
 
 
-def should_save_cover(scope: Scope) -> bool:
-    cover = wants_cover(scope)
-    save_cover = bool(scope.resource.save_cover)
+def should_save_cover(config: ResolvedConfig) -> bool:
+    cover = wants_cover(config)
+    save_cover = bool(config.resource.save_cover)
     if save_cover and not cover:
         raise ValueError("save_cover requires cover")
     if cover and not any(
         (
-            wants_video(scope),
-            wants_audio(scope),
-            wants_danmaku(scope),
-            wants_subtitle(scope),
-            wants_metadata(scope),
-            wants_chapter_info(scope),
+            wants_video(config),
+            wants_audio(config),
+            wants_danmaku(config),
+            wants_subtitle(config),
+            wants_metadata(config),
+            wants_chapter_info(config),
         )
     ):
         return True
     return save_cover
 
 
-def resolve_danmaku_format(scope: Scope) -> DanmakuSaveType:
-    value = scope.danmaku.format
+def resolve_danmaku_format(config: ResolvedConfig) -> DanmakuSaveType:
+    value = config.danmaku.format
     if value not in {"xml", "ass", "protobuf"}:
         raise ValueError(f"unsupported danmaku format: {value}")
     return value
@@ -147,17 +147,17 @@ async def _resolve_danmaku(
 async def resolve_resource_manifest(
     execution: ExecutionScope,
     item: MediaItem,
-    scope: Scope,
+    config: ResolvedConfig,
 ) -> ResourceManifest:
     """Resolve requested resource facts for one MediaItem without downloading resource bodies."""
 
-    video = wants_video(scope)
-    audio = wants_audio(scope)
-    subtitle = wants_subtitle(scope)
-    danmaku = wants_danmaku(scope)
-    cover = wants_cover(scope)
-    chapter_info = wants_chapter_info(scope)
-    ai_translation_language = scope.resource.ai_translation_language
+    video = wants_video(config)
+    audio = wants_audio(config)
+    subtitle = wants_subtitle(config)
+    danmaku = wants_danmaku(config)
+    cover = wants_cover(config)
+    chapter_info = wants_chapter_info(config)
+    ai_translation_language = config.resource.ai_translation_language
     if ai_translation_language is not None and not isinstance(ai_translation_language, str):
         raise ValueError("ai_translation_language must be a string or null")
 
@@ -212,7 +212,7 @@ async def resolve_resource_manifest(
     danmaku_source_type: DanmakuSourceType | None = None
     danmaku_urls: tuple[str, ...] = ()
     if danmaku:
-        danmaku_format = resolve_danmaku_format(scope)
+        danmaku_format = resolve_danmaku_format(config)
         danmaku_source_type, danmaku_urls = await _resolve_danmaku(execution, aid, item.cid, danmaku_format)
 
     return ResourceManifest(
