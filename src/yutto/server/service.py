@@ -16,7 +16,7 @@ from yutto.core.execution import (
 from yutto.downloader.planner import resolve_block_size_bytes
 from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
 from yutto.resource import resolve_danmaku_format, should_save_cover
-from yutto.scope import MISSING, ResolvedConfig, merge_configs
+from yutto.scope import MISSING, ResolvedConfig
 from yutto.server.request import config_parser_from_settings as config_parser_from_settings
 from yutto.server.request import scope_parser_from_settings as scope_parser_from_settings
 from yutto.server.serialization import (
@@ -105,14 +105,11 @@ class ServerPolicy:
                 field="output.temporary_directory",
             )
         )
-        return merge_configs(
-            config,
-            ResolvedConfig(
-                {
-                    "output.directory": output_directory,
-                    "output.temporary_directory": temporary_directory,
-                }
-            ),
+        return config.with_overrides(
+            {
+                "output.directory": output_directory,
+                "output.temporary_directory": temporary_directory,
+            }
         )
 
     def prepare_scope(self, config: ResolvedConfig) -> ResolvedConfig:
