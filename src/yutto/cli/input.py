@@ -130,7 +130,7 @@ def scope_values_from_cli(
     *,
     inherited_aliases: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any], bool]:
-    """把 argparse 字段转换成 Scope 的权威 ``spec.field`` 路径。"""
+    """把 argparse 字段转换成 canonical ``spec.field`` 路径。"""
     result: dict[str, Any] = {}
     unknown: list[str] = []
 
@@ -145,7 +145,7 @@ def scope_values_from_cli(
 
     if unknown:
         names = ", ".join(sorted(unknown))
-        raise TypeError(f"CLI fields without Scope mapping: {names}")
+        raise TypeError(f"CLI fields without config mapping: {names}")
 
     aliases = values.get("aliases", inherited_aliases)
     source = result.get("source.value")
@@ -167,14 +167,14 @@ def expand_download_scopes(
     aliases: Mapping[str, str] | None = None,
     config_aliases: Mapping[str, str] | None = None,
 ) -> list[Scope]:
-    """Expand task lists by creating child scopes instead of merging dictionaries."""
+    """Expand task lists by eagerly merging child overrides into flat configs."""
 
     source = scope.source.value
     if source is MISSING or source is None:
         raise ValueError("download source is missing")
     source = str(source)
 
-    current = Scope({**scope.values, "source.value": source}, parent=scope.parent)
+    current = Scope({"source.value": source}, parent=scope)
 
     if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
         return [current]
@@ -192,9 +192,9 @@ def expand_download_scopes(
             child_raw,
             inherited_aliases=inherited_aliases,
         )
-        parent = config if no_inherit or child_no_inherit else current
-        child = Scope(child_values, parent=parent)
-        Logger.debug(f"列表参数: {child.flatten(stop_at=config)}")
+        base = config if no_inherit or child_no_inherit else current
+        child = Scope(child_values, parent=base)
+        Logger.debug(f"列表参数: {_config_delta(child, config)}")
         result.extend(
             expand_download_scopes(
                 child,
@@ -213,7 +213,7 @@ def expand_download_values(
     parser: argparse.ArgumentParser,
     config: YuttoConfig,
 ) -> list[dict[str, Any]]:
-    """Return canonical explicit Scope paths for expanded download tasks."""
+    """Return canonical overrides for expanded download tasks."""
 
     configured = scope_from_config(config)
     config_aliases = config.basic.aliases
@@ -227,4 +227,14 @@ def expand_download_values(
         aliases=aliases,
         config_aliases=config_aliases,
     )
-    return [scope.flatten(stop_at=configured) for scope in scopes]
+    return [_config_delta(scope, configured) for scope in scopes]
+
+
+def _config_delta(scope: Scope, baseline: Scope) -> dict[str, Any]:
+    """Return the effective overrides relative to a flat baseline config."""
+    baseline_values = baseline.values
+    return {
+        path: value
+        for path, value in scope.values.items()
+        if path not in baseline_values or baseline_values[path] != value
+    }
