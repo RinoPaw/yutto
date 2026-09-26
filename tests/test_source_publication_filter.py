@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from returns.result import Success
 
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig
 from yutto.media import UgcSeries, UgcSpace
-from yutto.scope import Scope
 from yutto.source import UgcSeriesSource, UgcSpaceSource
 from yutto.types import MId, SeriesId
 
@@ -18,13 +19,15 @@ if TYPE_CHECKING:
 _EXECUTION = cast("ExecutionScope", None)
 
 
-def _scope(*, since: int, before: int, expression: str = "~") -> Scope:
-    return Scope(
-        {
-            "selection.expression": expression,
-            "selection.published_since": since,
-            "selection.published_before": before,
-        }
+def _config(*, since: int, before: int, expression: str = "~") -> ResolvedConfig:
+    return replace(
+        DEFAULT_CONFIG,
+        selection=replace(
+            DEFAULT_CONFIG.selection,
+            expression=expression,
+            published_since=since,
+            published_before=before,
+        ),
     )
 
 
@@ -46,7 +49,7 @@ def _video_response(aid: int, bvid: str, title: str, pubdate: int) -> dict[str, 
 
 
 def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+    async def fake_fetch_json(execution: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
         if "/x/series/series" in url:
             return Success({"code": 0, "data": {"meta": {"mid": 123, "name": "系列"}}})
         if "/x/series/archives" in url:
@@ -71,7 +74,7 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
     result = asyncio.run(
         UgcSeriesSource(id=SeriesId("456")).resolve(
             _EXECUTION,
-            _scope(since=1_706_745_600, before=1_709_251_200),
+            _config(since=1_706_745_600, before=1_709_251_200),
         )
     )
 
@@ -82,13 +85,13 @@ def test_ugc_batch_source_filters_by_resolved_publication_time(monkeypatch: pyte
 def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def fake_get_wbi_img(scope: object) -> object:
+    async def fake_get_wbi_img(execution: object) -> object:
         return object()
 
     def fake_encode_wbi(params: dict[str, Any], wbi_img: object) -> dict[str, Any]:
         return params
 
-    async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+    async def fake_fetch_json(execution: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
         calls.append((url, kwargs))
         if "/x/space/wbi/acc/info" in url:
             return Success({"code": 0, "data": {"name": "UP", "sign": "", "face": ""}})
@@ -128,7 +131,7 @@ def test_space_source_filters_before_selection_and_stops_old_pages(monkeypatch: 
     result = asyncio.run(
         UgcSpaceSource(id=MId("123")).resolve(
             _EXECUTION,
-            _scope(since=1_706_745_600, before=1_709_251_200, expression="2"),
+            _config(since=1_706_745_600, before=1_709_251_200, expression="2"),
         )
     )
 
