@@ -16,7 +16,8 @@ from yutto.core.execution import (
 from yutto.downloader.planner import resolve_block_size_bytes
 from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
 from yutto.resource import resolve_danmaku_format, should_save_cover
-from yutto.scope import MISSING, Scope
+from yutto.scope import MISSING, ResolvedConfig, merge_configs
+from yutto.server.request import config_parser_from_settings as config_parser_from_settings
 from yutto.server.request import scope_parser_from_settings as scope_parser_from_settings
 from yutto.server.serialization import (
     event_to_json as event_to_json,
@@ -71,22 +72,22 @@ class ServerPolicyOptions:
 
 
 class ServerPolicy:
-    """Apply server-owned limits before a Scope enters the task runtime."""
+    """Apply server-owned limits before a resolved config enters the task runtime."""
 
     def __init__(self, options: ServerPolicyOptions):
         self.options = options
 
-    def prepare_scope(self, scope: Scope) -> Scope:
-        """Return a child Scope with server-owned absolute output paths."""
-        self._validate_workers(scope)
-        self._validate_proxy(scope)
-        self._validate_auth_profile(scope)
-        self._validate_block_size(scope)
-        self._validate_save_codecs(scope)
-        self._validate_scope_values(scope)
-        self._validate_subpath_template(_scope_text(scope.output.subpath_template, "{auto}"))
+    def prepare_config(self, config: ResolvedConfig) -> ResolvedConfig:
+        """Return a flat config with server-owned absolute output paths applied."""
+        self._validate_workers(config)
+        self._validate_proxy(config)
+        self._validate_auth_profile(config)
+        self._validate_block_size(config)
+        self._validate_save_codecs(config)
+        self._validate_config_values(config)
+        self._validate_subpath_template(_config_text(config.output.subpath_template, "{auto}"))
 
-        directory = scope.output.directory
+        directory = config.output.directory
         request_directory = Path() if directory is MISSING or directory is None else Path(directory)
         output_directory = self._resolve_request_path(
             request_directory,
@@ -94,7 +95,7 @@ class ServerPolicy:
             field="output.directory",
         )
 
-        temporary = scope.output.temporary_directory
+        temporary = config.output.temporary_directory
         temporary_directory = (
             self.options.tmp_root
             if temporary is MISSING or temporary is None
@@ -104,57 +105,63 @@ class ServerPolicy:
                 field="output.temporary_directory",
             )
         )
-        return Scope(
-            {
-                "output.directory": output_directory,
-                "output.temporary_directory": temporary_directory,
-            },
-            parent=scope,
+        return merge_configs(
+            config,
+            ResolvedConfig(
+                {
+                    "output.directory": output_directory,
+                    "output.temporary_directory": temporary_directory,
+                }
+            ),
         )
 
+    def prepare_scope(self, config: ResolvedConfig) -> ResolvedConfig:
+        """Compatibility wrapper for prepare_config."""
+        return self.prepare_config(config)
+
     def build_scope_factory(self) -> RequestExecutionScopeFactory:
-        """Build the shared Scope-to-runtime boundary used by server tasks."""
+        """Build the shared config-to-runtime resource boundary used by server tasks."""
         return RequestExecutionScopeFactory(
             self.resolve_credentials,
             enforce_output_boundary=True,
         )
 
-    def resolve_credentials(self, scope: Scope) -> AuthInfo | None:
-        """Resolve one auth profile without attaching credentials to the Scope."""
+    def resolve_credentials(self, config: ResolvedConfig) -> AuthInfo | None:
+        """Resolve one auth profile without attaching credentials to the config."""
         try:
-            return load_auth(self.options.auth_file, _auth_profile(scope))
+            return load_auth(self.options.auth_file, _auth_profile(config))
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
-    def _validate_workers(self, scope: Scope) -> None:
+    def _validate_workers(self, config: ResolvedConfig) -> None:
         self._validate_worker_count(
             "network.fetch_workers",
-            resolve_fetch_workers(scope),
+            resolve_fetch_workers(config),
             self.options.max_fetch_workers,
         )
         self._validate_worker_count(
             "network.download_workers",
-            resolve_download_workers(scope),
+            resolve_download_workers(config),
             self.options.max_download_workers,
         )
 
     @staticmethod
-    def _validate_proxy(scope: Scope) -> None:
+    def _validate_proxy(config: ResolvedConfig) -> None:
         try:
-            resolve_proxy(resolve_network_proxy(scope))
+            resolve_proxy(resolve_network_proxy(config))
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
     @staticmethod
-    def _validate_auth_profile(scope: Scope) -> None:
+    def _validate_auth_profile(config: ResolvedConfig) -> None:
         try:
-            validate_profile(_auth_profile(scope))
+            validate_profile(_auth_profile(config))
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
-    def _validate_block_size(self, scope: Scope) -> None:
+    def _validate_block_size(self, config: ResolvedConfig) -> None:
         try:
-            value = resolve_block_size_bytes(scope)
+            value = resolve_block_size_bytes(config)
         except ValueError as error:
             raise ServerPolicyError(f"network.block_size_bytes is invalid: {error}") from error
         if not self.options.min_block_size_bytes <= value <= self.options.max_block_size_bytes:
@@ -163,9 +170,9 @@ class ServerPolicy:
                 f"{self.options.min_block_size_bytes} and {self.options.max_block_size_bytes}"
             )
 
-    def _validate_save_codecs(self, scope: Scope) -> None:
-        _, video_save_codec = resolve_video_codecs(scope)
-        _, audio_save_codec = resolve_audio_codecs(scope)
+    def _validate_save_codecs(self, config: ResolvedConfig) -> None:
+        _, video_save_codec = resolve_video_codecs(config)
+        _, audio_save_codec = resolve_audio_codecs(config)
         if (
             self.options.allowed_video_save_codecs is not None
             and video_save_codec not in self.options.allowed_video_save_codecs
@@ -178,15 +185,15 @@ class ServerPolicy:
             raise ServerPolicyError(f"unsupported audio save codec: {audio_save_codec}")
 
     @staticmethod
-    def _validate_scope_values(scope: Scope) -> None:
-        resolve_video_quality(scope)
-        resolve_audio_quality(scope)
-        resolve_video_codec_priority(scope)
-        resolve_danmaku_format(scope)
-        should_save_cover(scope)
+    def _validate_config_values(config: ResolvedConfig) -> None:
+        resolve_video_quality(config)
+        resolve_audio_quality(config)
+        resolve_video_codec_priority(config)
+        resolve_danmaku_format(config)
+        should_save_cover(config)
         try:
-            resolve_output_format(scope.output.format)
-            resolve_audio_only_output_format(scope.output.audio_only_format)
+            resolve_output_format(config.output.format)
+            resolve_audio_only_output_format(config.output.audio_only_format)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
@@ -258,8 +265,8 @@ class ServerPolicy:
             raise ServerPolicyError("output.subpath_template format width is too large")
 
 
-def _auth_profile(scope: Scope) -> str:
-    value = scope.auth.profile
+def _auth_profile(config: ResolvedConfig) -> str:
+    value = config.auth.profile
     if value is MISSING or value is None:
         return "default"
     if not isinstance(value, str):
@@ -267,9 +274,9 @@ def _auth_profile(scope: Scope) -> str:
     return value
 
 
-def _scope_text(value: object, default: str) -> str:
+def _config_text(value: object, default: str) -> str:
     if value is MISSING:
         return default
     if not isinstance(value, str):
-        raise ValueError("expected a string Scope value")
+        raise ValueError("expected a string config value")
     return value
