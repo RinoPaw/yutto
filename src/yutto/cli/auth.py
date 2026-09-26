@@ -31,6 +31,8 @@ from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from yutto._native import YuttoSession
     from yutto.types import UserInfo
 
@@ -60,10 +62,24 @@ class AuthCommandOptions:
     timeout: int
 
 
-def resolve_auth_command_options(config: ResolvedConfig, auth_command: str | None) -> AuthCommandOptions:
-    """Resolve auth inputs from one flat resolved config."""
+def resolve_auth_command_options(
+    config: ResolvedConfig,
+    auth_command: str | None,
+    values: Mapping[str, object],
+) -> AuthCommandOptions:
+    """Resolve auth-command controls at the CLI boundary."""
     if auth_command is None:
         raise ValueError("auth command is missing")
+
+    mode = values.get("mode", "terminal")
+    poll_interval = values.get("poll_interval", 2.0)
+    timeout = values.get("timeout", 180)
+    if mode not in ("terminal", "web"):
+        raise ValueError("mode must be terminal or web")
+    if type(poll_interval) is not float:
+        raise TypeError("poll_interval must be a float")
+    if type(timeout) is not int:
+        raise TypeError("timeout must be an integer")
 
     return AuthCommandOptions(
         auth_command=auth_command,
@@ -71,15 +87,19 @@ def resolve_auth_command_options(config: ResolvedConfig, auth_command: str | Non
         auth_file=config.auth.file,
         auth_profile=config.auth.profile,
         proxy=config.network.proxy,
-        mode=config.auth.mode,
-        poll_interval=config.auth.poll_interval,
-        timeout=config.auth.timeout,
+        mode=mode,
+        poll_interval=poll_interval,
+        timeout=timeout,
     )
 
 
 @as_sync
-async def run_auth(config: ResolvedConfig, auth_command: str | None) -> None:
-    options = resolve_auth_command_options(config, auth_command)
+async def run_auth(
+    config: ResolvedConfig,
+    auth_command: str | None,
+    values: Mapping[str, object],
+) -> None:
+    options = resolve_auth_command_options(config, auth_command, values)
 
     match options.auth_command:
         case "login":
