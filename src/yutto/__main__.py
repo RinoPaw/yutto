@@ -10,16 +10,16 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import expand_download_scopes, scope_values_from_cli
+from yutto.cli.input import config_values_from_cli, expand_download_configs
 from yutto.cli.parser import build_parser
 from yutto.cli.runtime import resolve_runtime_options
-from yutto.cli.settings import resolve_config, scope_from_config, search_for_settings_file
+from yutto.cli.settings import resolve_config, resolved_config_from_settings, search_for_settings_file
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
 from yutto.download_manager import DownloadManager
 from yutto.exceptions import ErrorCode, YuttoBaseException
-from yutto.scope import Scope
+from yutto.scope import ResolvedConfig, merge_configs
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.functional import as_sync
@@ -43,7 +43,7 @@ def main() -> None:
         Logger.error(str(error))
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
-    configured = scope_from_config(config)
+    configured = resolved_config_from_settings(config)
     raw_values = vars(args)
     command = raw_values["command"]
     auth_command = raw_values.get("auth_command")
@@ -53,12 +53,12 @@ def main() -> None:
             try:
                 config_aliases = config.basic.aliases
                 aliases = raw_values.get("aliases", config_aliases)
-                cli_values, no_inherit = scope_values_from_cli(
+                cli_values, no_inherit = config_values_from_cli(
                     raw_values,
                     inherited_aliases=config_aliases,
                 )
-                command_scope = Scope(cli_values, parent=configured)
-                runtime = resolve_runtime_options(command_scope)
+                command_config = merge_configs(configured, ResolvedConfig(cli_values))
+                runtime = resolve_runtime_options(command_config)
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
@@ -67,8 +67,8 @@ def main() -> None:
                         no_color=runtime.no_color,
                         debug=runtime.debug,
                     )
-                    tasks = expand_download_scopes(
-                        command_scope,
+                    tasks = expand_download_configs(
+                        command_config,
                         parser,
                         configured,
                         no_inherit=no_inherit,
@@ -85,21 +85,21 @@ def main() -> None:
 
                     credential_options = resolve_credential_options(tasks)
                     auth_list = [resolve_credentials(options) for options in credential_options]
-                    auth_by_scope = {id(scope): auth for scope, auth in zip(tasks, auth_list, strict=True)}
-                    credentials_by_scope = {
-                        id(scope): options for scope, options in zip(tasks, credential_options, strict=True)
+                    auth_by_config = {id(item): auth for item, auth in zip(tasks, auth_list, strict=True)}
+                    credentials_by_config = {
+                        id(item): options for item, options in zip(tasks, credential_options, strict=True)
                     }
 
-                    def resolve_scope_credentials(scope: Scope) -> AuthInfo | None:
-                        return auth_by_scope[id(scope)]
+                    def resolve_config_credentials(item: ResolvedConfig) -> AuthInfo | None:
+                        return auth_by_config[id(item)]
 
                     announced_profiles: set[tuple[Path, str]] = set()
                     inline_auth_announced = False
 
-                    async def announce_scope_auth(execution: ExecutionScope, scope: Scope) -> None:
+                    async def announce_config_auth(execution: ExecutionScope, item: ResolvedConfig) -> None:
                         nonlocal inline_auth_announced
 
-                        options = credentials_by_scope[id(scope)]
+                        options = credentials_by_config[id(item)]
                         if options.auth or options.sessdata:
                             if inline_auth_announced:
                                 return
@@ -110,11 +110,11 @@ def main() -> None:
                                 return
                             announced_profiles.add(profile)
 
-                        await announce_cli_auth(execution, scope)
+                        await announce_cli_auth(execution, item)
 
                     scope_factory = RequestExecutionScopeFactory(
-                        resolve_scope_credentials,
-                        on_open=announce_scope_auth,
+                        resolve_config_credentials,
+                        on_open=announce_config_auth,
                     )
                     if runtime.preview_formats:
                         run_preview_formats(scope_factory, tasks, renderer)
@@ -132,9 +132,9 @@ def main() -> None:
 
         case "auth":
             try:
-                cli_values, _ = scope_values_from_cli(raw_values)
-                command_scope = Scope(cli_values, parent=configured)
-                run_auth(command_scope, auth_command)
+                cli_values, _ = config_values_from_cli(raw_values)
+                command_config = merge_configs(configured, ResolvedConfig(cli_values))
+                run_auth(command_config, auth_command)
             except YuttoBaseException as error:
                 Logger.error(error.message)
                 sys.exit(error.code.value)
@@ -167,7 +167,7 @@ def main() -> None:
 @as_sync
 async def run_download(
     scope_factory: ExecutionScopeFactory,
-    scopes: list[Scope],
+    configs: list[ResolvedConfig],
     renderer: CliApplicationEventRenderer,
     *,
     jobs: int | None = None,
@@ -180,10 +180,10 @@ async def run_download(
             event_sink=renderer,
         )
         with bind_download_report_sink(renderer.report):
-            await application.download_all(scopes)
+            await application.download_all(configs)
 
 
-async def announce_cli_auth(execution: ExecutionScope, _scope: Scope) -> None:
+async def announce_cli_auth(execution: ExecutionScope, _config: ResolvedConfig) -> None:
     if execution.session.cookie("SESSDATA") is None:
         Logger.info(
             "未提供登录认证信息，无法下载高清视频、字幕等资源哦～请通过 `--auth` 参数提供认证信息，或者先使用 `yutto auth login` 登录存储认证信息后再下载～"
