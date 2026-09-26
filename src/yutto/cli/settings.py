@@ -115,7 +115,6 @@ class YuttoConfig(_ConfigModel):
 
 _BASIC_CONFIG_PATHS = {
     "download_workers": "network.download_workers",
-    "jobs": "runtime.jobs",
     "fetch_workers": "network.fetch_workers",
     "video_quality": "stream.video_quality",
     "audio_quality": "stream.audio_quality",
@@ -124,7 +123,6 @@ _BASIC_CONFIG_PATHS = {
     "download_vcodec_priority": "stream.video_codec_priority",
     "output_format": "output.format",
     "output_format_audio_only": "output.audio_only_format",
-    "ffmpeg_path": "runtime.ffmpeg_path",
     "ai_translation_language": "resource.ai_translation_language",
     "danmaku_format": "danmaku.format",
     "block_size": "network.block_size",
@@ -139,10 +137,8 @@ _BASIC_CONFIG_PATHS = {
     "banned_mirrors_pattern": "network.banned_mirrors_pattern",
     "vip_strict": "auth.vip_strict",
     "login_strict": "auth.login_strict",
-    "no_color": "runtime.no_color",
-    "no_progress": "runtime.no_progress",
-    "debug": "runtime.debug",
 }
+_BASIC_NON_TASK_FIELDS = frozenset({"aliases", "jobs", "ffmpeg_path", "no_color", "no_progress", "debug"})
 _RESOURCE_CONFIG_PATHS = {
     "require_video": "resource.video",
     "require_audio": "resource.audio",
@@ -182,10 +178,10 @@ _AUTH_CONFIG_PATHS = {
 
 
 def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
-    """Merge explicit persistent settings over application defaults."""
+    """Resolve persistent task settings over application defaults."""
     values: dict[str, Any] = {}
     for field_name in config.basic.model_fields_set:
-        if field_name == "aliases":
+        if field_name in _BASIC_NON_TASK_FIELDS:
             continue
         path = _BASIC_CONFIG_PATHS.get(field_name)
         if path is None:
