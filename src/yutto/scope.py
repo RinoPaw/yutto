@@ -258,6 +258,14 @@ class ResolvedConfig:
                     result[f"{section}.{descriptor.name}"] = value
         return MappingProxyType(result)
 
+    def with_overrides(
+        self,
+        values: Mapping[str, Any] | None = None,
+        **overrides: Any,
+    ) -> ResolvedConfig:
+        """Return a new flat config with only the supplied values overriding this config."""
+        return ResolvedConfig(values, parent=self, **overrides)
+
     def flatten(self, *, stop_at: ResolvedConfig | None = None) -> dict[str, Any]:
         """兼容旧调用；配置已经是扁平的，因此这里只复制当前值。"""
         if self is stop_at:
