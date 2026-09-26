@@ -5,7 +5,6 @@ import math
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -24,7 +23,6 @@ from yutto.auth import (
     user_info_matches,
     validate_profile,
 )
-from yutto.config import ResolvedConfig
 from yutto.exceptions import ErrorCode
 from yutto.utils.console.logger import Badge, Logger
 from yutto.utils.fetcher import cookies_from_auth, create_client, resolve_proxy
@@ -32,8 +30,10 @@ from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
     from yutto._native import YuttoSession
+    from yutto.config import ResolvedConfig
     from yutto.types import UserInfo
 
 # 这些状态码来自 B 站二维码登录返回 data.code
