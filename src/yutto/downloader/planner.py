@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.downloader.selector import select_streams
@@ -11,6 +10,8 @@ from yutto.stream import resolve_audio_codecs, resolve_video_codecs
 from yutto.utils.time import TIME_FULL_FMT
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from yutto.config import ResolvedConfig
     from yutto.resource import ResourceManifest
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
