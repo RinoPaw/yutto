@@ -14,7 +14,6 @@ from yutto.cli.input import apply_cli_overrides, expand_download_configs
 from yutto.cli.parser import build_parser
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import resolve_config, resolved_config_from_settings, search_for_settings_file
-from yutto.config import ResolvedConfig
 from yutto.core.application import YuttoApplication
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import bind_download_report_sink
@@ -29,6 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from yutto.auth import AuthInfo
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScope
 
 
