@@ -35,9 +35,6 @@ _CLI_CONFIG_PATHS = {
     "sessdata": "auth.sessdata",
     "login_strict": "auth.login_strict",
     "vip_strict": "auth.vip_strict",
-    "mode": "auth.mode",
-    "poll_interval": "auth.poll_interval",
-    "timeout": "auth.timeout",
     "require_video": "resource.video",
     "require_audio": "resource.audio",
     "require_danmaku": "resource.danmaku",
@@ -94,6 +91,9 @@ _CLI_CONTROL_FIELDS = frozenset(
         "no_color",
         "no_progress",
         "debug",
+        "mode",
+        "poll_interval",
+        "timeout",
     }
 )
 
