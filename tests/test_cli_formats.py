@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -10,16 +11,16 @@ import yutto.cli.formats as formats_module
 from yutto.cli.compat import normalize_argv
 from yutto.cli.formats import (
     FormatListingEntry,
-    build_format_probe_scope,
+    build_format_probe_config,
     format_grouped_manifest_lines,
     format_index_ranges,
     format_manifest_lines,
 )
 from yutto.cli.parser import build_parser
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig, SourceSpec
 from yutto.downloader.selector import select_streams
 from yutto.media import UgcPage
 from yutto.resource import ResourceManifest
-from yutto.scope import ROOT_SCOPE, Scope
 from yutto.types import AId, AudioUrlMeta, CId, VideoUrlMeta
 from yutto.utils.metadata import ItemMetaData
 
@@ -29,8 +30,29 @@ if TYPE_CHECKING:
     from yutto.media.quality import AudioQuality, VideoQuality
 
 
-def _scope(values: dict[str, object] | None = None) -> Scope:
-    return Scope(values, parent=ROOT_SCOPE)
+def _config(
+    *,
+    metadata: bool = False,
+    ai_translation_language: str | None = None,
+    video_quality: int = 127,
+    video_codec: str = "avc:copy",
+    fetch_workers: int = 8,
+) -> ResolvedConfig:
+    return replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1xx411c7mD"),
+        resource=replace(
+            DEFAULT_CONFIG.resource,
+            metadata=metadata,
+            ai_translation_language=ai_translation_language,
+        ),
+        stream=replace(
+            DEFAULT_CONFIG.stream,
+            video_quality=video_quality,
+            video_codec=video_codec,
+        ),
+        network=replace(DEFAULT_CONFIG.network, fetch_workers=fetch_workers),
+    )
 
 
 def _video(
@@ -69,16 +91,10 @@ def test_download_parser_rejects_removed_list_formats_alias():
     assert exit_info.value.code == 2
 
 
-def test_format_probe_scope_fetches_only_stream_resources():
-    scope = _scope(
-        {
-            "source.value": "BV1xx411c7mD",
-            "resource.metadata": True,
-            "resource.ai_translation_language": "en",
-        }
-    )
+def test_format_probe_config_fetches_only_stream_resources():
+    config = _config(metadata=True, ai_translation_language="en")
 
-    probe = build_format_probe_scope(scope)
+    probe = build_format_probe_config(config)
 
     assert probe.resource.video is True
     assert probe.resource.audio is True
@@ -89,8 +105,8 @@ def test_format_probe_scope_fetches_only_stream_resources():
     assert probe.resource.chapter_info is False
     assert probe.resource.save_cover is False
     assert probe.resource.ai_translation_language == "en"
-    assert scope.resource.metadata is True
-    assert scope.resource.cover is True
+    assert config.resource.metadata is True
+    assert config.resource.cover is True
 
 
 def test_format_manifest_lines_use_legacy_style_without_urls():
@@ -131,15 +147,9 @@ def test_format_manifest_lines_mark_exact_download_selection():
     video_1080p = _video("https://signed.example/1080p")
     audio = _audio("https://signed.example/audio")
     manifest = ResourceManifest(videos=(video_4k, video_1080p), audios=(audio,))
-    scope = _scope(
-        {
-            "source.value": "BV1xx411c7mD",
-            "stream.video_quality": 80,
-            "stream.video_codec": "avc:copy",
-        }
-    )
+    config = _config(video_quality=80, video_codec="avc:copy")
 
-    selection = select_streams(manifest, scope)
+    selection = select_streams(manifest, config)
     rendered = format_manifest_lines(manifest, selection)
 
     selected_lines = [line for line in rendered if line.startswith("*")]
@@ -250,7 +260,7 @@ def test_grouped_format_listing_separates_different_displayed_mirror_counts():
 
 
 def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pytest.MonkeyPatch):
-    scope = _scope({"source.value": "BV1xx411c7mD", "network.fetch_workers": 2})
+    config = _config(fetch_workers=2)
     items = tuple(
         UgcPage(
             metadata=ItemMetaData(title=f"P{index}"),
@@ -265,7 +275,7 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
     async def fake_resolve_resource_manifest(
         _execution: object,
         _item: UgcPage,
-        _scope: Scope,
+        _config: ResolvedConfig,
     ) -> ResourceManifest:
         nonlocal active, max_active
         active += 1
@@ -280,7 +290,7 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
         formats_module.resolve_format_manifests(
             cast("ExecutionScope", object()),
             items,
-            scope,
+            config,
         )
     )
 
@@ -289,7 +299,7 @@ def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pyt
 
 
 def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.MonkeyPatch):
-    captured: list[list[Scope]] = []
+    captured: list[list[ResolvedConfig]] = []
 
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1xx411c7mD", "--preview-formats"])
     monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
@@ -297,7 +307,7 @@ def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         main_module,
         "run_preview_formats",
-        lambda _scope_factory, scopes, _renderer: captured.append(scopes),
+        lambda _scope_factory, configs, _renderer: captured.append(configs),
     )
     monkeypatch.setattr(
         main_module.FFmpeg,
@@ -313,4 +323,4 @@ def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.Monk
     main_module.main()
 
     assert len(captured) == 1
-    assert [scope.source.value for scope in captured[0]] == ["BV1xx411c7mD"]
+    assert [config.source.value for config in captured[0]] == ["BV1xx411c7mD"]
