@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from yutto.config import ResolvedConfig
 from yutto.core.execution import resolve_fetch_workers
 from yutto.core.operation import (
     ReportLevel,
@@ -17,7 +18,6 @@ from yutto.exceptions import HttpStatusError, NoAccessPermissionError, NotFoundE
 from yutto.listing import iter_media_items
 from yutto.media import UgcPage, UgcVideo
 from yutto.resource import ResourceManifest, resolve_resource_manifest
-from yutto.scope import Scope
 from yutto.stream_formats import (
     FormatSignature,
     emit_manifest_formats,
@@ -56,9 +56,9 @@ class _FormatGroup:
     entries: list[FormatListingEntry]
 
 
-def build_format_probe_scope(scope: Scope) -> Scope:
-    """Return a child Scope that resolves only stream resources needed for format preview."""
-    return Scope(
+def build_format_probe_config(config: ResolvedConfig) -> ResolvedConfig:
+    """Return a config that resolves only stream resources needed for format preview."""
+    return config.with_overrides(
         {
             "resource.video": True,
             "resource.audio": True,
@@ -68,8 +68,7 @@ def build_format_probe_scope(scope: Scope) -> Scope:
             "resource.cover": False,
             "resource.chapter_info": False,
             "resource.save_cover": False,
-        },
-        parent=scope,
+        }
     )
 
 
@@ -142,17 +141,17 @@ def emit_grouped_manifest_report(
 async def resolve_format_manifests(
     execution: ExecutionScope,
     items: Sequence[MediaItem],
-    scope: Scope,
+    config: ResolvedConfig,
 ) -> tuple[ResourceManifest | BaseException, ...]:
     """Resolve format manifests concurrently while respecting the configured fetch-worker limit."""
     if not items:
         return ()
 
-    probe_limiter = asyncio.Semaphore(min(resolve_fetch_workers(scope), len(items)))
+    probe_limiter = asyncio.Semaphore(min(resolve_fetch_workers(config), len(items)))
 
     async def resolve_one(item: MediaItem) -> ResourceManifest:
         async with probe_limiter:
-            return await resolve_resource_manifest(execution, item, scope)
+            return await resolve_resource_manifest(execution, item, config)
 
     results = await asyncio.gather(*(resolve_one(item) for item in items), return_exceptions=True)
     return tuple(results)
@@ -220,19 +219,19 @@ def _make_listing_entry(
 @as_sync
 async def run_preview_formats(
     scope_factory: ExecutionScopeFactory,
-    scopes: Sequence[Scope],
+    configs: Sequence[ResolvedConfig],
     renderer: CliApplicationEventRenderer,
 ) -> None:
-    """Preview stream formats for CLI scopes without downloading media."""
+    """Preview stream formats for resolved configs without downloading media."""
     manager = DownloadManager()
     listed_streams = False
 
     async with renderer:
         with bind_download_event_sink(renderer), bind_download_report_sink(renderer.report):
-            for scope in scopes:
-                async with scope_factory.open(scope) as execution:
-                    probe_scope = build_format_probe_scope(scope)
-                    result = await manager.resolve_scope(execution, probe_scope)
+            for config in configs:
+                async with scope_factory.open(config) as execution:
+                    probe_config = build_format_probe_config(config)
+                    result = await manager.resolve_config(execution, probe_config)
                     if result.media is None:
                         continue
 
@@ -241,10 +240,10 @@ async def run_preview_formats(
                         continue
                     items = tuple(item for _, _, item in resolved_items)
                     if len(items) > 1:
-                        concurrency = min(resolve_fetch_workers(probe_scope), len(items))
+                        concurrency = min(resolve_fetch_workers(probe_config), len(items))
                         emit_download_report(f"正在探测 {len(items)} 个条目的可用格式（并发 {concurrency}）…")
 
-                    outcomes = await resolve_format_manifests(execution, items, probe_scope)
+                    outcomes = await resolve_format_manifests(execution, items, probe_config)
                     entries: list[FormatListingEntry] = []
                     for index, ((ancestry, relation_index, item), outcome) in enumerate(
                         zip(resolved_items, outcomes, strict=True),
@@ -258,7 +257,7 @@ async def run_preview_formats(
                         if isinstance(outcome, BaseException):
                             raise outcome
 
-                        selection = select_streams(outcome, scope)
+                        selection = select_streams(outcome, config)
                         entries.append(_make_listing_entry(index, ancestry, relation_index, item, outcome, selection))
                         listed_streams = listed_streams or bool(outcome.videos or outcome.audios)
 
