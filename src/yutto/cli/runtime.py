@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from yutto.config import ResolvedConfig
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from yutto.cli.settings import YuttoConfig
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RuntimeOptions:
-    """CLI process options read from one flat resolved config."""
+    """Process-level options for one CLI/server invocation."""
 
     jobs: int
     ffmpeg_path: str | None
@@ -17,16 +21,32 @@ class RuntimeOptions:
     debug: bool
 
 
-def resolve_runtime_options(config: ResolvedConfig) -> RuntimeOptions:
-    jobs = config.runtime.jobs
-    if jobs < 1:
-        raise ValueError(f"jobs 参数值（{jobs}）不满足要求哦（应为不小于 1 的整数）")
+def resolve_runtime_options(values: Mapping[str, object], settings: YuttoConfig) -> RuntimeOptions:
+    """Resolve CLI overrides over persistent process-level settings."""
+    jobs_value = values.get("jobs", settings.basic.jobs if settings.basic.jobs is not None else 1)
+    if type(jobs_value) is not int or jobs_value < 1:
+        raise ValueError(f"jobs 参数值（{jobs_value}）不满足要求哦（应为不小于 1 的整数）")
+
+    ffmpeg_path = values.get("ffmpeg_path", settings.basic.ffmpeg_path)
+    if ffmpeg_path is not None and not isinstance(ffmpeg_path, str):
+        raise TypeError("ffmpeg_path must be a string or null")
 
     return RuntimeOptions(
-        jobs=jobs,
-        ffmpeg_path=config.runtime.ffmpeg_path,
-        preview_formats=config.runtime.preview_formats,
-        no_color=config.runtime.no_color,
-        no_progress=config.runtime.no_progress,
-        debug=config.runtime.debug,
+        jobs=jobs_value,
+        ffmpeg_path=ffmpeg_path,
+        preview_formats=_resolve_bool(values, "preview_formats"),
+        no_color=_resolve_bool(values, "no_color", settings.basic.no_color),
+        no_progress=_resolve_bool(values, "no_progress", settings.basic.no_progress),
+        debug=_resolve_bool(values, "debug", settings.basic.debug),
     )
+
+
+def _resolve_bool(
+    values: Mapping[str, object],
+    name: str,
+    configured: bool | None = None,
+) -> bool:
+    value = values.get(name, False if configured is None else configured)
+    if type(value) is not bool:
+        raise TypeError(f"{name} must be a boolean")
+    return value
