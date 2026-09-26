@@ -281,9 +281,6 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "format": "format",
             "font_size": "font_size",
             "font": "font",
-            "opacity": "opacity",
-            "display_region_ratio": "display_region_ratio",
-            "speed": "speed",
             "block_top": "block_top",
             "block_bottom": "block_bottom",
             "block_scroll": "block_scroll",
@@ -292,9 +289,12 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "block_colorful": "block_colorful",
         },
     )
-    for field in ("opacity", "display_region_ratio", "speed"):
-        if field in danmaku_updates:
-            danmaku_updates[field] = float(danmaku_updates[field])
+    if "opacity" in danmaku_request.model_fields_set:
+        danmaku_updates["opacity"] = float(danmaku_request.opacity)
+    if "display_region_ratio" in danmaku_request.model_fields_set:
+        danmaku_updates["display_region_ratio"] = float(danmaku_request.display_region_ratio)
+    if "speed" in danmaku_request.model_fields_set:
+        danmaku_updates["speed"] = float(danmaku_request.speed)
     if "block_keyword_patterns" in danmaku_request.model_fields_set:
         patterns = danmaku_request.block_keyword_patterns
         danmaku_updates["block_keyword_patterns"] = None if patterns is None else tuple(patterns)
