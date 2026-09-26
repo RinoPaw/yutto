@@ -153,10 +153,12 @@ def _request_validation_reason(error: ValidationError) -> str:
 def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> dict[str, Any]:
     values: dict[str, Any] = {"source.value": request.source.url}
 
-    _copy_present(
-        request.access,
+    access = request.access
+    if "auth_profile" in access.model_fields_set:
+        values["auth.profile"] = "default" if access.auth_profile is None else access.auth_profile
+    _copy_present_bools(
+        access,
         {
-            "auth_profile": "auth.profile",
             "login_strict": "auth.login_strict",
             "vip_strict": "auth.vip_strict",
         },
@@ -166,10 +168,12 @@ def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig
     selection = request.selection
     _copy_present(
         selection,
-        {
-            "expression": "selection.expression",
-            "skip_preview": "selection.skip_preview",
-        },
+        {"expression": "selection.expression"},
+        values,
+    )
+    _copy_present_bools(
+        selection,
+        {"skip_preview": "selection.skip_preview"},
         values,
     )
     for field, path in {
@@ -182,11 +186,11 @@ def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig
         values[path] = None if value is None else parse_local_timestamp(value)
 
     if "with_extra_episodes" in request.model_fields_set:
-        values["selection.with_extra_episodes"] = request.with_extra_episodes
+        values["selection.with_extra_episodes"] = bool(request.with_extra_episodes)
     if request.batch is True and "expression" not in selection.model_fields_set:
         values["selection.expression"] = "~"
 
-    _copy_present(
+    _copy_present_bools(
         request.resources,
         {
             "video": "resource.video",
@@ -197,8 +201,12 @@ def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig
             "cover": "resource.cover",
             "chapter_info": "resource.chapter_info",
             "save_cover": "resource.save_cover",
-            "ai_translation_language": "resource.ai_translation_language",
         },
+        values,
+    )
+    _copy_present(
+        request.resources,
+        {"ai_translation_language": "resource.ai_translation_language"},
         values,
     )
 
@@ -247,12 +255,12 @@ def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig
         {
             "format": "output.format",
             "audio_only_format": "output.audio_only_format",
-            "overwrite": "output.overwrite",
             "subpath_template": "output.subpath_template",
             "metadata_format_premiered": "output.metadata_premiered_format",
         },
         values,
     )
+    _copy_present_bools(output, {"overwrite": "output.overwrite"}, values)
 
     network = request.network
     _copy_present(
@@ -281,6 +289,12 @@ def _config_values_from_request(request: ConfigRequest, baseline: ResolvedConfig
             "opacity": "danmaku.opacity",
             "display_region_ratio": "danmaku.display_region_ratio",
             "speed": "danmaku.speed",
+        },
+        values,
+    )
+    _copy_present_bools(
+        danmaku,
+        {
             "block_top": "danmaku.block_top",
             "block_bottom": "danmaku.block_bottom",
             "block_scroll": "danmaku.block_scroll",
@@ -301,6 +315,12 @@ def _copy_present(model: BaseModel, paths: dict[str, str], target: dict[str, Any
     for field, path in paths.items():
         if field in model.model_fields_set:
             target[path] = getattr(model, field)
+
+
+def _copy_present_bools(model: BaseModel, paths: dict[str, str], target: dict[str, Any]) -> None:
+    for field, path in paths.items():
+        if field in model.model_fields_set:
+            target[path] = bool(getattr(model, field))
 
 
 __all__ = ["ConfigRequest", "config_parser_from_settings"]
