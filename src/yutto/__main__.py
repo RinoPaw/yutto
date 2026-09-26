@@ -10,7 +10,7 @@ from yutto.cli.compat import normalize_argv
 from yutto.cli.credentials import resolve_credential_options
 from yutto.cli.event_renderer import CliApplicationEventRenderer
 from yutto.cli.formats import run_preview_formats
-from yutto.cli.input import config_values_from_cli, expand_download_configs
+from yutto.cli.input import apply_cli_overrides, expand_download_configs
 from yutto.cli.parser import build_parser
 from yutto.cli.runtime import resolve_runtime_options
 from yutto.cli.settings import resolve_config, resolved_config_from_settings, search_for_settings_file
@@ -54,11 +54,11 @@ def main() -> None:
                 runtime = resolve_runtime_options(raw_values, config)
                 config_aliases = config.basic.aliases
                 aliases = raw_values.get("aliases", config_aliases)
-                cli_values, no_inherit = config_values_from_cli(
+                command_config, no_inherit = apply_cli_overrides(
+                    configured,
                     raw_values,
                     inherited_aliases=config_aliases,
                 )
-                command_config = configured.with_overrides(cli_values)
                 renderer.progress_enabled = not runtime.no_progress and sys.stdout.isatty()
 
                 with bind_download_report_sink(renderer.report):
@@ -132,8 +132,7 @@ def main() -> None:
 
         case "auth":
             try:
-                cli_values, _ = config_values_from_cli(raw_values)
-                command_config = configured.with_overrides(cli_values)
+                command_config, _ = apply_cli_overrides(configured, raw_values)
                 run_auth(command_config, auth_command, raw_values)
             except YuttoBaseException as error:
                 Logger.error(error.message)
