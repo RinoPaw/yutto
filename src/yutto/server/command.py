@@ -63,7 +63,7 @@ def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> Se
 
     values = vars(args)
     configured = resolved_config_from_settings(settings)
-    configured_runtime = resolve_runtime_options(values, settings)
+    runtime = resolve_runtime_options(values, settings)
     configured_fetch_workers = resolve_fetch_workers(configured)
     configured_download_workers = resolve_download_workers(configured)
 
@@ -73,7 +73,7 @@ def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> Se
 
     options = ServeOptions(
         request_settings=settings,
-        ffmpeg_path=str(values.get("ffmpeg_path", configured_runtime.ffmpeg_path or "ffmpeg")),
+        ffmpeg_path=runtime.ffmpeg_path or "ffmpeg",
         host=str(values.get("host", "127.0.0.1")),
         port=int(values.get("port", 11223)),
         allow_origin=tuple(values.get("allow_origin", ())),
@@ -96,7 +96,7 @@ def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> Se
         max_fetch_workers=int(values.get("max_fetch_workers", max(16, configured_fetch_workers))),
         max_download_workers=int(values.get("max_download_workers", max(16, configured_download_workers))),
         task_limit=int(values.get("task_limit", 256)),
-        jobs=int(values.get("jobs", configured_runtime.jobs)),
+        jobs=runtime.jobs,
     )
 
     if options.jobs < 1:
