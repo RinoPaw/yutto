@@ -171,7 +171,6 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
     if "vip_strict" in access_request.model_fields_set:
         access = replace(access, vip_strict=bool(access_request.vip_strict))
 
-    selection = baseline.selection
     selection_request = request.selection
     selection_updates: dict[str, object] = {}
     if "expression" in selection_request.model_fields_set:
@@ -188,7 +187,7 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
         selection_updates["with_extra_episodes"] = bool(request.with_extra_episodes)
     if request.batch is True and "expression" not in selection_request.model_fields_set:
         selection_updates["expression"] = "~"
-    selection = replace(selection, **selection_updates)
+    selection = replace(baseline.selection, **selection_updates)
 
     resources = request.resources
     resource_updates = _present_updates(
@@ -226,6 +225,8 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "video_quality": "video_quality",
             "audio_quality": "audio_quality",
         },
+        allow_none=False,
+        section="stream",
     )
     if "video_download_codec_priority" in stream_request.model_fields_set:
         priority = stream_request.video_download_codec_priority
@@ -263,6 +264,8 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "subpath_template": "subpath_template",
             "metadata_format_premiered": "metadata_premiered_format",
         },
+        allow_none=False,
+        section="output",
     )
     if "directory" in output_request.model_fields_set:
         if output_request.directory is None:
@@ -284,9 +287,12 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "fetch_workers": "fetch_workers",
             "download_workers": "download_workers",
             "download_interval": "download_interval",
-            "banned_mirrors_pattern": "banned_mirrors_pattern",
         },
+        allow_none=False,
+        section="network",
     )
+    if "banned_mirrors_pattern" in network_request.model_fields_set:
+        network_updates["banned_mirrors_pattern"] = network_request.banned_mirrors_pattern
     if "block_size_bytes" in network_request.model_fields_set:
         if network_request.block_size_bytes is None:
             raise ValueError("network.block_size_bytes must not be null")
@@ -298,15 +304,18 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
         danmaku_request,
         {
             "format": "format",
-            "font_size": "font_size",
             "font": "font",
             "opacity": "opacity",
             "display_region_ratio": "display_region_ratio",
             "speed": "speed",
         },
+        allow_none=False,
+        section="danmaku",
     )
+    if "font_size" in danmaku_request.model_fields_set:
+        danmaku_updates["font_size"] = danmaku_request.font_size
     for field in ("opacity", "display_region_ratio", "speed"):
-        if field in danmaku_updates and danmaku_updates[field] is not None:
+        if field in danmaku_updates:
             danmaku_updates[field] = float(danmaku_updates[field])
     for field in (
         "block_top",
@@ -337,12 +346,22 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
     )
 
 
-def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, object]:
-    return {
-        target: getattr(model, source)
-        for source, target in fields.items()
-        if source in model.model_fields_set
-    }
+def _present_updates(
+    model: BaseModel,
+    fields: dict[str, str],
+    *,
+    allow_none: bool = True,
+    section: str = "request",
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for source, target in fields.items():
+        if source not in model.model_fields_set:
+            continue
+        value = getattr(model, source)
+        if value is None and not allow_none:
+            raise ValueError(f"{section}.{source} must not be null")
+        result[target] = value
+    return result
 
 
 __all__ = ["ConfigRequest", "config_parser_from_settings"]
