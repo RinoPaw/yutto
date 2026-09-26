@@ -278,7 +278,7 @@ class DownloadManager:
             async with self._item_limiter:
                 if not await validate_user_info(
                     execution,
-                    {"is_login": config.auth.login_strict, "vip_status": config.auth.vip_strict},
+                    {"is_login": config.access.login_strict, "vip_status": config.access.vip_strict},
                 ):
                     raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
 
@@ -351,8 +351,8 @@ class DownloadManager:
         if not await validate_user_info(
             execution,
             {
-                "is_login": config.auth.login_strict,
-                "vip_status": config.auth.vip_strict,
+                "is_login": config.access.login_strict,
+                "vip_status": config.access.vip_strict,
             },
         ):
             raise NotLoginError("启用了严格校验大会员或登录模式，请检查认证信息（--auth）或大会员状态！")
