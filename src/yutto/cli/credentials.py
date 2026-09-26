@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -34,21 +33,10 @@ def resolve_credential_options(
 
     return [
         argparse.Namespace(
-            auth=str(_value(item.auth.cookie, "")),
-            auth_file=_auth_file(item),
-            auth_profile=str(_value(item.auth.profile, "default")),
-            sessdata=str(_value(item.auth.sessdata, "")),
+            auth=item.auth.cookie,
+            auth_file=item.auth.file,
+            auth_profile=item.auth.profile,
+            sessdata=item.auth.sessdata,
         )
         for item in resolved_configs
     ]
-
-
-def _value(value: object, default: object) -> object:
-    return default if value is MISSING or value is None else value
-
-
-def _auth_file(config: ResolvedConfig) -> Path | None:
-    value = config.auth.file
-    if value is MISSING or value is None:
-        return None
-    return value if isinstance(value, Path) else Path(value).expanduser()
