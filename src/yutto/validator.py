@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     import argparse
 
     from yutto.auth import AuthInfo
-    from yutto.scope import ResolvedConfig
+    from yutto.config import ResolvedConfig
     from yutto.utils.ffmpeg import FFmpeg
 
 
@@ -91,8 +91,3 @@ def validate_download_config(config: ResolvedConfig, ffmpeg: FFmpeg) -> None:
                 audio_save_codec, ", ".join(ffmpeg.audio_encodecs + ["copy"])
             )
         )
-
-
-def validate_download_scope(config: ResolvedConfig, ffmpeg: FFmpeg) -> None:
-    """Compatibility wrapper for validate_download_config."""
-    validate_download_config(config, ffmpeg)
