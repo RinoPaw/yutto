@@ -7,7 +7,6 @@ from string import Formatter
 from typing import TYPE_CHECKING
 
 from yutto.auth import load_auth, validate_profile
-from yutto.config import ResolvedConfig
 from yutto.core.execution import (
     RequestExecutionScopeFactory,
     resolve_download_workers,
@@ -35,6 +34,7 @@ from yutto.utils.fetcher import resolve_proxy
 
 if TYPE_CHECKING:
     from yutto.auth import AuthInfo
+    from yutto.config import ResolvedConfig
 
 
 class ServerPolicyError(ValueError):
