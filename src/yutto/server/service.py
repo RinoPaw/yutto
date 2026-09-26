@@ -7,6 +7,7 @@ from string import Formatter
 from typing import TYPE_CHECKING
 
 from yutto.auth import load_auth, validate_profile
+from yutto.config import MISSING, ResolvedConfig
 from yutto.core.execution import (
     RequestExecutionScopeFactory,
     resolve_download_workers,
@@ -16,9 +17,7 @@ from yutto.core.execution import (
 from yutto.downloader.planner import resolve_block_size_bytes
 from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
 from yutto.resource import resolve_danmaku_format, should_save_cover
-from yutto.scope import MISSING, ResolvedConfig
 from yutto.server.request import config_parser_from_settings as config_parser_from_settings
-from yutto.server.request import scope_parser_from_settings as scope_parser_from_settings
 from yutto.server.serialization import (
     event_to_json as event_to_json,
     replay_to_json as replay_to_json,
@@ -112,11 +111,7 @@ class ServerPolicy:
             }
         )
 
-    def prepare_scope(self, config: ResolvedConfig) -> ResolvedConfig:
-        """Compatibility wrapper for prepare_config."""
-        return self.prepare_config(config)
-
-    def build_scope_factory(self) -> RequestExecutionScopeFactory:
+    def build_execution_factory(self) -> RequestExecutionScopeFactory:
         """Build the shared config-to-runtime resource boundary used by server tasks."""
         return RequestExecutionScopeFactory(
             self.resolve_credentials,
