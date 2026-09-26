@@ -51,61 +51,6 @@ _CREDENTIAL_FIELDS = frozenset(
     }
 )
 
-# Internal config paths are explicitly projected onto the stable RPC wire schema.
-# Credential material is intentionally omitted; only the profile reference is exposed.
-_CONFIG_WIRE_FIELDS = (
-    ("source.value", "source.value"),
-    ("selection.expression", "selection.expression"),
-    ("selection.with_extra_episodes", "selection.with_extra_episodes"),
-    ("selection.skip_preview", "selection.skip_preview"),
-    ("selection.published_since", "selection.published_since"),
-    ("selection.published_before", "selection.published_before"),
-    ("credential.profile", "auth.profile"),
-    ("access.login_strict", "auth.login_strict"),
-    ("access.vip_strict", "auth.vip_strict"),
-    ("resource.video", "resource.video"),
-    ("resource.audio", "resource.audio"),
-    ("resource.danmaku", "resource.danmaku"),
-    ("resource.subtitle", "resource.subtitle"),
-    ("resource.metadata", "resource.metadata"),
-    ("resource.cover", "resource.cover"),
-    ("resource.chapter_info", "resource.chapter_info"),
-    ("resource.save_cover", "resource.save_cover"),
-    ("resource.ai_translation_language", "resource.ai_translation_language"),
-    ("stream.video_quality", "stream.video_quality"),
-    ("stream.audio_quality", "stream.audio_quality"),
-    ("stream.video_codec", "stream.video_codec"),
-    ("stream.audio_codec", "stream.audio_codec"),
-    ("stream.video_codec_priority", "stream.video_codec_priority"),
-    ("output.format", "output.format"),
-    ("output.audio_only_format", "output.audio_only_format"),
-    ("output.directory", "output.directory"),
-    ("output.temporary_directory", "output.temporary_directory"),
-    ("output.overwrite", "output.overwrite"),
-    ("output.subpath_template", "output.subpath_template"),
-    ("output.metadata_premiered_format", "output.metadata_premiered_format"),
-    ("network.proxy", "network.proxy"),
-    ("network.fetch_workers", "network.fetch_workers"),
-    ("network.download_workers", "network.download_workers"),
-    ("network.block_size", "network.block_size"),
-    ("network.download_interval", "network.download_interval"),
-    ("network.banned_mirrors_pattern", "network.banned_mirrors_pattern"),
-    ("danmaku.format", "danmaku.format"),
-    ("danmaku.font_size", "danmaku.font_size"),
-    ("danmaku.font", "danmaku.font"),
-    ("danmaku.opacity", "danmaku.opacity"),
-    ("danmaku.display_region_ratio", "danmaku.display_region_ratio"),
-    ("danmaku.speed", "danmaku.speed"),
-    ("danmaku.block_top", "danmaku.block_top"),
-    ("danmaku.block_bottom", "danmaku.block_bottom"),
-    ("danmaku.block_scroll", "danmaku.block_scroll"),
-    ("danmaku.block_reverse", "danmaku.block_reverse"),
-    ("danmaku.block_fixed", "danmaku.block_fixed"),
-    ("danmaku.block_special", "danmaku.block_special"),
-    ("danmaku.block_colorful", "danmaku.block_colorful"),
-    ("danmaku.block_keyword_patterns", "danmaku.block_keyword_patterns"),
-)
-
 
 def snapshot_to_json(snapshot: TaskSnapshot[PayloadT, ResultT]) -> dict[str, object]:
     """Project one task snapshot onto the stable RPC schema."""
@@ -179,20 +124,75 @@ def _snapshot_result_to_json(result: object) -> JsonValue:
 
 
 def _config_to_json(config: ResolvedConfig) -> dict[str, JsonValue]:
-    values = config.values
-    result: dict[str, JsonValue] = {}
-    for internal_path, wire_path in _CONFIG_WIRE_FIELDS:
-        if internal_path not in values:
-            continue
-        section, field = wire_path.split(".", 1)
-        value = values[internal_path]
-        section_value = result.setdefault(section, {})
-        assert isinstance(section_value, dict)
-        if internal_path == "network.proxy" and isinstance(value, str):
-            section_value[field] = _sanitize_proxy(value)
-        else:
-            section_value[field] = _wire_value(value)
-    return result
+    """Explicitly project typed task config onto the stable public wire schema."""
+    return {
+        "source": {
+            "value": _wire_value(config.source.value),
+        },
+        "selection": {
+            "expression": _wire_value(config.selection.expression),
+            "with_extra_episodes": config.selection.with_extra_episodes,
+            "skip_preview": config.selection.skip_preview,
+            "published_since": _wire_value(config.selection.published_since),
+            "published_before": _wire_value(config.selection.published_before),
+        },
+        "auth": {
+            "profile": config.credential.profile,
+            "login_strict": config.access.login_strict,
+            "vip_strict": config.access.vip_strict,
+        },
+        "resource": {
+            "video": config.resource.video,
+            "audio": config.resource.audio,
+            "danmaku": config.resource.danmaku,
+            "subtitle": config.resource.subtitle,
+            "metadata": config.resource.metadata,
+            "cover": config.resource.cover,
+            "chapter_info": config.resource.chapter_info,
+            "save_cover": config.resource.save_cover,
+            "ai_translation_language": _wire_value(config.resource.ai_translation_language),
+        },
+        "stream": {
+            "video_quality": config.stream.video_quality,
+            "audio_quality": config.stream.audio_quality,
+            "video_codec": config.stream.video_codec,
+            "audio_codec": config.stream.audio_codec,
+            "video_codec_priority": _wire_value(config.stream.video_codec_priority),
+        },
+        "output": {
+            "format": config.output.format,
+            "audio_only_format": config.output.audio_only_format,
+            "directory": _wire_value(config.output.directory),
+            "temporary_directory": _wire_value(config.output.temporary_directory),
+            "overwrite": config.output.overwrite,
+            "subpath_template": config.output.subpath_template,
+            "metadata_premiered_format": config.output.metadata_premiered_format,
+        },
+        "network": {
+            "proxy": _sanitize_proxy(config.network.proxy),
+            "fetch_workers": config.network.fetch_workers,
+            "download_workers": config.network.download_workers,
+            "block_size": config.network.block_size,
+            "download_interval": config.network.download_interval,
+            "banned_mirrors_pattern": _wire_value(config.network.banned_mirrors_pattern),
+        },
+        "danmaku": {
+            "format": config.danmaku.format,
+            "font_size": _wire_value(config.danmaku.font_size),
+            "font": config.danmaku.font,
+            "opacity": config.danmaku.opacity,
+            "display_region_ratio": config.danmaku.display_region_ratio,
+            "speed": config.danmaku.speed,
+            "block_top": config.danmaku.block_top,
+            "block_bottom": config.danmaku.block_bottom,
+            "block_scroll": config.danmaku.block_scroll,
+            "block_reverse": config.danmaku.block_reverse,
+            "block_fixed": config.danmaku.block_fixed,
+            "block_special": config.danmaku.block_special,
+            "block_colorful": config.danmaku.block_colorful,
+            "block_keyword_patterns": _wire_value(config.danmaku.block_keyword_patterns),
+        },
+    }
 
 
 def _download_result_to_json(result: DownloadResult) -> dict[str, JsonValue]:
