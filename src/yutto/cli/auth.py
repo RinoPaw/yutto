@@ -74,7 +74,7 @@ def resolve_auth_command_options(
     mode = values.get("mode", "terminal")
     poll_interval = values.get("poll_interval", 2.0)
     timeout = values.get("timeout", 180)
-    if mode not in ("terminal", "web"):
+    if not isinstance(mode, str) or mode not in ("terminal", "web"):
         raise ValueError("mode must be terminal or web")
     if type(poll_interval) is not float:
         raise TypeError("poll_interval must be a float")
