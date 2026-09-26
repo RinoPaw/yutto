@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from yutto.config import ResolvedConfig
 from yutto.core.events import DownloadBatchStarted, DownloadRequestQueued, NullDownloadEventSink
 from yutto.core.operation import bind_download_event_sink, emit_download_event
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from yutto.config import ResolvedConfig
     from yutto.core.events import DownloadEventSink
     from yutto.core.execution import ExecutionScopeFactory
     from yutto.core.result import DownloadResult, ResolveResult
