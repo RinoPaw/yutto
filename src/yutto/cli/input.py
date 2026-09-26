@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
 from yutto.cli.settings import resolved_config_from_settings
+from yutto.config import MISSING, ResolvedConfig
 from yutto.core.operation import emit_download_report
-from yutto.scope import MISSING, ResolvedConfig
 from yutto.utils.console.logger import Logger
 
 if TYPE_CHECKING:
@@ -158,15 +158,6 @@ def config_values_from_cli(
     return result, bool(values.get("no_inherit", False))
 
 
-def scope_values_from_cli(
-    values: Mapping[str, Any],
-    *,
-    inherited_aliases: Mapping[str, str] | None = None,
-) -> tuple[dict[str, Any], bool]:
-    """Compatibility wrapper for config_values_from_cli."""
-    return config_values_from_cli(values, inherited_aliases=inherited_aliases)
-
-
 def expand_download_configs(
     config: ResolvedConfig,
     parser: argparse.ArgumentParser,
@@ -215,26 +206,6 @@ def expand_download_configs(
             )
         )
     return result
-
-
-def expand_download_scopes(
-    scope: ResolvedConfig,
-    parser: argparse.ArgumentParser,
-    config: ResolvedConfig,
-    *,
-    no_inherit: bool = False,
-    aliases: Mapping[str, str] | None = None,
-    config_aliases: Mapping[str, str] | None = None,
-) -> list[ResolvedConfig]:
-    """Compatibility wrapper for expand_download_configs."""
-    return expand_download_configs(
-        scope,
-        parser,
-        config,
-        no_inherit=no_inherit,
-        aliases=aliases,
-        config_aliases=config_aliases,
-    )
 
 
 def expand_download_values(
