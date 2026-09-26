@@ -7,28 +7,28 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from pydantic import BaseModel
 
 import yutto.core.execution as execution_module
 from yutto.auth import load_auth
-from yutto.core.events import DownloadItemListed
+from yutto.cli.settings import YuttoConfig
+from yutto.config import CredentialSpec, ResolvedConfig, SourceSpec
 from yutto.core.execution import RequestExecutionScopeFactory
-from yutto.core.request import DownloadRequest
 from yutto.core.result import (
     Artifact,
     ArtifactKind,
     DownloadResult,
+    ItemFailure,
     ItemResult,
     ItemState,
-    ResolvedItem,
     ResolveResult,
 )
-from yutto.core.task_service import _encode_runtime_event
+from yutto.media import MediaEntry, UgcPage, UgcVideo
 from yutto.runtime import EventReplay, TaskError, TaskEvent, TaskSnapshot, TaskState
 from yutto.server.service import (
     ServerPolicy,
     ServerPolicyError,
     ServerPolicyOptions,
+    config_parser_from_settings,
     event_to_json,
     replay_to_json,
     snapshot_summary_to_json,
@@ -36,8 +36,11 @@ from yutto.server.service import (
 )
 from yutto.types import AId, CId
 from yutto.utils.functional import as_sync
+from yutto.utils.metadata import ItemMetaData
 
 pytestmark = pytest.mark.processor
+
+_PARSE_CONFIG = config_parser_from_settings(YuttoConfig())
 
 
 def make_policy(
@@ -57,33 +60,33 @@ def make_policy(
     )
 
 
-def make_request(**overrides: object) -> DownloadRequest:
+def make_config(**overrides: object) -> ResolvedConfig:
     payload: dict[str, object] = {"source": {"url": "BV1server"}}
     payload.update(overrides)
-    return DownloadRequest.model_validate(payload)
+    return _PARSE_CONFIG(payload)
 
 
-def test_prepare_request_resolves_output_paths_under_server_roots(tmp_path: Path):
+def test_prepare_config_resolves_output_paths_under_server_roots(tmp_path: Path):
     policy = make_policy(tmp_path)
-    request = make_request(
+    config = make_config(
         output={
             "directory": "shows/season-1",
             "temporary_directory": "segments/task-1",
         }
     )
 
-    prepared = policy.prepare_request(request)
+    prepared = policy.prepare_config(config)
 
     assert prepared.output.directory == (tmp_path / "downloads/shows/season-1").resolve()
     assert prepared.output.temporary_directory == (tmp_path / "temporary/segments/task-1").resolve()
-    assert request.output.directory == Path("shows/season-1")
-    assert request.output.temporary_directory == Path("segments/task-1")
+    assert config.output.directory == Path("shows/season-1")
+    assert config.output.temporary_directory == Path("segments/task-1")
 
 
-def test_prepare_request_uses_configured_roots_for_default_paths(tmp_path: Path):
+def test_prepare_config_uses_configured_roots_for_default_paths(tmp_path: Path):
     policy = make_policy(tmp_path)
 
-    prepared = policy.prepare_request(make_request())
+    prepared = policy.prepare_config(make_config())
 
     assert prepared.output.directory == (tmp_path / "downloads").resolve()
     assert prepared.output.temporary_directory == (tmp_path / "temporary").resolve()
@@ -98,14 +101,14 @@ def test_prepare_request_uses_configured_roots_for_default_paths(tmp_path: Path)
         ({"temporary_directory": "safe/../../outside"}, "output.temporary_directory must not contain"),
     ],
 )
-def test_prepare_request_rejects_absolute_and_parent_paths(tmp_path: Path, output: object, message: str):
+def test_prepare_config_rejects_absolute_and_parent_paths(tmp_path: Path, output: object, message: str):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match=message):
-        policy.prepare_request(make_request(output=output))
+        policy.prepare_config(make_config(output=output))
 
 
-def test_prepare_request_rejects_existing_symlink_escape(tmp_path: Path):
+def test_prepare_config_rejects_existing_symlink_escape(tmp_path: Path):
     policy = make_policy(tmp_path)
     policy.options.download_root.mkdir()
     outside = tmp_path / "outside"
@@ -113,42 +116,40 @@ def test_prepare_request_rejects_existing_symlink_escape(tmp_path: Path):
     (policy.options.download_root / "linked").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(ServerPolicyError, match="escapes its configured root"):
-        policy.prepare_request(make_request(output={"directory": "linked/result"}))
+        policy.prepare_config(make_config(output={"directory": "linked/result"}))
 
 
 @pytest.mark.parametrize("template", ["../outside/{title}", "safe/../../outside", "/outside/{title}"])
-def test_prepare_request_rejects_subpath_template_escape(tmp_path: Path, template: str):
+def test_prepare_config_rejects_subpath_template_escape(tmp_path: Path, template: str):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="subpath_template"):
-        policy.prepare_request(make_request(output={"subpath_template": template}))
+        policy.prepare_config(make_config(output={"subpath_template": template}))
 
 
 @pytest.mark.parametrize("template", ["{id:/>10}", "{title:.^2.0}/outside", "{title!x}", "{id:0>1000}"])
-def test_prepare_request_rejects_advanced_format_template_escape(tmp_path: Path, template: str):
+def test_prepare_config_rejects_advanced_format_template_escape(tmp_path: Path, template: str):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="subpath_template"):
-        policy.prepare_request(make_request(output={"subpath_template": template}))
+        policy.prepare_config(make_config(output={"subpath_template": template}))
 
 
-def test_prepare_request_marks_final_output_path_for_boundary_enforcement(tmp_path: Path):
+@as_sync
+async def test_execution_factory_enforces_final_output_boundary(tmp_path: Path):
     policy = make_policy(tmp_path)
-
-    prepared = policy.prepare_request(
-        make_request(output={"subpath_template": "series/{pubdate@%Y-%m-%d %H:%M:%S}/{id:0>3}{title}"})
+    prepared = policy.prepare_config(
+        make_config(output={"subpath_template": "series/{pubdate@%Y-%m-%d %H:%M:%S}/{id:0>3}{title}"})
     )
 
-    assert prepared.output.enforce_directory_boundary is True
-    assert "enforce_directory_boundary" not in prepared.model_dump(mode="json")["output"]
+    async with policy.build_execution_factory().open(prepared) as execution:
+        assert execution.enforce_output_boundary is True
 
 
 @pytest.mark.parametrize(
     "network",
     [
-        {"fetch_workers": 0},
         {"fetch_workers": 5},
-        {"download_workers": 0},
         {"download_workers": 7},
     ],
 )
@@ -156,14 +157,14 @@ def test_policy_rejects_worker_counts_outside_configured_limits(tmp_path: Path, 
     policy = make_policy(tmp_path, max_fetch_workers=4, max_download_workers=6)
 
     with pytest.raises(ServerPolicyError, match="must be between 1 and"):
-        policy.prepare_request(make_request(network=network))
+        policy.prepare_config(make_config(network=network))
 
 
-def test_prepare_request_rejects_invalid_auth_profile(tmp_path: Path):
+def test_prepare_config_rejects_invalid_auth_profile(tmp_path: Path):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="auth profile 名称不合法"):
-        policy.prepare_request(make_request(access={"auth_profile": "bad profile"}))
+        policy.prepare_config(make_config(access={"auth_profile": "bad profile"}))
 
 
 @pytest.mark.parametrize("block_size", [0, -1, 64 * 1024 - 1, 64 * 1024 * 1024 + 1])
@@ -171,7 +172,7 @@ def test_policy_rejects_unsafe_block_sizes(tmp_path: Path, block_size: int):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="block_size_bytes"):
-        policy.prepare_request(make_request(network={"block_size_bytes": block_size}))
+        policy.prepare_config(make_config(network={"block_size_bytes": block_size}))
 
 
 def test_policy_rejects_ffmpeg_save_codecs_outside_server_capabilities(tmp_path: Path):
@@ -186,9 +187,9 @@ def test_policy_rejects_ffmpeg_save_codecs_outside_server_capabilities(tmp_path:
     )
 
     with pytest.raises(ServerPolicyError, match="video save codec"):
-        policy.prepare_request(make_request(stream={"video_save_codec": "av1"}))
+        policy.prepare_config(make_config(stream={"video_save_codec": "av1"}))
     with pytest.raises(ServerPolicyError, match="audio save codec"):
-        policy.prepare_request(make_request(stream={"audio_save_codec": "flac"}))
+        policy.prepare_config(make_config(stream={"audio_save_codec": "flac"}))
 
 
 @pytest.mark.parametrize("field", ["max_fetch_workers", "max_download_workers"])
@@ -205,7 +206,7 @@ def test_options_reject_non_positive_worker_limits(tmp_path: Path, field: str):
 
 
 @as_sync
-async def test_scope_factory_applies_request_network_and_selected_auth_profile(
+async def test_execution_factory_applies_config_network_and_selected_auth_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -221,7 +222,7 @@ bili_jct = "csrf-value"
 """.strip(),
         encoding="utf-8",
     )
-    request = make_request(
+    config = make_config(
         access={"auth_profile": "work"},
         network={"proxy": "no", "fetch_workers": 3},
     )
@@ -236,15 +237,15 @@ bili_jct = "csrf-value"
 
     monkeypatch.setattr(execution_module, "create_client", capture_client)
 
-    async with policy.build_scope_factory().open(request) as scope:
+    async with policy.build_execution_factory().open(config) as execution:
         assert captured["trust_env"] is False
-        assert scope.fetch_limiter._value == 3
-        assert scope.session.cookie("SESSDATA") == "session%2Cvalue"
-        assert scope.session.cookie("bili_jct") == "csrf-value"
+        assert execution.fetch_limiter._value == 3
+        assert execution.session.cookie("SESSDATA") == "session%2Cvalue"
+        assert execution.session.cookie("bili_jct") == "csrf-value"
 
 
 @as_sync
-async def test_cli_and_server_scope_factories_interpret_same_request_equivalently(tmp_path: Path):
+async def test_cli_and_server_execution_factories_interpret_same_config_equivalently(tmp_path: Path):
     policy = make_policy(tmp_path)
     policy.options.auth_file.write_text(
         """
@@ -254,7 +255,7 @@ bili_jct = "csrf-value"
 """.strip(),
         encoding="utf-8",
     )
-    request = make_request(
+    config = make_config(
         access={"auth_profile": "work"},
         network={
             "proxy": "no",
@@ -263,52 +264,46 @@ bili_jct = "csrf-value"
         },
     )
     cli_factory = RequestExecutionScopeFactory(
-        lambda active_request: load_auth(
+        lambda active_config: load_auth(
             policy.options.auth_file,
-            active_request.access.auth_profile,
+            active_config.credential.profile,
         )
     )
 
     async with (
-        cli_factory.open(request) as cli_scope,
-        policy.build_scope_factory().open(request) as server_scope,
+        cli_factory.open(config) as cli_execution,
+        policy.build_execution_factory().open(config) as server_execution,
     ):
         assert (
-            cli_scope.fetch_limiter._value,
-            cli_scope.download_workers,
-            cli_scope.session.cookie("SESSDATA"),
-            cli_scope.session.cookie("bili_jct"),
+            cli_execution.fetch_limiter._value,
+            cli_execution.download_workers,
+            cli_execution.session.cookie("SESSDATA"),
+            cli_execution.session.cookie("bili_jct"),
         ) == (
-            server_scope.fetch_limiter._value,
-            server_scope.download_workers,
-            server_scope.session.cookie("SESSDATA"),
-            server_scope.session.cookie("bili_jct"),
+            server_execution.fetch_limiter._value,
+            server_execution.download_workers,
+            server_execution.session.cookie("SESSDATA"),
+            server_execution.session.cookie("bili_jct"),
         )
 
 
-def test_scope_factory_rejects_invalid_auth_profile_without_exposing_auth_file(tmp_path: Path):
+def test_execution_factory_rejects_invalid_auth_profile_without_exposing_auth_file(tmp_path: Path):
     policy = make_policy(tmp_path)
 
     with pytest.raises(ServerPolicyError, match="auth profile"):
-        policy.resolve_credentials(make_request(access={"auth_profile": "bad profile"}))
-
-
-class CredentialPayload(BaseModel):
-    url: str
-    auth_profile: str
-    SESSDATA: str
-    nested: dict[str, str]
+        policy.resolve_credentials(make_config(access={"auth_profile": "bad profile"}))
 
 
 def test_snapshot_serialization_is_json_compatible_and_removes_credentials():
     created_at = datetime(2026, 7, 12, 10, 11, 12, tzinfo=UTC)
-    payload = CredentialPayload(
-        url="BV1safe",
-        auth_profile="work",
-        SESSDATA="session-secret",
-        nested={"token": "token-secret", "visible": "kept"},
+    payload = ResolvedConfig(
+        source=SourceSpec(value="BV1safe"),
+        credential=CredentialSpec(
+            cookie="SESSDATA=session-secret",
+            profile="work",
+        ),
     )
-    snapshot = TaskSnapshot[object, object](
+    snapshot = TaskSnapshot[ResolvedConfig, None](
         task_id="task-1",
         state=TaskState.FAILED,
         payload=payload,
@@ -321,22 +316,20 @@ def test_snapshot_serialization_is_json_compatible_and_removes_credentials():
     )
 
     serialized = snapshot_to_json(snapshot)
+    serialized_payload = cast("dict[str, object]", serialized["payload"])
+    serialized_auth = cast("dict[str, object]", serialized_payload["auth"])
 
-    assert serialized == {
-        "task_id": "task-1",
-        "state": "failed",
-        "payload": {
-            "url": "BV1safe",
-            "auth_profile": "work",
-            "nested": {"visible": "kept"},
-        },
-        "result": None,
-        "error": {"code": "internal_error", "type": "ExampleError", "message": "failed"},
-        "created_at": "2026-07-12T10:11:12+00:00",
-        "started_at": "2026-07-12T10:11:12+00:00",
-        "finished_at": "2026-07-12T10:11:12+00:00",
-        "last_event_seq": 4,
+    assert serialized["task_id"] == "task-1"
+    assert serialized["state"] == "failed"
+    assert serialized["result"] is None
+    assert serialized["error"] == {
+        "code": "internal_error",
+        "type": "ExampleError",
+        "message": "failed",
     }
+    assert cast("dict[str, object]", serialized_payload["source"])["value"] == "BV1safe"
+    assert serialized_auth["profile"] == "work"
+    assert "cookie" not in serialized_auth
     assert "secret" not in json.dumps(serialized)
     assert snapshot_summary_to_json(snapshot)["error"] == {
         "code": "internal_error",
@@ -344,12 +337,12 @@ def test_snapshot_serialization_is_json_compatible_and_removes_credentials():
     }
 
 
-def test_request_snapshot_removes_proxy_userinfo():
+def test_config_snapshot_removes_proxy_userinfo():
     created_at = datetime(2026, 7, 12, 10, 11, 12, tzinfo=UTC)
-    snapshot = TaskSnapshot[DownloadRequest, None](
+    snapshot = TaskSnapshot[ResolvedConfig, None](
         task_id="task-proxy",
         state=TaskState.QUEUED,
-        payload=make_request(network={"proxy": "http://proxy-user:proxy-password@example.test:8080"}),
+        payload=make_config(network={"proxy": "http://proxy-user:proxy-password@example.test:8080"}),
         result=None,
         error=None,
         created_at=created_at,
@@ -365,21 +358,27 @@ def test_request_snapshot_removes_proxy_userinfo():
     assert "proxy-password" not in json.dumps(serialized)
 
 
-def test_download_result_serializes_paths_enums_and_tuples():
+def test_download_result_serializes_explicit_identity_and_failure_schema():
     created_at = datetime(2026, 7, 12, 10, 11, 12, tzinfo=UTC)
     result = DownloadResult(
         items=(
             ItemResult(
+                planned_path=Path("series/video"),
                 state=ItemState.DONE,
                 output_path=Path("series/video.mp4"),
                 artifacts=(Artifact(kind=ArtifactKind.MEDIA, path=Path("series/video.mp4")),),
             ),
+            ItemResult(
+                planned_path=Path("series/missing"),
+                state=ItemState.FAILED,
+                failure=ItemFailure(type="NotFoundError", message="missing", code=404),
+            ),
         )
     )
-    snapshot = TaskSnapshot[DownloadRequest, DownloadResult](
+    snapshot = TaskSnapshot[ResolvedConfig, DownloadResult](
         task_id="task-result",
         state=TaskState.COMPLETED,
-        payload=make_request(),
+        payload=make_config(),
         result=result,
         error=None,
         created_at=created_at,
@@ -393,109 +392,71 @@ def test_download_result_serializes_paths_enums_and_tuples():
     assert serialized["result"] == {
         "items": [
             {
+                "planned_path": "series/video",
                 "state": "done",
                 "output_path": "series/video.mp4",
                 "skip_reason": None,
                 "artifacts": [{"kind": "media", "path": "series/video.mp4"}],
-            }
+            },
+            {
+                "planned_path": "series/missing",
+                "state": "failed",
+                "output_path": None,
+                "skip_reason": None,
+                "artifacts": [],
+                "failure": {"type": "NotFoundError", "message": "missing", "code": 404},
+            },
         ]
     }
 
 
-def test_listing_event_and_result_share_jsonrpc_wire_shape():
+def test_resolve_result_serializes_media_tree():
     created_at = datetime(2026, 7, 12, 11, 12, 13, tzinfo=UTC)
-
-    def serialize_both(item: ResolvedItem) -> tuple[dict[str, object], dict[str, object]]:
-        kind, data = _encode_runtime_event(DownloadItemListed(item=item))
-        event = TaskEvent(
-            task_id="task-listing",
-            seq=1,
-            kind=kind,
-            state=TaskState.RUNNING,
-            created_at=created_at,
-            data=data,
-        )
-        snapshot = TaskSnapshot[DownloadRequest, ResolveResult](
-            task_id="task-listing",
-            state=TaskState.COMPLETED,
-            payload=make_request(),
-            result=ResolveResult(items=(item,)),
-            error=None,
-            created_at=created_at,
-            started_at=created_at,
-            finished_at=created_at,
-            last_event_seq=1,
-        )
-        event_wire = cast("dict[str, object]", event_to_json(event)["data"])
-        result = cast("dict[str, object]", snapshot_to_json(snapshot)["result"])
-        result_wire = cast("list[dict[str, object]]", result["items"])[0]
-        return event_wire, result_wire
-
-    item = ResolvedItem(
-        avid=AId("1"),
+    aid = AId("808982399")
+    page = UgcPage(
+        aid=aid,
         cid=CId("10"),
-        url="https://www.bilibili.com/video/av1?p=1",
-        name="P1",
-        title="标题",
-        cover_url="https://example.com/cover.jpg",
-        planned_path=Path("标题/P1"),
-        display_group="标题",
-        uploader="某UP主",
-        description="视频简介",
-        tags=("标签A", "标签B"),
-        pubdate=1698148800,
-        duration=1559,
+        metadata=ItemMetaData(title="P2", duration=1559),
     )
-    expected = {
-        "avid": "1",
-        "cid": "10",
-        "url": "https://www.bilibili.com/video/av1?p=1",
-        "name": "P1",
-        "title": "标题",
-        "cover_url": "https://example.com/cover.jpg",
-        "planned_path": "标题/P1",
-        "display_group": "标题",
-        "uploader": "某UP主",
-        "description": "视频简介",
-        "tags": ["标签A", "标签B"],
-        "pubdate": 1698148800,
-        "duration": 1559,
-    }
-    event_wire, result_wire = serialize_both(item)
-
-    assert event_wire == result_wire == expected
-    assert type(event_wire["avid"]) is str
-    assert type(event_wire["planned_path"]) is str
-    assert type(event_wire["tags"]) is list
-    assert type(event_wire["pubdate"]) is int
-    assert type(event_wire["duration"]) is int
-
-    default_item = ResolvedItem(
-        avid=AId("2"),
-        cid=CId("20"),
-        url="https://www.bilibili.com/video/av2?p=1",
-        name="单集",
-        title="单集",
-        cover_url="",
-        planned_path=Path("单集"),
+    video = UgcVideo(
+        aid=aid,
+        metadata=ItemMetaData(title="标题", owner="某UP主", tag=["标签A", "标签B"]),
+        items=(MediaEntry(index=2, media=page),),
     )
-    default_expected = {
-        "avid": "2",
-        "cid": "20",
-        "url": "https://www.bilibili.com/video/av2?p=1",
-        "name": "单集",
-        "title": "单集",
-        "cover_url": "",
-        "planned_path": "单集",
-        "display_group": None,
-        "uploader": "",
-        "description": "",
-        "tags": [],
-        "pubdate": 0,
-        "duration": 0,
-    }
+    snapshot = TaskSnapshot[ResolvedConfig, ResolveResult](
+        task_id="task-listing",
+        state=TaskState.COMPLETED,
+        payload=make_config(),
+        result=ResolveResult(items=(video,)),
+        error=None,
+        created_at=created_at,
+        started_at=created_at,
+        finished_at=created_at,
+        last_event_seq=1,
+    )
 
-    assert serialize_both(default_item) == (default_expected, default_expected)
+    result = cast("dict[str, object]", snapshot_to_json(snapshot)["result"])
+    media = cast("list[dict[str, object]]", result["items"])
+    video_wire = media[0]
+    page_wire = cast("list[dict[str, object]]", video_wire["items"])[0]
+    video_metadata = cast("dict[str, object]", video_wire["metadata"])
+    page_metadata = cast("dict[str, object]", page_wire["metadata"])
+
+    assert result["failures"] == []
+    assert video_wire["type"] == "UgcVideo"
+    assert video_wire["aid"] == "808982399"
+    assert video_metadata["title"] == "标题"
+    assert video_metadata["owner"] == "某UP主"
+    assert video_metadata["tag"] == ["标签A", "标签B"]
+    assert "chapter_info_data" not in video_metadata
+    assert page_wire["type"] == "UgcPage"
+    assert page_wire["aid"] == "808982399"
+    assert page_wire["index"] == 2
+    assert page_wire["cid"] == "10"
+    assert page_metadata["title"] == "P2"
+    assert page_metadata["duration"] == 1559
+    assert "planned_path" not in video_wire
+    json.dumps(result)
 
 
 def test_event_and_replay_serialization_use_enum_values_iso_dates_and_redaction():

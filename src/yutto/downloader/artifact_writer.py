@@ -1,22 +1,24 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from biliass import BlockOptions
 
 from yutto.core.result import Artifact, ArtifactKind
 from yutto.utils.danmaku import write_danmaku
-from yutto.utils.metadata import write_chapter_info, write_metadata
-from yutto.utils.subtitle import write_subtitle
+from yutto.utils.metadata import ChapterInfoData, write_chapter_info, write_metadata
+from yutto.utils.subtitle import SubtitleData, write_subtitle
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from yutto.downloader.downloaded import Downloaded
     from yutto.downloader.planner import DownloadPlan
-    from yutto.types import EpisodeData
-    from yutto.utils.danmaku import DanmakuOptions
+    from yutto.utils.danmaku import DanmakuData, DanmakuOptions
+    from yutto.utils.metadata import ItemMetaData
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,26 +33,46 @@ class WrittenResource:
 
 
 class ArtifactWriter:
-    """Own resource sidecars and temporary muxing resources."""
+    """Write already-downloaded resources according to a DownloadPlan."""
 
-    def write(self, episode_data: EpisodeData, plan: DownloadPlan) -> Iterator[WrittenResource]:
+    def write(
+        self,
+        metadata: ItemMetaData,
+        plan: DownloadPlan,
+        downloaded: Downloaded,
+    ) -> Iterator[WrittenResource]:
         resources = plan.resources
 
-        if resources.subtitle_languages:
+        if downloaded.subtitles:
             paths = tuple(
-                write_subtitle(subtitle["lines"], plan.paths.output, subtitle["lang"])
-                for subtitle in episode_data["subtitles"]
+                write_subtitle(
+                    cast(
+                        "SubtitleData",
+                        [{"content": line.content, "from": line.start, "to": line.end} for line in subtitle.lines],
+                    ),
+                    plan.paths.output,
+                    subtitle.lang,
+                )
+                for subtitle in downloaded.subtitles
             )
             yield WrittenResource(
                 kind=ArtifactKind.SUBTITLE,
                 paths=paths,
-                labels=resources.subtitle_languages,
+                labels=tuple(subtitle.lang for subtitle in downloaded.subtitles),
             )
 
-        if resources.has_danmaku:
+        danmaku = downloaded.danmaku
+        if danmaku is not None and danmaku.data:
             paths = tuple(
                 write_danmaku(
-                    episode_data["danmaku"],
+                    cast(
+                        "DanmakuData",
+                        {
+                            "source_type": danmaku.source_type,
+                            "save_type": danmaku.save_type,
+                            "data": list(danmaku.data),
+                        },
+                    ),
                     plan.paths.output,
                     resources.danmaku_height,
                     resources.danmaku_width,
@@ -60,42 +82,39 @@ class ArtifactWriter:
             yield WrittenResource(
                 kind=ArtifactKind.DANMAKU,
                 paths=paths,
-                labels=(str(resources.danmaku_save_type),),
+                labels=(str(danmaku.save_type),),
             )
 
+        chapter_info_data = tuple(
+            ChapterInfoData(start=chapter.start, end=chapter.end, content=chapter.content)
+            for chapter in downloaded.chapters
+        )
         if resources.has_metadata:
-            metadata = episode_data["metadata"]
-            assert metadata is not None
             path = write_metadata(
                 metadata,
                 plan.paths.output,
                 {
-                    "premiered": resources.metadata.premiered,
-                    "dateadded": resources.metadata.dateadded,
+                    "premiered": resources.metadata.published_at,
+                    "dateadded": resources.metadata.added_at,
                 },
+                chapter_info_data=chapter_info_data,
             )
             yield WrittenResource(kind=ArtifactKind.METADATA, paths=(path,))
 
-        if resources.has_cover:
-            cover_data = episode_data["cover_data"]
-            assert cover_data is not None
-            plan.paths.cover.write_bytes(cover_data)
-            if resources.save_cover:
-                plan.paths.saved_cover.write_bytes(cover_data)
-                yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
+        if downloaded.cover_path is not None and resources.save_cover:
+            shutil.copyfile(downloaded.cover_path, plan.paths.saved_cover)
+            yield WrittenResource(kind=ArtifactKind.COVER, paths=(plan.paths.saved_cover,))
 
-        if resources.has_chapter_info:
+        if chapter_info_data:
             write_chapter_info(
                 plan.item,
-                episode_data["chapter_info_data"],
+                chapter_info_data,
                 plan.paths.chapter_info,
             )
 
     def cleanup_temporary(self, plan: DownloadPlan) -> None:
-        if plan.resources.has_chapter_info:
-            plan.paths.chapter_info.unlink(missing_ok=True)
-        if plan.resources.has_cover:
-            plan.paths.cover.unlink(missing_ok=True)
+        plan.paths.chapter_info.unlink(missing_ok=True)
+        plan.paths.cover.unlink(missing_ok=True)
 
 
 def create_danmaku_options(plan: DownloadPlan) -> DanmakuOptions:

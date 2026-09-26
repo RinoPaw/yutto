@@ -1,41 +1,65 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, Self, assert_never
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol, Self, TypeVar, assert_never
 
 from yutto.core.events import (
     DownloadArtifactCreated,
     DownloadBatchStarted,
     DownloadEvent,
     DownloadEventSink,
-    DownloadItemListed,
     DownloadItemSkipped,
     DownloadMediaSelected,
     DownloadProgress,
     DownloadRequestQueued,
     DownloadStageChanged,
 )
-from yutto.core.request import DownloadRequest
 from yutto.core.result import DownloadResult, ResolveResult
-from yutto.core.serialization import listing_item_to_wire
-from yutto.runtime import TaskRuntime
+from yutto.runtime import TaskRuntime, TaskSnapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScopeFactory
-    from yutto.runtime import EventReplay, TaskCapacityPool, TaskContext, TaskEvent, TaskSnapshot
+    from yutto.runtime import EventReplay, TaskCapacityPool, TaskContext, TaskEvent
+
+
+_ResultT = TypeVar("_ResultT")
+
+
+@dataclass(frozen=True, slots=True)
+class _TaskConfig:
+    """Keep the submitted request config separate from the config used for execution."""
+
+    request: ResolvedConfig
+    execution: ResolvedConfig
+
+
+def _public_snapshot(snapshot: TaskSnapshot[_TaskConfig, _ResultT]) -> TaskSnapshot[ResolvedConfig, _ResultT]:
+    return TaskSnapshot(
+        task_id=snapshot.task_id,
+        state=snapshot.state,
+        payload=snapshot.payload.request,
+        result=snapshot.result,
+        error=snapshot.error,
+        created_at=snapshot.created_at,
+        started_at=snapshot.started_at,
+        finished_at=snapshot.finished_at,
+        last_event_seq=snapshot.last_event_seq,
+    )
 
 
 class DownloadApplication(Protocol):
-    async def download(self, request: DownloadRequest) -> DownloadResult: ...
+    async def download(self, config: ResolvedConfig) -> DownloadResult: ...
 
 
 class ResolveApplication(Protocol):
-    async def resolve(self, request: DownloadRequest) -> ResolveResult: ...
+    async def resolve(self, config: ResolvedConfig) -> ResolveResult: ...
 
 
 class DownloadTaskService:
-    """Run frontend-independent download requests through a bounded worker runtime."""
+    """Run frontend-independent download configs through a bounded worker runtime."""
 
     def __init__(
         self,
@@ -51,7 +75,7 @@ class DownloadTaskService:
     ):
         self._scope_factory = scope_factory
         self._application_factory = application_factory
-        self.runtime = TaskRuntime[DownloadRequest, DownloadResult](
+        self.runtime = TaskRuntime[_TaskConfig, DownloadResult](
             self._run,
             worker_count=worker_count,
             replay_limit=replay_limit,
@@ -74,17 +98,28 @@ class DownloadTaskService:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, DownloadResult]:
-        return await self.runtime.submit(request)
+    async def submit(
+        self,
+        config: ResolvedConfig,
+        *,
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, DownloadResult]:
+        task_config = _TaskConfig(
+            request=config,
+            execution=config if execution_config is None else execution_config,
+        )
+        return _public_snapshot(await self.runtime.submit(task_config))
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None:
-        return self.runtime.get(task_id)
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None:
+        snapshot = self.runtime.get(task_id)
+        return None if snapshot is None else _public_snapshot(snapshot)
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, DownloadResult], ...]:
-        return self.runtime.list()
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, DownloadResult], ...]:
+        return tuple(_public_snapshot(snapshot) for snapshot in self.runtime.list())
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None:
-        return await self.runtime.cancel(task_id)
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None:
+        snapshot = await self.runtime.cancel(task_id)
+        return None if snapshot is None else _public_snapshot(snapshot)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
         return self.runtime.replay(task_id, after_seq=after_seq)
@@ -92,13 +127,13 @@ class DownloadTaskService:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, request: DownloadRequest, task_context: TaskContext) -> DownloadResult:
+    async def _run(self, task_config: _TaskConfig, task_context: TaskContext) -> DownloadResult:
         application = self._application_factory(self._scope_factory, _RuntimeDownloadEventSink(task_context))
-        return await application.download(request)
+        return await application.download(task_config.execution)
 
 
 class ResolveTaskService:
-    """Run frontend-independent resolve requests through a single-worker runtime.
+    """Run frontend-independent resolve configs through a single-worker runtime.
 
     Resolve tasks run in their own runtime so that enumerating a collection is
     never queued behind a long-running download task.
@@ -117,7 +152,7 @@ class ResolveTaskService:
     ):
         self._scope_factory = scope_factory
         self._application_factory = application_factory
-        self.runtime = TaskRuntime[DownloadRequest, ResolveResult](
+        self.runtime = TaskRuntime[_TaskConfig, ResolveResult](
             self._run,
             worker_count=1,
             replay_limit=replay_limit,
@@ -140,17 +175,28 @@ class ResolveTaskService:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, ResolveResult]:
-        return await self.runtime.submit(request)
+    async def submit(
+        self,
+        config: ResolvedConfig,
+        *,
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, ResolveResult]:
+        task_config = _TaskConfig(
+            request=config,
+            execution=config if execution_config is None else execution_config,
+        )
+        return _public_snapshot(await self.runtime.submit(task_config))
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None:
-        return self.runtime.get(task_id)
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None:
+        snapshot = self.runtime.get(task_id)
+        return None if snapshot is None else _public_snapshot(snapshot)
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, ResolveResult], ...]:
-        return self.runtime.list()
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, ResolveResult], ...]:
+        return tuple(_public_snapshot(snapshot) for snapshot in self.runtime.list())
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None:
-        return await self.runtime.cancel(task_id)
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None:
+        snapshot = await self.runtime.cancel(task_id)
+        return None if snapshot is None else _public_snapshot(snapshot)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
         return self.runtime.replay(task_id, after_seq=after_seq)
@@ -158,9 +204,9 @@ class ResolveTaskService:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, request: DownloadRequest, task_context: TaskContext) -> ResolveResult:
+    async def _run(self, task_config: _TaskConfig, task_context: TaskContext) -> ResolveResult:
         application = self._application_factory(self._scope_factory, _RuntimeDownloadEventSink(task_context))
-        return await application.resolve(request)
+        return await application.resolve(task_config.execution)
 
 
 class _RuntimeDownloadEventSink:
@@ -229,7 +275,5 @@ def _encode_runtime_event(event: DownloadEvent) -> tuple[str, dict[str, object]]
             return "item_skipped", {"item": item, "reason": reason.value}
         case DownloadArtifactCreated(item=item, path=path):
             return "artifact_created", {"path": path.as_posix(), "item": item}
-        case DownloadItemListed(item=item):
-            return "item_listed", listing_item_to_wire(item)
         case _ as unreachable:
             assert_never(unreachable)

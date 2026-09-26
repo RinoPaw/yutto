@@ -1,47 +1,40 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import date, datetime
-from enum import Enum
+from dataclasses import dataclass, replace
 from pathlib import Path
 from string import Formatter
-from typing import TYPE_CHECKING, TypeAlias, TypeVar
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING
 
 from yutto.auth import load_auth, validate_profile
-from yutto.core.execution import RequestExecutionScopeFactory
-from yutto.core.result import ResolvedItem, ResolveResult
-from yutto.core.serialization import listing_item_to_wire
+from yutto.config import ResolvedConfig
+from yutto.core.execution import (
+    RequestExecutionScopeFactory,
+    resolve_download_workers,
+    resolve_fetch_workers,
+    resolve_network_proxy,
+)
+from yutto.downloader.planner import resolve_block_size_bytes
+from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
+from yutto.resource import resolve_danmaku_format, should_save_cover
+from yutto.server.request import config_parser_from_settings as config_parser_from_settings
+from yutto.server.serialization import (
+    event_to_json as event_to_json,
+    replay_to_json as replay_to_json,
+    snapshot_summary_to_json as snapshot_summary_to_json,
+    snapshot_to_json as snapshot_to_json,
+)
+from yutto.stream import (
+    resolve_audio_codecs,
+    resolve_audio_quality,
+    resolve_video_codec_priority,
+    resolve_video_codecs,
+    resolve_video_quality,
+)
 from yutto.utils.fetcher import resolve_proxy
 
 if TYPE_CHECKING:
     from yutto.auth import AuthInfo
-    from yutto.core.request import DownloadRequest
-    from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
-
-JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
-PayloadT = TypeVar("PayloadT")
-ResultT = TypeVar("ResultT")
-
-_CREDENTIAL_FIELDS = frozenset(
-    {
-        "api_key",
-        "auth",
-        "authorization",
-        "bili_jct",
-        "cookie",
-        "cookies",
-        "credential",
-        "credentials",
-        "password",
-        "secret",
-        "sessdata",
-        "token",
-    }
-)
 
 
 class ServerPolicyError(ValueError):
@@ -78,98 +71,123 @@ class ServerPolicyOptions:
 
 
 class ServerPolicy:
-    """Apply server-owned limits before a download enters the task runtime."""
+    """Apply server-owned limits before a resolved config enters the task runtime."""
 
     def __init__(self, options: ServerPolicyOptions):
         self.options = options
 
-    def prepare_request(self, request: DownloadRequest) -> DownloadRequest:
-        """Return an immutable copy with server-owned absolute output paths."""
-        self._validate_workers(request)
-        self._validate_proxy(request)
-        self._validate_auth_profile(request)
-        self._validate_block_size(request)
-        self._validate_save_codecs(request)
-        self._validate_subpath_template(request.output.subpath_template)
+    def prepare_config(self, config: ResolvedConfig) -> ResolvedConfig:
+        """Return a config with server-owned absolute output paths applied."""
+        self._validate_workers(config)
+        self._validate_proxy(config)
+        self._validate_auth_profile(config)
+        self._validate_block_size(config)
+        self._validate_save_codecs(config)
+        self._validate_config_values(config)
+        self._validate_subpath_template(config.output.subpath_template)
+
         output_directory = self._resolve_request_path(
-            request.output.directory,
+            config.output.directory,
             root=self.options.download_root,
             field="output.directory",
         )
+
+        temporary = config.output.temporary_directory
         temporary_directory = (
             self.options.tmp_root
-            if request.output.temporary_directory is None
+            if temporary is None
             else self._resolve_request_path(
-                request.output.temporary_directory,
+                temporary,
                 root=self.options.tmp_root,
                 field="output.temporary_directory",
             )
         )
-        output = request.output.model_copy(
-            update={
-                "directory": output_directory,
-                "temporary_directory": temporary_directory,
-                "enforce_directory_boundary": True,
-            }
+        return replace(
+            config,
+            output=replace(
+                config.output,
+                directory=output_directory,
+                temporary_directory=temporary_directory,
+            ),
         )
-        return request.model_copy(update={"output": output})
 
-    def build_scope_factory(self) -> RequestExecutionScopeFactory:
-        """Build the shared request-to-scope boundary used by server tasks."""
-        return RequestExecutionScopeFactory(self.resolve_credentials)
+    def build_execution_factory(self) -> RequestExecutionScopeFactory:
+        """Build the shared config-to-runtime resource boundary used by server tasks."""
+        return RequestExecutionScopeFactory(
+            self.resolve_credentials,
+            enforce_output_boundary=True,
+        )
 
-    def resolve_credentials(self, request: DownloadRequest) -> AuthInfo | None:
-        """Resolve one auth profile without attaching credentials to the request."""
+    def resolve_credentials(self, config: ResolvedConfig) -> AuthInfo | None:
+        """Resolve one auth profile without attaching credentials to the config."""
         try:
-            return load_auth(self.options.auth_file, request.access.auth_profile)
+            return load_auth(self.options.auth_file, config.credential.profile)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
-    def _validate_workers(self, request: DownloadRequest) -> None:
+    def _validate_workers(self, config: ResolvedConfig) -> None:
         self._validate_worker_count(
             "network.fetch_workers",
-            request.network.fetch_workers,
+            resolve_fetch_workers(config),
             self.options.max_fetch_workers,
         )
         self._validate_worker_count(
             "network.download_workers",
-            request.network.download_workers,
+            resolve_download_workers(config),
             self.options.max_download_workers,
         )
 
     @staticmethod
-    def _validate_proxy(request: DownloadRequest) -> None:
+    def _validate_proxy(config: ResolvedConfig) -> None:
         try:
-            resolve_proxy(request.network.proxy)
+            resolve_proxy(resolve_network_proxy(config))
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
     @staticmethod
-    def _validate_auth_profile(request: DownloadRequest) -> None:
+    def _validate_auth_profile(config: ResolvedConfig) -> None:
         try:
-            validate_profile(request.access.auth_profile)
+            validate_profile(config.credential.profile)
         except ValueError as error:
             raise ServerPolicyError(str(error)) from error
 
-    def _validate_block_size(self, request: DownloadRequest) -> None:
-        value = request.network.block_size_bytes
+    def _validate_block_size(self, config: ResolvedConfig) -> None:
+        try:
+            value = resolve_block_size_bytes(config)
+        except ValueError as error:
+            raise ServerPolicyError(f"network.block_size_bytes is invalid: {error}") from error
         if not self.options.min_block_size_bytes <= value <= self.options.max_block_size_bytes:
             raise ServerPolicyError(
                 "network.block_size_bytes must be between "
                 f"{self.options.min_block_size_bytes} and {self.options.max_block_size_bytes}"
             )
 
-    def _validate_save_codecs(self, request: DownloadRequest) -> None:
+    def _validate_save_codecs(self, config: ResolvedConfig) -> None:
+        _, video_save_codec = resolve_video_codecs(config)
+        _, audio_save_codec = resolve_audio_codecs(config)
         if (
             self.options.allowed_video_save_codecs is not None
-            and request.stream.video_save_codec not in self.options.allowed_video_save_codecs
+            and video_save_codec not in self.options.allowed_video_save_codecs
         ):
-            raise ServerPolicyError(f"unsupported video save codec: {request.stream.video_save_codec}")
+            raise ServerPolicyError(f"unsupported video save codec: {video_save_codec}")
         if (
             self.options.allowed_audio_save_codecs is not None
-            and request.stream.audio_save_codec not in self.options.allowed_audio_save_codecs
+            and audio_save_codec not in self.options.allowed_audio_save_codecs
         ):
-            raise ServerPolicyError(f"unsupported audio save codec: {request.stream.audio_save_codec}")
+            raise ServerPolicyError(f"unsupported audio save codec: {audio_save_codec}")
+
+    @staticmethod
+    def _validate_config_values(config: ResolvedConfig) -> None:
+        resolve_video_quality(config)
+        resolve_audio_quality(config)
+        resolve_video_codec_priority(config)
+        resolve_danmaku_format(config)
+        should_save_cover(config)
+        try:
+            resolve_output_format(config.output.format)
+            resolve_audio_only_output_format(config.output.audio_only_format)
+        except ValueError as error:
+            raise ServerPolicyError(str(error)) from error
 
     @staticmethod
     def _validate_worker_count(field: str, value: int, maximum: int) -> None:
@@ -191,9 +209,6 @@ class ServerPolicy:
 
     @staticmethod
     def _validate_subpath_template(template: str) -> None:
-        # Template variables are filename-sanitized by path_templates.py, while
-        # literal separators intentionally remain available for subdirectories.
-        # Therefore only the literal template can introduce a parent traversal.
         path = Path(template)
         if path.is_absolute() or path.anchor:
             raise ServerPolicyError("output.subpath_template must be relative")
@@ -240,118 +255,3 @@ class ServerPolicy:
             raise ServerPolicyError("output.subpath_template format spec contains an unsafe fill")
         if any(int(width) > 256 for width in re.findall(r"\d+", format_spec)):
             raise ServerPolicyError("output.subpath_template format width is too large")
-
-
-def snapshot_to_json(snapshot: TaskSnapshot[PayloadT, ResultT]) -> dict[str, object]:
-    """Convert a task snapshot into a credential-safe JSON object."""
-    result = snapshot_summary_to_json(snapshot)
-    if snapshot.error is not None:
-        error: dict[str, JsonValue] = {
-            "code": snapshot.error.code,
-            "type": snapshot.error.type,
-            "message": snapshot.error.message,
-        }
-        if snapshot.error.truncated:
-            error["truncated"] = True
-        result["error"] = error
-    result["payload"] = _to_json_value(snapshot.payload)
-    result["result"] = _to_json_value(snapshot.result)
-    return result
-
-
-def snapshot_summary_to_json(snapshot: TaskSnapshot[PayloadT, ResultT]) -> dict[str, object]:
-    """Convert a task snapshot without retaining or expanding its payload."""
-    error: dict[str, JsonValue] | None = None
-    if snapshot.error is not None:
-        error = {"code": snapshot.error.code, "type": snapshot.error.type}
-        if snapshot.error.truncated:
-            error["truncated"] = True
-    return {
-        "task_id": snapshot.task_id,
-        "state": snapshot.state.value,
-        "error": error,
-        "created_at": snapshot.created_at.isoformat(),
-        "started_at": snapshot.started_at.isoformat() if snapshot.started_at is not None else None,
-        "finished_at": snapshot.finished_at.isoformat() if snapshot.finished_at is not None else None,
-        "last_event_seq": snapshot.last_event_seq,
-    }
-
-
-def event_to_json(event: TaskEvent) -> dict[str, object]:
-    """Convert a runtime event into a credential-safe JSON object."""
-    return {
-        "task_id": event.task_id,
-        "seq": event.seq,
-        "kind": event.kind,
-        "state": event.state.value,
-        "created_at": event.created_at.isoformat(),
-        "data": _to_json_value(event.data),
-    }
-
-
-def replay_to_json(replay: EventReplay) -> dict[str, object]:
-    """Convert a bounded event replay into a JSON object."""
-    return {
-        "task_id": replay.task_id,
-        "after_seq": replay.after_seq,
-        "events": [event_to_json(event) for event in replay.events],
-        "truncated": replay.truncated,
-    }
-
-
-def _to_json_value(value: object) -> JsonValue:
-    if isinstance(value, Enum):
-        return _to_json_value(value.value)
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, Path):
-        # wire 上的路径统一使用正斜杠，避免协议输出随 server 所在平台变化
-        return value.as_posix()
-    if isinstance(value, ResolveResult):
-        result = value.model_dump(mode="python")
-        result["items"] = [listing_item_to_wire(item) for item in value.items]
-        return _to_json_value(result)
-    if isinstance(value, ResolvedItem):
-        return _to_json_value(listing_item_to_wire(value))
-    if isinstance(value, BaseModel):
-        # python mode 保留 Path 等原生类型，统一交由本函数的分支序列化
-        return _to_json_value(value.model_dump(mode="python"))
-    if isinstance(value, Mapping):
-        result: dict[str, JsonValue] = {}
-        for key, item in value.items():
-            json_key = str(key)
-            if _is_credential_field(json_key):
-                continue
-            if json_key.casefold() == "proxy" and isinstance(item, str):
-                result[json_key] = _sanitize_proxy(item)
-                continue
-            result[json_key] = _to_json_value(item)
-        return result
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_to_json_value(item) for item in value]
-    raise TypeError(f"value of type {type(value).__name__} is not JSON compatible")
-
-
-def _is_credential_field(field: str) -> bool:
-    normalized = field.casefold().replace("-", "_")
-    return normalized in _CREDENTIAL_FIELDS or normalized.endswith(
-        ("_api_key", "_cookie", "_credential", "_password", "_secret", "_token")
-    )
-
-
-def _sanitize_proxy(proxy: str) -> str:
-    scheme_separator = proxy.find("://")
-    if scheme_separator < 0:
-        return proxy
-
-    authority_start = scheme_separator + 3
-    authority_end = len(proxy)
-    for separator in "/?#":
-        if (index := proxy.find(separator, authority_start)) >= 0:
-            authority_end = min(authority_end, index)
-    credential_separator = proxy.rfind("@", authority_start, authority_end)
-    if credential_separator < 0:
-        return proxy
-    return f"{proxy[: scheme_separator + 3]}{proxy[credential_separator + 1 :]}"

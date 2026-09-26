@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
 
-from tests.test_processor.test_download_result import make_audio, make_request, make_resource_only_episode
+from tests.test_processor.test_download_result import make_audio, make_config, make_resource_only_entry
+from yutto.config import ResolvedConfig
 from yutto.core.events import DownloadMediaSelected, SelectedAudioStream, SelectedVideoStream
 from yutto.core.operation import bind_download_event_sink
 from yutto.downloader.executor import emit_streams_selected
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner
+from yutto.stream import resolve_audio_codecs
+from yutto.types import VideoUrlMeta
 
 if TYPE_CHECKING:
-    from yutto.core.request import DownloadRequest
-    from yutto.media.codec import AudioCodec, VideoCodec
-    from yutto.types import EpisodeData, VideoUrlMeta
+    from yutto.resource import ResourceManifest
+    from yutto.stream import AudioCodec, VideoCodec
 
 pytestmark = pytest.mark.processor
 
@@ -23,14 +26,14 @@ AudioOnlyFormat = Literal["infer", "m4a", "aac", "mp3", "flac", "mp4", "mkv", "m
 
 
 def make_video(codec: VideoCodec = "avc") -> VideoUrlMeta:
-    return {
-        "url": "https://signed.example.test/video?token=video-secret",
-        "mirrors": ["https://mirror.example.test/video?token=mirror-secret"],
-        "codec": codec,
-        "width": 1920,
-        "height": 1080,
-        "quality": 80,
-    }
+    return VideoUrlMeta(
+        url="https://signed.example.test/video?token=video-secret",
+        mirrors=("https://mirror.example.test/video?token=mirror-secret",),
+        codec=codec,
+        width=1920,
+        height=1080,
+        quality=80,
+    )
 
 
 def make_plan(
@@ -42,26 +45,37 @@ def make_plan(
     audio_only_format: AudioOnlyFormat = "infer",
     path: Path = Path("series/episode"),
     use_output_as_temporary: bool = False,
-) -> tuple[EpisodeData, DownloadRequest, DownloadPlan]:
-    episode = make_resource_only_episode()
-    episode["info"]["path"] = path
-    episode["videos"] = [make_video(video_codec)] if video_codec is not None else []
-    episode["audios"] = [make_audio(audio_codec)] if audio_codec is not None else []
-    request = make_request(
+) -> tuple[ResourceManifest, ResolvedConfig, DownloadPlan]:
+    manifest = replace(
+        make_resource_only_entry(),
+        video_requested=video_codec is not None,
+        audio_requested=audio_codec is not None,
+        videos=(make_video(video_codec),) if video_codec is not None else (),
+        audios=(make_audio(audio_codec),) if audio_codec is not None else (),
+    )
+    base_config = make_config(
         tmp_path,
         video=video_codec is not None,
         audio=audio_codec is not None,
     )
+    stream = base_config.stream
     if video_codec is not None:
-        request.stream.video_download_codec = video_codec
+        stream = replace(stream, video_codec=f"{video_codec}:copy")
     if audio_codec is not None:
-        request.stream.audio_download_codec = audio_codec
-    request.output.format = output_format
-    request.output.audio_only_format = audio_only_format
-    if use_output_as_temporary:
-        request.output.temporary_directory = None
-    request.danmaku.block_keyword_patterns = ["original-pattern"]
-    return episode, request, DownloadPlanner().plan(episode, request)
+        stream = replace(stream, audio_codec=f"{audio_codec}:copy")
+    output = replace(
+        base_config.output,
+        format=output_format,
+        audio_only_format=audio_only_format,
+        temporary_directory=None if use_output_as_temporary else base_config.output.temporary_directory,
+    )
+    config = replace(
+        base_config,
+        stream=stream,
+        output=output,
+        danmaku=replace(base_config.danmaku, block_keyword_patterns=("original-pattern",)),
+    )
+    return manifest, config, DownloadPlanner().plan(manifest, path, config)
 
 
 @pytest.mark.parametrize(
@@ -95,23 +109,22 @@ def test_planner_resolves_output_without_io(
     assert not (tmp_path / "temporary").exists()
 
 
-def test_planner_snapshots_inputs_without_exposing_signed_urls(tmp_path: Path):
-    episode, request, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
-    episode["videos"][0]["mirrors"].append("https://later.example.test/video")
-    episode["audios"][0]["mirrors"].append("https://later.example.test/audio")
-    request.danmaku.block_keyword_patterns.append("later-pattern")
+def test_plan_selects_manifest_entries_without_copying_resource_urls(tmp_path: Path):
+    manifest, config, plan = make_plan(tmp_path, video_codec="avc", audio_codec="mp4a")
 
-    assert plan.video is not None
-    assert plan.video.mirrors == ("https://mirror.example.test/video?token=mirror-secret",)
-    assert plan.audio is not None
-    assert plan.audio.mirrors == ("https://mirror.example.test/audio?token=mirror-secret",)
+    assert config.danmaku.block_keyword_patterns == ("original-pattern",)
+    assert plan.video is not None and plan.video.index == 0
+    assert plan.audio is not None and plan.audio.index == 0
+    assert not hasattr(plan.video, "url") and not hasattr(plan.video, "mirrors")
+    assert not hasattr(plan.audio, "url") and not hasattr(plan.audio, "mirrors")
     assert plan.resources.danmaku.block_keyword_patterns == ("original-pattern",)
     assert "signed.example.test" not in repr(plan)
     assert "mirror.example.test" not in repr(plan)
+    assert manifest.videos[0].url.startswith("https://signed.example.test/")
 
 
 def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_path: Path):
-    episode, _, plan = make_plan(tmp_path, video_codec="av1", audio_codec="mp4a")
+    manifest, _, plan = make_plan(tmp_path, video_codec="av1", audio_codec="mp4a")
     events = []
 
     class Sink:
@@ -119,7 +132,7 @@ def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_pa
             events.append(event)
 
     with bind_download_event_sink(Sink()):
-        emit_streams_selected(episode, plan)
+        emit_streams_selected(manifest, plan)
 
     assert events == [
         DownloadMediaSelected(
@@ -139,7 +152,7 @@ def test_stream_selection_event_projects_only_the_final_safe_media_values(tmp_pa
 
 
 def test_planner_resolves_nested_temporary_paths_and_forced_transcode(tmp_path: Path):
-    _, request, plan = make_plan(
+    _, config, plan = make_plan(
         tmp_path,
         audio_codec="mp4a",
         audio_only_format="mp3",
@@ -148,8 +161,9 @@ def test_planner_resolves_nested_temporary_paths_and_forced_transcode(tmp_path: 
     )
 
     assert plan.paths.temporary_dir == tmp_path / "output/nested/series"
-    assert plan.paths.audio == tmp_path / "output/nested/series/episode_audio.m4s"
+    assert not hasattr(plan.paths, "audio")
+    assert not hasattr(plan.paths, "video")
     assert plan.paths.saved_cover == tmp_path / "output/nested/series/episode-poster.jpg"
     assert plan.audio_save_codec == "mp3"
     assert plan.requires_audio_transcode_notice is True
-    assert request.stream.audio_save_codec == "copy"
+    assert resolve_audio_codecs(config)[1] == "copy"

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from yutto.types import AId, AvId, BvId, CId
+if TYPE_CHECKING:
+    from yutto.media import Media
 
 
 class _ResultModel(BaseModel):
@@ -24,6 +26,7 @@ class ArtifactKind(StrEnum):
 class ItemState(StrEnum):
     DONE = "done"
     SKIPPED = "skipped"
+    FAILED = "failed"
 
 
 class ItemSkipReason(StrEnum):
@@ -36,18 +39,45 @@ class Artifact(_ResultModel):
     path: Path
 
 
+class ItemFailure(_ResultModel):
+    type: str
+    message: str
+    code: int | str
+
+
 class ItemResult(_ResultModel):
+    # Filled by DownloadManager once the item has crossed the path-planning boundary.
+    # Executor-local results may omit it while they are still inside that operation.
+    planned_path: Path | None = None
     state: ItemState
-    output_path: Path
+    output_path: Path | None = None
     skip_reason: ItemSkipReason | None = None
+    failure: ItemFailure | None = None
     artifacts: tuple[Artifact, ...] = Field(default_factory=tuple)
 
     @model_validator(mode="after")
-    def validate_skip_reason(self) -> Self:
-        if self.state is ItemState.DONE and self.skip_reason is not None:
-            raise ValueError("done item must not have a skip reason")
-        if self.state is ItemState.SKIPPED and self.skip_reason is None:
-            raise ValueError("skipped item must have a skip reason")
+    def validate_state(self) -> Self:
+        if self.state is ItemState.DONE:
+            if self.skip_reason is not None:
+                raise ValueError("done item must not have a skip reason")
+            if self.failure is not None:
+                raise ValueError("done item must not have a failure")
+        elif self.state is ItemState.SKIPPED:
+            if self.skip_reason is None:
+                raise ValueError("skipped item must have a skip reason")
+            if self.failure is not None:
+                raise ValueError("skipped item must not have a failure")
+            if self.skip_reason is ItemSkipReason.ALREADY_EXISTS and self.output_path is None:
+                raise ValueError("already-existing item must have an output path")
+            if self.skip_reason is ItemSkipReason.NO_MEDIA_STREAM and self.output_path is not None:
+                raise ValueError("item without a media stream must not have an output path")
+        elif self.state is ItemState.FAILED:
+            if self.output_path is not None:
+                raise ValueError("failed item must not have an output path")
+            if self.skip_reason is not None:
+                raise ValueError("failed item must not have a skip reason")
+            if self.failure is None:
+                raise ValueError("failed item must have a failure")
         return self
 
     @property
@@ -59,62 +89,27 @@ class DownloadResult(_ResultModel):
     items: tuple[ItemResult, ...] = Field(default_factory=tuple)
 
 
-class ResolvedItem(_ResultModel):
-    """The canonical immutable snapshot of one listed episode."""
-
-    avid: AvId
-    cid: CId
-    url: str
-    name: str
-    title: str
-    cover_url: str
-    planned_path: Path
-    display_group: str | None = None
-    uploader: str = ""
-    description: str = ""
-    tags: tuple[str, ...] = ()
-    pubdate: int = 0
-    duration: int = 0
-
-    @field_validator("avid", mode="plain", json_schema_input_type=str)
-    @classmethod
-    def validate_avid(cls, value: object) -> AvId:
-        if isinstance(value, AvId):
-            return value
-        if isinstance(value, str):
-            return BvId(value) if value.casefold().startswith(AvId.PREFIX.casefold()) else AId(value)
-        raise ValueError("avid must be an AvId instance or string")
-
-    @field_validator("cid", mode="plain", json_schema_input_type=str)
-    @classmethod
-    def validate_cid(cls, value: object) -> CId:
-        if isinstance(value, CId):
-            return value
-        if isinstance(value, str):
-            return CId(value)
-        raise ValueError("cid must be a CId instance or string")
-
-    @field_serializer("avid", "cid", when_used="json", return_type=str)
-    def serialize_id(self, value: AvId | CId) -> str:
-        return str(value)
-
-    @field_serializer("planned_path", when_used="json", return_type=str)
-    def serialize_planned_path(self, value: Path) -> str:
-        return value.as_posix()
+class ResolveFailureStep(_ResultModel):
+    index: int
+    source: str
 
 
 class ResolveFailure(_ResultModel):
     """一次预期内的解析失败（视频不存在 / 无访问权限 / 请求重试耗尽等）。
 
-    ``type`` / ``message`` / ``code`` 与任务级错误（TaskError）同构，
-    ``code`` 来自 yutto 的稳定错误码表。
+    ``path`` 保留从外层容器到失败 source 的解析路径；``type`` / ``message`` /
+    ``code`` 与任务级错误（TaskError）同构，``code`` 来自 yutto 的稳定错误码表。
     """
 
+    path: tuple[ResolveFailureStep, ...] = Field(default_factory=tuple)
     type: str
     message: str
     code: int | str
 
 
-class ResolveResult(_ResultModel):
-    items: tuple[ResolvedItem, ...] = Field(default_factory=tuple)
-    failures: tuple[ResolveFailure, ...] = Field(default_factory=tuple)
+@dataclass(frozen=True, slots=True)
+class ResolveResult:
+    """Resolve 结果直接保留每个请求得到的 Media 根节点。"""
+
+    items: tuple[Media, ...] = ()
+    failures: tuple[ResolveFailure, ...] = ()

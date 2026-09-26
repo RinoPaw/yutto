@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -8,10 +9,12 @@ import pytest
 
 import yutto.__main__ as main_module
 import yutto.server.command as server_command_module
-from yutto.cli.cli import cli, handle_default_subcommand
+from yutto.cli.compat import normalize_argv
+from yutto.cli.parser import build_parser
+from yutto.cli.settings import YuttoConfig
 from yutto.core.operation import ReportLevel, emit_download_report
 from yutto.exceptions import ErrorCode, WrongArgumentError
-from yutto.server.command import build_server, resolve_server_token
+from yutto.server.command import ServeOptions, build_server, resolve_serve_options, resolve_server_token
 
 if TYPE_CHECKING:
     from yutto.core.task_service import DownloadTaskService
@@ -19,30 +22,82 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.processor
 
 
+def _server_options(**overrides: object) -> ServeOptions:
+    values: dict[str, object] = {
+        "request_settings": YuttoConfig(),
+        "ffmpeg_path": "ffmpeg",
+        "host": "127.0.0.1",
+        "port": 11223,
+        "allow_origin": (),
+        "token_file": None,
+        "download_root": Path(),
+        "tmp_root": None,
+        "auth_file": None,
+        "max_fetch_workers": 16,
+        "max_download_workers": 16,
+        "task_limit": 256,
+        "jobs": 1,
+    }
+    values.update(overrides)
+    return ServeOptions(**cast("Any", values))
+
+
 def test_serve_is_an_explicit_subcommand():
-    assert handle_default_subcommand(["serve"]) == ["serve"]
-    args = cli().parse_args(["serve", "--port", "12345", "--allow-origin", "https://ui.example"])
-    assert args.command == "serve"
-    assert args.port == 12345
-    assert args.allow_origin == ["https://ui.example"]
-    assert args.jobs == 1
+    assert normalize_argv(["serve"]) == ["serve"]
+    args = build_parser().parse_args(["serve", "--port", "12345", "--allow-origin", "https://ui.example"])
+    assert vars(args) == {
+        "command": "serve",
+        "port": 12345,
+        "allow_origin": ["https://ui.example"],
+    }
+
+
+def test_serve_options_resolve_sparse_cli_without_mutating_namespace():
+    args = build_parser().parse_args(["serve"])
+    original = vars(args).copy()
+    settings = YuttoConfig(
+        basic={
+            "ffmpeg_path": "/config/ffmpeg",
+            "jobs": 3,
+            "fetch_workers": 5,
+            "download_workers": 6,
+            "dir": "configured-downloads",
+            "tmp_dir": "configured-tmp",
+        }
+    )
+
+    options = resolve_serve_options(args, settings)
+
+    assert vars(args) == original
+    assert options.ffmpeg_path == "/config/ffmpeg"
+    assert options.jobs == 3
+    assert options.download_root == Path("configured-downloads")
+    assert options.tmp_root == Path("configured-tmp")
+    assert options.max_fetch_workers == 16
+    assert options.max_download_workers == 16
+
+
+def test_serve_cli_overrides_configured_startup_values():
+    args = build_parser().parse_args(
+        ["serve", "--ffmpeg-path", "/cli/ffmpeg", "--jobs", "4", "--download-root", "cli-downloads"]
+    )
+    settings = YuttoConfig(basic={"ffmpeg_path": "/config/ffmpeg", "jobs": 3, "dir": "configured-downloads"})
+
+    options = resolve_serve_options(args, settings)
+
+    assert options.ffmpeg_path == "/cli/ffmpeg"
+    assert options.jobs == 4
+    assert options.download_root == Path("cli-downloads")
 
 
 def test_serve_jobs_configures_download_runtime_workers():
-    args = cli().parse_args(["serve", "--jobs", "3"])
-
     server = build_server(
-        args,
+        _server_options(jobs=3),
         "token",
         ffmpeg=cast("Any", SimpleNamespace(video_encodecs=(), audio_encodecs=())),
     )
 
     assert cast("DownloadTaskService", server._task_service).runtime.worker_count == 3
-
-
-def test_serve_accepts_ffmpeg_path():
-    assert cli().parse_args(["serve"]).ffmpeg_path == "ffmpeg"
-    assert cli().parse_args(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"]).ffmpeg_path == "/opt/ffmpeg/ffmpeg"
 
 
 def test_serve_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.MonkeyPatch):
@@ -55,22 +110,41 @@ def test_serve_configures_ffmpeg_path_at_command_boundary(monkeypatch: pytest.Mo
             raise RuntimeError("stop after recording")
 
     monkeypatch.setattr(server_command_module, "FFmpeg", RecordingFFmpeg)
-    args = cli().parse_args(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
+    args = build_parser().parse_args(["serve", "--ffmpeg-path", "/opt/ffmpeg/ffmpeg"])
     with pytest.raises(RuntimeError, match="stop after recording"):
-        server_command_module.run_server_command(args)
+        server_command_module.run_server_command(args, YuttoConfig())
 
     assert recorded == ["/opt/ffmpeg/ffmpeg"]
+
+
+def test_serve_uses_configured_ffmpeg_path(monkeypatch: pytest.MonkeyPatch):
+    recorded: list[str] = []
+
+    class RecordingFFmpeg:
+        @classmethod
+        def setup_ffmpeg_path(cls, ffmpeg_path: str) -> None:
+            recorded.append(ffmpeg_path)
+            raise RuntimeError("stop after recording")
+
+    monkeypatch.setattr(server_command_module, "FFmpeg", RecordingFFmpeg)
+    args = build_parser().parse_args(["serve"])
+    settings = YuttoConfig(basic={"ffmpeg_path": "/configured/ffmpeg"})
+    with pytest.raises(RuntimeError, match="stop after recording"):
+        server_command_module.run_server_command(args, settings)
+
+    assert recorded == ["/configured/ffmpeg"]
 
 
 def test_serve_argument_error_is_rendered_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    parser = SimpleNamespace(parse_args=lambda args: SimpleNamespace(command="serve"))
+    parser = SimpleNamespace(parse_args=lambda _args: SimpleNamespace(command="serve"))
 
-    def fail_server(args: object) -> None:
+    def fail_server(args: object, config: YuttoConfig) -> None:
         raise WrongArgumentError("请配置正确的 FFmpeg 路径")
 
-    monkeypatch.setattr(main_module, "cli", lambda: parser)
+    monkeypatch.setattr(main_module, "build_parser", lambda: parser)
+    monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
     monkeypatch.setattr(main_module.sys, "argv", ["yutto", "serve"])
     monkeypatch.setattr(server_command_module, "run_server_command", fail_server)
 
@@ -82,16 +156,15 @@ def test_serve_argument_error_is_rendered_without_traceback(
     assert "请配置正确的 FFmpeg 路径" in captured.out
     assert "Traceback" not in captured.out + captured.err
 
-    parser = SimpleNamespace(parse_args=lambda args: SimpleNamespace(command="serve"))
+    parser = SimpleNamespace(parse_args=lambda _args: SimpleNamespace(command="serve"))
     rendered_errors: list[str] = []
 
-    def fail_server(args: object) -> None:
+    def fail_server_with_report(args: object, config: YuttoConfig) -> None:
         emit_download_report("server report", ReportLevel.ERROR)
         raise OSError("address already in use")
 
-    monkeypatch.setattr(main_module, "cli", lambda: parser)
-    monkeypatch.setattr(main_module.sys, "argv", ["yutto", "serve"])
-    monkeypatch.setattr(server_command_module, "run_server_command", fail_server)
+    monkeypatch.setattr(main_module, "build_parser", lambda: parser)
+    monkeypatch.setattr(server_command_module, "run_server_command", fail_server_with_report)
     monkeypatch.setattr(main_module.Logger, "error", rendered_errors.append)
 
     with pytest.raises(SystemExit) as exc_info:
