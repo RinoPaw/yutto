@@ -69,7 +69,7 @@ def resolve_serve_options(args: argparse.Namespace, settings: YuttoConfig) -> Se
 
     configured_download_root = Path(configured.output.directory).expanduser()
     configured_tmp_root = configured.output.temporary_directory
-    configured_auth_file = configured.auth.file
+    configured_auth_file = configured.credential.file
 
     options = ServeOptions(
         request_settings=settings,
