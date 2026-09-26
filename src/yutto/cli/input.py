@@ -5,11 +5,11 @@ import re
 import shlex
 import urllib.parse
 import urllib.request
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
-from yutto.cli.settings import resolved_config_from_settings
 from yutto.config import ResolvedConfig
 from yutto.core.operation import emit_download_report
 from yutto.utils.console.logger import Logger
@@ -19,63 +19,61 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import Any
 
-    from yutto.cli.settings import YuttoConfig
 
-
-_CLI_CONFIG_PATHS = {
-    "source": "source.value",
-    "selection_expr": "selection.expression",
-    "with_extra_episodes": "selection.with_extra_episodes",
-    "skip_preview": "selection.skip_preview",
-    "publication_start_time": "selection.published_since",
-    "publication_end_time": "selection.published_before",
-    "auth": "credential.cookie",
-    "auth_file": "credential.file",
-    "auth_profile": "credential.profile",
-    "sessdata": "credential.sessdata",
-    "login_strict": "access.login_strict",
-    "vip_strict": "access.vip_strict",
-    "require_video": "resource.video",
-    "require_audio": "resource.audio",
-    "require_danmaku": "resource.danmaku",
-    "require_subtitle": "resource.subtitle",
-    "require_metadata": "resource.metadata",
-    "require_cover": "resource.cover",
-    "require_chapter_info": "resource.chapter_info",
-    "save_cover": "resource.save_cover",
-    "ai_translation_language": "resource.ai_translation_language",
-    "video_quality": "stream.video_quality",
-    "audio_quality": "stream.audio_quality",
-    "vcodec": "stream.video_codec",
-    "acodec": "stream.audio_codec",
-    "download_vcodec_priority": "stream.video_codec_priority",
-    "output_format": "output.format",
-    "output_format_audio_only": "output.audio_only_format",
-    "dir": "output.directory",
-    "tmp_dir": "output.temporary_directory",
-    "overwrite": "output.overwrite",
-    "subpath_template": "output.subpath_template",
-    "metadata_premiered_format": "output.metadata_premiered_format",
-    "proxy": "network.proxy",
-    "fetch_workers": "network.fetch_workers",
-    "download_workers": "network.download_workers",
-    "block_size": "network.block_size",
-    "download_interval": "network.download_interval",
-    "banned_mirrors_pattern": "network.banned_mirrors_pattern",
-    "danmaku_format": "danmaku.format",
-    "danmaku_font_size": "danmaku.font_size",
-    "danmaku_font": "danmaku.font",
-    "danmaku_opacity": "danmaku.opacity",
-    "danmaku_display_region_ratio": "danmaku.display_region_ratio",
-    "danmaku_speed": "danmaku.speed",
-    "danmaku_block_top": "danmaku.block_top",
-    "danmaku_block_bottom": "danmaku.block_bottom",
-    "danmaku_block_scroll": "danmaku.block_scroll",
-    "danmaku_block_reverse": "danmaku.block_reverse",
-    "danmaku_block_fixed": "danmaku.block_fixed",
-    "danmaku_block_special": "danmaku.block_special",
-    "danmaku_block_colorful": "danmaku.block_colorful",
-    "danmaku_block_keyword_patterns": "danmaku.block_keyword_patterns",
+_CLI_CONFIG_FIELDS = {
+    "source": ("source", "value"),
+    "selection_expr": ("selection", "expression"),
+    "with_extra_episodes": ("selection", "with_extra_episodes"),
+    "skip_preview": ("selection", "skip_preview"),
+    "publication_start_time": ("selection", "published_since"),
+    "publication_end_time": ("selection", "published_before"),
+    "auth": ("credential", "cookie"),
+    "auth_file": ("credential", "file"),
+    "auth_profile": ("credential", "profile"),
+    "sessdata": ("credential", "sessdata"),
+    "login_strict": ("access", "login_strict"),
+    "vip_strict": ("access", "vip_strict"),
+    "require_video": ("resource", "video"),
+    "require_audio": ("resource", "audio"),
+    "require_danmaku": ("resource", "danmaku"),
+    "require_subtitle": ("resource", "subtitle"),
+    "require_metadata": ("resource", "metadata"),
+    "require_cover": ("resource", "cover"),
+    "require_chapter_info": ("resource", "chapter_info"),
+    "save_cover": ("resource", "save_cover"),
+    "ai_translation_language": ("resource", "ai_translation_language"),
+    "video_quality": ("stream", "video_quality"),
+    "audio_quality": ("stream", "audio_quality"),
+    "vcodec": ("stream", "video_codec"),
+    "acodec": ("stream", "audio_codec"),
+    "download_vcodec_priority": ("stream", "video_codec_priority"),
+    "output_format": ("output", "format"),
+    "output_format_audio_only": ("output", "audio_only_format"),
+    "dir": ("output", "directory"),
+    "tmp_dir": ("output", "temporary_directory"),
+    "overwrite": ("output", "overwrite"),
+    "subpath_template": ("output", "subpath_template"),
+    "metadata_premiered_format": ("output", "metadata_premiered_format"),
+    "proxy": ("network", "proxy"),
+    "fetch_workers": ("network", "fetch_workers"),
+    "download_workers": ("network", "download_workers"),
+    "block_size": ("network", "block_size"),
+    "download_interval": ("network", "download_interval"),
+    "banned_mirrors_pattern": ("network", "banned_mirrors_pattern"),
+    "danmaku_format": ("danmaku", "format"),
+    "danmaku_font_size": ("danmaku", "font_size"),
+    "danmaku_font": ("danmaku", "font"),
+    "danmaku_opacity": ("danmaku", "opacity"),
+    "danmaku_display_region_ratio": ("danmaku", "display_region_ratio"),
+    "danmaku_speed": ("danmaku", "speed"),
+    "danmaku_block_top": ("danmaku", "block_top"),
+    "danmaku_block_bottom": ("danmaku", "block_bottom"),
+    "danmaku_block_scroll": ("danmaku", "block_scroll"),
+    "danmaku_block_reverse": ("danmaku", "block_reverse"),
+    "danmaku_block_fixed": ("danmaku", "block_fixed"),
+    "danmaku_block_special": ("danmaku", "block_special"),
+    "danmaku_block_colorful": ("danmaku", "block_colorful"),
+    "danmaku_block_keyword_patterns": ("danmaku", "block_keyword_patterns"),
 }
 _CLI_CONTROL_FIELDS = frozenset(
     {
@@ -134,37 +132,66 @@ def file_scheme_parser(url: str) -> list[str]:
     return result
 
 
-def config_values_from_cli(
+def apply_cli_overrides(
+    config: ResolvedConfig,
     values: Mapping[str, Any],
     *,
     inherited_aliases: Mapping[str, str] | None = None,
-) -> tuple[dict[str, Any], bool]:
-    """把 argparse 字段转换成 canonical ``spec.field`` 路径。"""
-    result: dict[str, Any] = {}
+) -> tuple[ResolvedConfig, bool]:
+    """Apply sparse argparse values directly to typed task Specs."""
+    updates: dict[str, dict[str, Any]] = {
+        "source": {},
+        "selection": {},
+        "credential": {},
+        "access": {},
+        "resource": {},
+        "stream": {},
+        "output": {},
+        "network": {},
+        "danmaku": {},
+    }
     unknown: list[str] = []
 
     for name, value in values.items():
         if name in _CLI_CONTROL_FIELDS:
             continue
-        path = _CLI_CONFIG_PATHS.get(name)
-        if path is None:
+        target = _CLI_CONFIG_FIELDS.get(name)
+        if target is None:
             unknown.append(name)
             continue
-        result[path] = value
+        section, field = target
+        if name in {"download_vcodec_priority", "danmaku_block_keyword_patterns"} and value is not None:
+            value = tuple(value)
+        updates[section][field] = value
 
     if unknown:
         names = ", ".join(sorted(unknown))
         raise TypeError(f"CLI fields without config mapping: {names}")
 
     aliases = values.get("aliases", inherited_aliases)
-    source = result.get("source.value")
+    source = updates["source"].get("value")
     if source is not None and aliases:
-        result["source.value"] = aliases.get(str(source), source)
+        updates["source"]["value"] = aliases.get(str(source), source)
 
-    if values.get("batch") and "selection.expression" not in result:
-        result["selection.expression"] = "~"
+    if values.get("batch") and "expression" not in updates["selection"]:
+        updates["selection"]["expression"] = "~"
 
-    return result, bool(values.get("no_inherit", False))
+    return _replace_specs(config, updates), bool(values.get("no_inherit", False))
+
+
+def _replace_specs(config: ResolvedConfig, updates: dict[str, dict[str, Any]]) -> ResolvedConfig:
+    return replace(
+        config,
+        source=replace(config.source, **updates["source"]),
+        selection=replace(config.selection, **updates["selection"]),
+        credential=replace(config.credential, **updates["credential"]),
+        access=replace(config.access, **updates["access"]),
+        resource=replace(config.resource, **updates["resource"]),
+        stream=replace(config.stream, **updates["stream"]),
+        output=replace(config.output, **updates["output"]),
+        network=replace(config.network, **updates["network"]),
+        danmaku=replace(config.danmaku, **updates["danmaku"]),
+    )
 
 
 def expand_download_configs(
@@ -176,16 +203,13 @@ def expand_download_configs(
     aliases: Mapping[str, str] | None = None,
     config_aliases: Mapping[str, str] | None = None,
 ) -> list[ResolvedConfig]:
-    """Expand task lists by eagerly applying each child's overrides."""
-
+    """Expand task lists by eagerly applying each child's typed overrides."""
     source = config.source.value
     if source is None:
         raise ValueError("download source is missing")
 
-    current = config.with_overrides({"source.value": source})
-
     if not re.match(r"file://", source) and not os.path.isfile(source):  # noqa: PTH113
-        return [current]
+        return [config]
 
     result: list[ResolvedConfig] = []
     for line in file_scheme_parser(source):
@@ -196,13 +220,13 @@ def expand_download_configs(
         child_no_inherit = bool(child_raw.get("no_inherit", False))
         inherited_aliases = config_aliases if no_inherit or child_no_inherit else aliases
         child_aliases = child_raw.get("aliases", inherited_aliases)
-        child_values, child_no_inherit = config_values_from_cli(
+        base = baseline if no_inherit or child_no_inherit else config
+        child, child_no_inherit = apply_cli_overrides(
+            base,
             child_raw,
             inherited_aliases=inherited_aliases,
         )
-        base = baseline if no_inherit or child_no_inherit else current
-        child = base.with_overrides(child_values)
-        Logger.debug(f"列表参数: {_config_delta(child, baseline)}")
+        Logger.debug(f"列表参数已解析：{child.source.value}")
         result.extend(
             expand_download_configs(
                 child,
@@ -214,36 +238,3 @@ def expand_download_configs(
             )
         )
     return result
-
-
-def expand_download_values(
-    values: Mapping[str, Any],
-    parser: argparse.ArgumentParser,
-    config: YuttoConfig,
-) -> list[dict[str, Any]]:
-    """Return canonical overrides for expanded download tasks."""
-
-    configured = resolved_config_from_settings(config)
-    config_aliases = config.basic.aliases
-    aliases = values.get("aliases", config_aliases)
-    cli_values, no_inherit = config_values_from_cli(values, inherited_aliases=config_aliases)
-    command_config = configured.with_overrides(cli_values)
-    configs = expand_download_configs(
-        command_config,
-        parser,
-        configured,
-        no_inherit=no_inherit,
-        aliases=aliases,
-        config_aliases=config_aliases,
-    )
-    return [_config_delta(item, configured) for item in configs]
-
-
-def _config_delta(config: ResolvedConfig, baseline: ResolvedConfig) -> dict[str, Any]:
-    """Return the effective overrides relative to a flat baseline config."""
-    baseline_values = baseline.values
-    return {
-        path: value
-        for path, value in config.values.items()
-        if path not in baseline_values or baseline_values[path] != value
-    }
