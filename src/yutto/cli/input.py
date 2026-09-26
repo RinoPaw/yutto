@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from yutto.cli.compat import normalize_argv
 from yutto.cli.settings import resolved_config_from_settings
-from yutto.config import MISSING, ResolvedConfig
+from yutto.config import ResolvedConfig
 from yutto.core.operation import emit_download_report
 from yutto.utils.console.logger import Logger
 
@@ -170,9 +170,8 @@ def expand_download_configs(
     """Expand task lists by eagerly applying each child's overrides."""
 
     source = config.source.value
-    if source is MISSING or source is None:
+    if source is None:
         raise ValueError("download source is missing")
-    source = str(source)
 
     current = config.with_overrides({"source.value": source})
 
