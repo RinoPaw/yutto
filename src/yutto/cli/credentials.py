@@ -1,35 +1,16 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from yutto.cli.settings import resolved_config_from_settings
 from yutto.config import ResolvedConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-    from typing import Any
-
-    from yutto.cli.settings import YuttoConfig
+    from collections.abc import Sequence
 
 
-def resolve_credential_options(
-    configs: Sequence[ResolvedConfig] | Sequence[Mapping[str, Any]],
-    config: YuttoConfig | None = None,
-) -> list[argparse.Namespace]:
-    """Resolve credential options from flat canonical configurations."""
-
-    if not configs:
-        return []
-
-    if isinstance(configs[0], ResolvedConfig):
-        resolved_configs = list(cast("Sequence[ResolvedConfig]", configs))
-    else:
-        if config is None:
-            raise TypeError("config is required when resolving raw task mappings")
-        configured = resolved_config_from_settings(config)
-        raw_configs = cast("Sequence[Mapping[str, Any]]", configs)
-        resolved_configs = [configured.with_overrides(values) for values in raw_configs]
+def resolve_credential_options(configs: Sequence[ResolvedConfig]) -> list[argparse.Namespace]:
+    """Project resolved configs onto the credential resolver's argparse-compatible input."""
 
     return [
         argparse.Namespace(
@@ -38,5 +19,5 @@ def resolve_credential_options(
             auth_profile=item.auth.profile,
             sessdata=item.auth.sessdata,
         )
-        for item in resolved_configs
+        for item in configs
     ]
