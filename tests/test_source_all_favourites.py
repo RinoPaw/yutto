@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from returns.result import Success
 
+from yutto.config import DEFAULT_CONFIG
 from yutto.media import UgcAllFavourites
 from yutto.parser import parse
-from yutto.scope import Scope
 from yutto.source import UgcAllFavouritesSource, UgcFavSource
 from yutto.types import MId
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from yutto.core.execution import ExecutionScope
 
 _EXECUTION = cast("ExecutionScope", None)
-_SCOPE = Scope()
+_CONFIG = DEFAULT_CONFIG
 
 
 def _video_response() -> dict[str, Any]:
@@ -49,7 +49,7 @@ def test_bare_favlist_parses_as_all_favourites() -> None:
 def test_all_favourites_resolves_every_folder(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    async def fake_fetch_json(scope: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+    async def fake_fetch_json(execution: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
         calls.append(url)
         if "/x/v3/fav/folder/created/list-all" in url:
             return Success({"code": 0, "data": {"list": [{"id": 11}, {"id": 22}]}})
@@ -83,7 +83,7 @@ def test_all_favourites_resolves_every_folder(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("yutto.utils.fetcher.Fetcher.fetch_json", fake_fetch_json)
 
-    result = asyncio.run(UgcAllFavouritesSource(id=MId("123")).resolve(_EXECUTION, _SCOPE))
+    result = asyncio.run(UgcAllFavouritesSource(id=MId("123")).resolve(_EXECUTION, _CONFIG))
 
     assert isinstance(result.media, UgcAllFavourites)
     assert [entry.media.fid.value for entry in result.media.items] == ["11", "22"]
