@@ -20,8 +20,8 @@ from yutto.stream import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from yutto.config import ResolvedConfig
     from yutto.resource import ResourceManifest
-    from yutto.scope import Scope
     from yutto.stream import AudioCodec, AudioQuality, VideoCodec, VideoQuality
     from yutto.types import AudioUrlMeta, VideoUrlMeta
 
@@ -84,22 +84,22 @@ def select_audio(
     return None
 
 
-def select_streams(resources: ResourceManifest, scope: Scope) -> StreamSelection:
-    """Apply the active Scope's stream policy to one resolved manifest."""
-    video_download_codec, _ = resolve_video_codecs(scope)
-    audio_download_codec, _ = resolve_audio_codecs(scope)
+def select_streams(resources: ResourceManifest, config: ResolvedConfig) -> StreamSelection:
+    """Apply the resolved config's stream policy to one manifest."""
+    video_download_codec, _ = resolve_video_codecs(config)
+    audio_download_codec, _ = resolve_audio_codecs(config)
     video = (
         select_video(
             resources.videos,
-            resolve_video_quality(scope),
+            resolve_video_quality(config),
             video_download_codec,
-            resolve_video_codec_priority(scope),
+            resolve_video_codec_priority(config),
         )
         if resources.video_requested
         else None
     )
     audio = (
-        select_audio(resources.audios, resolve_audio_quality(scope), audio_download_codec)
+        select_audio(resources.audios, resolve_audio_quality(config), audio_download_codec)
         if resources.audio_requested
         else None
     )
