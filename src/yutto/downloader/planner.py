@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from yutto.downloader.selector import select_streams
 from yutto.output_formats import resolve_audio_only_output_format, resolve_output_format
@@ -131,7 +131,7 @@ class DownloadPlanner:
             else requested_audio_save_codec
         )
 
-        fixed = bool(config.danmaku.block_fixed)
+        fixed = config.danmaku.block_fixed
         resource_plan = DownloadResources(
             subtitle_languages=tuple(lang for lang, _ in resources.subtitles),
             has_danmaku=bool(resources.danmaku_urls),
@@ -143,22 +143,22 @@ class DownloadPlanner:
             danmaku_width=video_meta.width if video_meta is not None else 1920,
             danmaku_height=video_meta.height if video_meta is not None else 1080,
             metadata=MetadataPlan(
-                published_at=_text(config.output.metadata_premiered_format),
+                published_at=config.output.metadata_premiered_format,
                 added_at=TIME_FULL_FMT,
             ),
             danmaku=DanmakuPlan(
-                font_size=_optional_int(config.danmaku.font_size),
-                font=_text(config.danmaku.font),
-                opacity=_float(config.danmaku.opacity),
-                display_region_ratio=_float(config.danmaku.display_region_ratio),
-                speed=_float(config.danmaku.speed),
-                block_top=bool(config.danmaku.block_top) or fixed,
-                block_bottom=bool(config.danmaku.block_bottom) or fixed,
-                block_scroll=bool(config.danmaku.block_scroll),
-                block_reverse=bool(config.danmaku.block_reverse),
-                block_special=bool(config.danmaku.block_special),
-                block_colorful=bool(config.danmaku.block_colorful),
-                block_keyword_patterns=_patterns(config.danmaku.block_keyword_patterns),
+                font_size=config.danmaku.font_size,
+                font=config.danmaku.font,
+                opacity=config.danmaku.opacity,
+                display_region_ratio=config.danmaku.display_region_ratio,
+                speed=config.danmaku.speed,
+                block_top=config.danmaku.block_top or fixed,
+                block_bottom=config.danmaku.block_bottom or fixed,
+                block_scroll=config.danmaku.block_scroll,
+                block_reverse=config.danmaku.block_reverse,
+                block_special=config.danmaku.block_special,
+                block_colorful=config.danmaku.block_colorful,
+                block_keyword_patterns=config.danmaku.block_keyword_patterns or (),
             ),
         )
         return DownloadPlan(
@@ -173,26 +173,21 @@ class DownloadPlanner:
             requires_audio_transcode_notice=(
                 audio_meta is not None and audio_save_codec not in {requested_audio_save_codec, "copy"}
             ),
-            overwrite=bool(config.output.overwrite),
+            overwrite=config.output.overwrite,
             block_size=resolve_block_size_bytes(config),
-            banned_mirrors_pattern=_optional_text(config.network.banned_mirrors_pattern),
+            banned_mirrors_pattern=config.network.banned_mirrors_pattern,
             resources=resource_plan,
         )
 
 
 def resolve_output_directories(config: ResolvedConfig) -> tuple[Path, Path]:
-    directory = config.output.directory
-    output_directory = Path() if directory is None else Path(directory)
-    temporary = config.output.temporary_directory
-    temporary_directory = output_directory if temporary is None else Path(temporary)
+    output_directory = config.output.directory
+    temporary_directory = config.output.temporary_directory or output_directory
     return output_directory, temporary_directory
 
 
 def resolve_block_size_bytes(config: ResolvedConfig) -> int:
-    value = config.network.block_size
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("block_size must be a positive number")
-    size = int(value * MEBIBYTE)
+    size = int(config.network.block_size * MEBIBYTE)
     if size < 1:
         raise ValueError("block_size must be a positive number")
     return size
@@ -275,39 +270,3 @@ def resolve_audio_save_codec(audio_codec: str, audio_save_codec: str, container_
         if audio_codec not in compatible_codecs:
             return transcode_codec
     return audio_save_codec
-
-
-def _text(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("expected a string config value")
-    return value
-
-
-def _optional_text(value: object) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("expected a string config value")
-    return value
-
-
-def _float(value: object) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("expected a numeric config value")
-    return float(value)
-
-
-def _optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("expected an integer config value")
-    return value
-
-
-def _patterns(value: object) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, tuple) or not all(isinstance(item, str) for item in value):
-        raise ValueError("danmaku block keyword patterns must be a sequence of strings")
-    return cast("tuple[str, ...]", value)
