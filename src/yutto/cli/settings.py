@@ -131,6 +131,7 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
             "download_interval": "download_interval",
             "banned_mirrors_pattern": "banned_mirrors_pattern",
         },
+        nullable=frozenset({"banned_mirrors_pattern"}),
     )
     stream_updates = _present_updates(
         basic,
@@ -194,7 +195,13 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
             "save_cover": "save_cover",
         },
     )
-    resource_updates.update(_present_updates(basic, {"ai_translation_language": "ai_translation_language"}))
+    resource_updates.update(
+        _present_updates(
+            basic,
+            {"ai_translation_language": "ai_translation_language"},
+            nullable=frozenset({"ai_translation_language"}),
+        )
+    )
 
     selection_updates = _present_updates(
         config.batch,
@@ -226,11 +233,12 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
             "danmaku_block_special": "block_special",
             "danmaku_block_colorful": "block_colorful",
         },
+        nullable=frozenset({"font_size"}),
     )
     if "danmaku_block_keyword_patterns" in config.danmaku.model_fields_set:
         patterns = config.danmaku.danmaku_block_keyword_patterns
         danmaku_updates["block_keyword_patterns"] = None if patterns is None else tuple(patterns)
-    if "danmaku_format" in basic.model_fields_set:
+    if "danmaku_format" in basic.model_fields_set and basic.danmaku_format is not None:
         danmaku_updates["format"] = basic.danmaku_format
 
     task_fields = basic.model_fields_set - _BASIC_NON_TASK_FIELDS
@@ -276,8 +284,21 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
     )
 
 
-def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, Any]:
-    return {target: getattr(model, source) for source, target in fields.items() if source in model.model_fields_set}
+def _present_updates(
+    model: BaseModel,
+    fields: dict[str, str],
+    *,
+    nullable: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for source, target in fields.items():
+        if source not in model.model_fields_set:
+            continue
+        value = getattr(model, source)
+        if value is None and target not in nullable:
+            continue
+        result[target] = value
+    return result
 
 
 def search_for_settings_file() -> Path | None:

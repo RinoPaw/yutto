@@ -97,6 +97,7 @@ class DanmakuRequest(_RpcModel):
     block_bottom: bool = _OMITTED
     block_scroll: bool = _OMITTED
     block_reverse: bool = _OMITTED
+    block_fixed: bool = _OMITTED
     block_special: bool = _OMITTED
     block_colorful: bool = _OMITTED
     block_keyword_patterns: list[str] | None = None
@@ -289,6 +290,7 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             "block_bottom": "block_bottom",
             "block_scroll": "block_scroll",
             "block_reverse": "block_reverse",
+            "block_fixed": "block_fixed",
             "block_special": "block_special",
             "block_colorful": "block_colorful",
         },

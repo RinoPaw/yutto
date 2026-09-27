@@ -54,6 +54,42 @@ def test_persistent_config_maps_into_typed_specs():
     assert config.basic.ffmpeg_path == "/opt/ffmpeg"
 
 
+def test_persistent_none_does_not_override_non_nullable_spec_defaults():
+    config = YuttoConfig.model_validate(
+        {
+            "basic": {
+                "download_workers": None,
+                "proxy": None,
+                "vcodec": None,
+                "overwrite": None,
+                "danmaku_format": None,
+            },
+            "resource": {"require_video": None},
+            "danmaku": {
+                "danmaku_font": None,
+                "danmaku_opacity": None,
+            },
+            "auth": {
+                "auth": None,
+                "auth_profile": None,
+            },
+        }
+    )
+
+    resolved = resolved_config_from_settings(config)
+
+    assert resolved.network.download_workers == DEFAULT_CONFIG.network.download_workers
+    assert resolved.network.proxy == DEFAULT_CONFIG.network.proxy
+    assert resolved.stream.video_codec == DEFAULT_CONFIG.stream.video_codec
+    assert resolved.output.overwrite == DEFAULT_CONFIG.output.overwrite
+    assert resolved.resource.video == DEFAULT_CONFIG.resource.video
+    assert resolved.danmaku.format == DEFAULT_CONFIG.danmaku.format
+    assert resolved.danmaku.font == DEFAULT_CONFIG.danmaku.font
+    assert resolved.danmaku.opacity == DEFAULT_CONFIG.danmaku.opacity
+    assert resolved.credential.cookie == DEFAULT_CONFIG.credential.cookie
+    assert resolved.credential.profile == DEFAULT_CONFIG.credential.profile
+
+
 def test_no_inherit_cuts_outer_cli_config_but_keeps_persistent_config(tmp_path: Path):
     task_list = tmp_path / "downloads.txt"
     task_list.write_text(
