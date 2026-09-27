@@ -12,7 +12,6 @@ from websockets.typing import Origin
 
 from yutto.__version__ import VERSION
 from yutto.cli.settings import YuttoConfig
-from yutto.config import ResolvedConfig
 from yutto.runtime import TaskCapacityError
 from yutto.server.request import config_parser_from_settings
 from yutto.server.rpc import JsonRpcDispatcher, JsonRpcError, encode_notification
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from socket import socket
 
+    from yutto.config import ResolvedConfig
     from yutto.core.result import DownloadResult, ResolveResult
     from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
 
