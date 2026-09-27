@@ -26,7 +26,9 @@ if TYPE_CHECKING:
     from yutto.core.result import DownloadResult, ResolveResult
     from yutto.runtime import EventReplay, TaskEvent, TaskSnapshot
 
-    _AnyTaskSnapshot: TypeAlias = TaskSnapshot[ResolvedConfig, DownloadResult] | TaskSnapshot[ResolvedConfig, ResolveResult]
+    _AnyTaskSnapshot: TypeAlias = (
+        TaskSnapshot[ResolvedConfig, DownloadResult] | TaskSnapshot[ResolvedConfig, ResolveResult]
+    )
 
 
 AUTHENTICATION_ERROR = -32001
