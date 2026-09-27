@@ -228,7 +228,9 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             if "video_download_codec" in stream_request.model_fields_set
             else default_download
         )
-        save = stream_request.video_save_codec if "video_save_codec" in stream_request.model_fields_set else default_save
+        save = (
+            stream_request.video_save_codec if "video_save_codec" in stream_request.model_fields_set else default_save
+        )
         stream_updates["video_codec"] = f"{download}:{save}"
     if {"audio_download_codec", "audio_save_codec"} & stream_request.model_fields_set:
         default_download, default_save = resolve_audio_codecs(baseline)
@@ -237,7 +239,9 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
             if "audio_download_codec" in stream_request.model_fields_set
             else default_download
         )
-        save = stream_request.audio_save_codec if "audio_save_codec" in stream_request.model_fields_set else default_save
+        save = (
+            stream_request.audio_save_codec if "audio_save_codec" in stream_request.model_fields_set else default_save
+        )
         stream_updates["audio_codec"] = f"{download}:{save}"
     stream = replace(baseline.stream, **stream_updates)
 
@@ -315,11 +319,7 @@ def _config_from_request(request: ConfigRequest, baseline: ResolvedConfig) -> Re
 
 
 def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, object]:
-    return {
-        target: getattr(model, source)
-        for source, target in fields.items()
-        if source in model.model_fields_set
-    }
+    return {target: getattr(model, source) for source, target in fields.items() if source in model.model_fields_set}
 
 
 __all__ = ["ConfigRequest", "config_parser_from_settings"]
