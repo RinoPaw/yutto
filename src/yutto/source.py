@@ -29,7 +29,6 @@ from yutto.api.ugc import (
     get_ugc_video_tags,
     get_watch_later_entries,
 )
-from yutto.config import ResolvedConfig
 from yutto.exceptions import (
     HttpStatusError,
     MaxRetryError,
@@ -70,6 +69,7 @@ from yutto.utils.metadata import Actor, ItemMetaData
 from yutto.utils.time import get_time_stamp_by_now
 
 if TYPE_CHECKING:
+    from yutto.config import ResolvedConfig
     from yutto.core.execution import ExecutionScope
     from yutto.exceptions import YuttoBaseException
 
