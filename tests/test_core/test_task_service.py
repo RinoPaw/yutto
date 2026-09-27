@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from yutto.config import ResolvedConfig, SourceSpec
 from yutto.core.events import (
     DownloadArtifactCreated,
     DownloadBatchStarted,
     DownloadEventSink,
-    DownloadItemListed,
     DownloadItemSkipped,
     DownloadMediaSelected,
     DownloadProgress,
@@ -22,11 +22,9 @@ from yutto.core.events import (
 )
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import emit_download_event
-from yutto.core.request import DownloadRequest
-from yutto.core.result import DownloadResult, ItemSkipReason, ResolvedItem
+from yutto.core.result import DownloadResult, ItemSkipReason
 from yutto.core.task_service import DownloadTaskService, _encode_runtime_event
 from yutto.runtime import TaskState
-from yutto.types import AId, CId
 from yutto.utils.functional import as_sync
 
 if TYPE_CHECKING:
@@ -42,6 +40,10 @@ def task_ids() -> Iterator[str]:
         yield f"download-{index}"
 
 
+def make_config(url: str) -> ResolvedConfig:
+    return ResolvedConfig(source=SourceSpec(value=url))
+
+
 class RecordingApplication:
     def __init__(
         self,
@@ -54,7 +56,7 @@ class RecordingApplication:
         self.calls = calls
         self.result = DownloadResult()
 
-    async def download(self, request: DownloadRequest) -> DownloadResult:
+    async def download(self, config: ResolvedConfig) -> DownloadResult:
         self.event_sink.emit(DownloadStageChanged(name=DownloadStage.RESOLVING))
         self.event_sink.emit(
             DownloadMediaSelected(
@@ -69,12 +71,12 @@ class RecordingApplication:
                 audio=None,
             )
         )
-        self.calls.append((self.scope_factory, request.source.url))
+        self.calls.append((self.scope_factory, str(config.source.value)))
         return self.result
 
 
 @as_sync
-async def test_download_task_service_runs_requests_in_order_and_bridges_events():
+async def test_download_task_service_runs_configs_in_order_and_bridges_events():
     ids = task_ids()
     scope_factory = RequestExecutionScopeFactory()
     calls: list[tuple[ExecutionScopeFactory, str]] = []
@@ -91,8 +93,8 @@ async def test_download_task_service_runs_requests_in_order_and_bridges_events()
         task_id_factory=lambda: next(ids),
     )
     async with service:
-        first = await service.submit(DownloadRequest.model_validate({"source": {"url": "BV1first"}}))
-        second = await service.submit(DownloadRequest.model_validate({"source": {"url": "BV1second"}}))
+        first = await service.submit(make_config("BV1first"))
+        second = await service.submit(make_config("BV1second"))
         first_done = await service.runtime.wait(first.task_id)
         second_done = await service.runtime.wait(second.task_id)
 
@@ -128,7 +130,7 @@ async def test_download_task_service_runs_up_to_worker_count_concurrently():
     max_active = 0
 
     class ConcurrentApplication:
-        async def download(self, request: DownloadRequest) -> DownloadResult:
+        async def download(self, config: ResolvedConfig) -> DownloadResult:
             nonlocal active, max_active
             active += 1
             max_active = max(max_active, active)
@@ -146,8 +148,8 @@ async def test_download_task_service_runs_up_to_worker_count_concurrently():
         worker_count=2,
     )
     async with service:
-        first = await service.submit(DownloadRequest.model_validate({"source": {"url": "BV1first"}}))
-        second = await service.submit(DownloadRequest.model_validate({"source": {"url": "BV1second"}}))
+        first = await service.submit(make_config("BV1first"))
+        second = await service.submit(make_config("BV1second"))
         await asyncio.wait_for(both_started.wait(), timeout=1)
         release.set()
         first_done, second_done = await asyncio.gather(
@@ -252,29 +254,3 @@ def test_encode_runtime_event_media_selected_omits_urls_and_handles_missing_stre
         "audio": {"codec": "flac", "quality": 30251, "save_codec": "flac"},
     }
     assert "url" not in repr(data).casefold()
-
-
-def test_encode_runtime_event_item_listed_carries_full_wire_fields():
-    item = ResolvedItem(
-        avid=AId("1"),
-        cid=CId("10"),
-        url="https://www.bilibili.com/video/av1?p=1",
-        name="P1",
-        title="标题",
-        cover_url="https://example.com/cover.jpg",
-        planned_path=Path("标题/P1"),
-        display_group="标题",
-        uploader="某UP主",
-        description="视频简介",
-        tags=("标签A", "标签B"),
-        pubdate=1698148800,
-        duration=1559,
-    )
-    kind, data = _encode_runtime_event(DownloadItemListed(item=item))
-    assert kind == "item_listed"
-    assert data["avid"] == "1"
-    assert data["cid"] == "10"
-    assert data["planned_path"] == "标题/P1"
-    assert data["tags"] == ["标签A", "标签B"]
-    assert data["pubdate"] == 1698148800
-    assert data["duration"] == 1559

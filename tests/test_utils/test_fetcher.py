@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from returns.result import Failure, Success
@@ -11,6 +11,10 @@ from yutto._native import HttpStatusError, SessionClosedError
 from yutto.core.execution import ExecutionScope
 from yutto.utils.fetcher import Fetcher, cookies_from_auth, create_client, resolve_proxy
 from yutto.utils.functional import as_sync
+
+
+def _execution_scope(session: Any) -> ExecutionScope:
+    return ExecutionScope(session, fetch_workers=1, download_workers=1)
 
 
 def test_resolve_proxy_auto_uses_system_proxy():
@@ -156,7 +160,7 @@ async def test_get_size_reports_started_and_completed_with_probe_result(monkeypa
     reports: list[str] = []
     monkeypatch.setattr(fetcher_module, "emit_download_report", lambda message, **_kwargs: reports.append(message))
     session = SizeSession()
-    scope = ExecutionScope(cast("Any", session))
+    scope = _execution_scope(session)
 
     assert await Fetcher.get_size(scope, "https://example.com/known") == Success(42)
     assert await Fetcher.get_size(scope, "https://example.com/unknown") == Success(None)
@@ -179,7 +183,7 @@ async def test_fetcher_preserves_query_parameter_encoding():
             return await super().get(url, **kwargs)
 
     session = QuerySession(200)
-    scope = ExecutionScope(cast("Any", session))
+    scope = _execution_scope(session)
 
     assert await Fetcher.fetch_bin(
         scope,
@@ -207,7 +211,7 @@ async def test_fetcher_preserves_query_parameter_encoding():
 
 @as_sync
 async def test_fetch_bin_keeps_non_success_status_as_success_none():
-    scope = ExecutionScope(cast("Any", _StatusSession(404)))
+    scope = _execution_scope(_StatusSession(404))
     match await Fetcher.fetch_bin(scope, "https://example.com"):
         case Success(None):
             pass
@@ -221,7 +225,7 @@ async def test_fetch_json_retries_non_success_status(monkeypatch: pytest.MonkeyP
         return None
 
     monkeypatch.setattr(fetcher_module.asyncio, "sleep", no_sleep)
-    scope = ExecutionScope(cast("Any", _StatusSession(404)))
+    scope = _execution_scope(_StatusSession(404))
     match await Fetcher.fetch_json(scope, "https://example.com"):
         case Failure(error):
             assert error.message == "超出最大重试次数！"
@@ -231,7 +235,7 @@ async def test_fetch_json_retries_non_success_status(monkeypatch: pytest.MonkeyP
 
 @as_sync
 async def test_get_redirected_url_keeps_non_success_status_as_url():
-    scope = ExecutionScope(cast("Any", _StatusSession(404)))
+    scope = _execution_scope(_StatusSession(404))
     match await Fetcher.get_redirected_url(scope, "https://example.com"):
         case Success(url):
             assert url == "https://example.com"
@@ -241,7 +245,7 @@ async def test_get_redirected_url_keeps_non_success_status_as_url():
 
 @as_sync
 async def test_touch_url_keeps_non_success_status_as_success_none():
-    scope = ExecutionScope(cast("Any", _StatusSession(404)))
+    scope = _execution_scope(_StatusSession(404))
     match await Fetcher.touch_url(scope, "https://example.com"):
         case Success(None):
             pass
@@ -263,8 +267,8 @@ async def test_touch_url_cache_is_scoped_to_execution_scope():
 
     first_session = CountingSession()
     second_session = CountingSession()
-    first_scope = ExecutionScope(cast("Any", first_session))
-    second_scope = ExecutionScope(cast("Any", second_session))
+    first_scope = _execution_scope(first_session)
+    second_scope = _execution_scope(second_session)
 
     assert isinstance(await Fetcher.touch_url(first_scope, "https://example.com"), Success)
     assert isinstance(await Fetcher.touch_url(first_scope, "https://example.com"), Success)
@@ -279,6 +283,6 @@ async def test_fetcher_does_not_retry_a_closed_session():
         async def get(self, url: str, **kwargs: Any) -> None:
             raise SessionClosedError("closed")
 
-    scope = ExecutionScope(cast("Any", ClosedSession()))
+    scope = _execution_scope(ClosedSession())
     with pytest.raises(SessionClosedError, match="closed"):
         await Fetcher.touch_url(scope, "https://example.com")

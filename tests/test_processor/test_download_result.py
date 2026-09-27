@@ -2,133 +2,137 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from returns.result import Success
 
 import yutto.downloader.executor as executor_module
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig, SourceSpec
 from yutto.core.execution import ExecutionScope
-from yutto.core.request import DownloadRequest
-from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState, ResolvedItem
+from yutto.core.result import Artifact, ArtifactKind, ItemResult, ItemSkipReason, ItemState
 from yutto.downloader.downloader import process_download
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.exceptions import PostprocessingError
-from yutto.types import AId, CId
+from yutto.resource import ResourceManifest
+from yutto.types import AudioUrlMeta
 from yutto.utils.danmaku import write_danmaku
 from yutto.utils.functional import as_sync
+from yutto.utils.metadata import ItemMetaData
 
 if TYPE_CHECKING:
-    from yutto.downloader.planner import DownloadPlan
-    from yutto.media.codec import AudioCodec
-    from yutto.types import AudioUrlMeta, EpisodeData
+    from yutto.stream import AudioCodec
     from yutto.utils.danmaku import DanmakuData, DanmakuOptions
 
 pytestmark = pytest.mark.processor
 
+ENTRY_PATH = Path("series/episode")
 
-def make_request(
+
+def _execution_scope(session: Any) -> ExecutionScope:
+    return ExecutionScope(session, fetch_workers=1, download_workers=1)
+
+
+def make_config(
     tmp_path: Path,
     *,
     video: bool = False,
     audio: bool = False,
     save_cover: bool = True,
-) -> DownloadRequest:
-    return DownloadRequest.model_validate(
-        {
-            "source": {"url": "BV1test"},
-            "resources": {
-                "video": video,
-                "audio": audio,
-                "chapter_info": False,
-                "save_cover": save_cover,
-            },
-            "stream": {
-                "video_quality": 80,
-                "video_download_codec": "avc",
-                "video_save_codec": "copy",
-                "audio_quality": 30280,
-                "audio_download_codec": "mp4a",
-                "audio_save_codec": "copy",
-            },
-            "output": {
-                "directory": tmp_path / "output",
-                "temporary_directory": tmp_path / "temporary",
-            },
-        }
+    metadata: bool = True,
+    chapter_info: bool = False,
+) -> ResolvedConfig:
+    return replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1test"),
+        resource=replace(
+            DEFAULT_CONFIG.resource,
+            video=video,
+            audio=audio,
+            metadata=metadata,
+            chapter_info=chapter_info,
+            save_cover=save_cover,
+        ),
+        stream=replace(
+            DEFAULT_CONFIG.stream,
+            video_quality=80,
+            video_codec="avc:copy",
+            audio_quality=30280,
+            audio_codec="mp4a:copy",
+        ),
+        output=replace(
+            DEFAULT_CONFIG.output,
+            directory=tmp_path / "output",
+            temporary_directory=tmp_path / "temporary",
+        ),
     )
 
 
-def make_resource_only_episode() -> EpisodeData:
-    planned_path = Path("series/episode")
-    return {
-        "info": {
-            "listing": ResolvedItem(
-                avid=AId("1"),
-                cid=CId("1"),
-                url="https://www.bilibili.com/video/av1?p=1",
-                name="episode",
-                title="episode",
-                cover_url="",
-                planned_path=planned_path,
-            ),
-            "path": planned_path,
-        },
-        "videos": [],
-        "audios": [],
-        "subtitles": [
-            {
-                "lang": "zh-CN",
-                "lines": [{"content": "测试", "from": 0, "to": 1}],
-            }
-        ],
-        "metadata": {
-            "title": "测试",
-            "show_title": "测试",
-            "plot": "",
-            "thumb": "",
-            "premiered": 0,
-            "dateadded": 0,
-            "actor": [],
-            "genre": [],
-            "tag": [],
-            "source": "",
-            "original_filename": "episode",
-            "website": "",
-            "chapter_info_data": [],
-        },
-        "danmaku": {"source_type": "xml", "save_type": "xml", "data": ["<i />"]},
-        "cover_data": b"cover",
-        "chapter_info_data": [],
-    }
+def make_metadata() -> ItemMetaData:
+    return ItemMetaData(title="测试", show_title="测试", original_filename="episode")
+
+
+def make_resource_only_entry() -> ResourceManifest:
+    return ResourceManifest(
+        subtitle_requested=True,
+        subtitles=(("zh-CN", "https://example.test/subtitle.json"),),
+        danmaku_source_type="xml",
+        danmaku_urls=("https://example.test/danmaku.xml",),
+        cover_url="https://example.test/cover.jpg",
+    )
 
 
 def make_audio(codec: AudioCodec = "mp4a") -> AudioUrlMeta:
-    return {
-        "url": "https://signed.example.test/audio?token=audio-secret",
-        "mirrors": ["https://mirror.example.test/audio?token=mirror-secret"],
-        "codec": codec,
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    return AudioUrlMeta(
+        url="https://signed.example.test/audio?token=audio-secret",
+        mirrors=("https://mirror.example.test/audio?token=mirror-secret",),
+        codec=codec,
+        width=0,
+        height=0,
+        quality=30280,
+    )
 
 
-def make_media_episode() -> EpisodeData:
-    episode = make_resource_only_episode()
-    episode["audios"] = [make_audio()]
-    episode["chapter_info_data"] = [{"start": 0, "end": 1, "content": "chapter"}]
-    return episode
+def make_media_entry() -> ResourceManifest:
+    return replace(
+        make_resource_only_entry(),
+        audio_requested=True,
+        audios=(make_audio(),),
+        chapter_info_url="https://example.test/chapters.json",
+    )
+
+
+@pytest.fixture(autouse=True)
+def stub_resource_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fetch_json(_execution: ExecutionScope, url: str):
+        if "subtitle" in url:
+            return Success({"body": [{"content": "测试", "from": 0, "to": 1}]})
+        if "chapters" in url:
+            return Success({"data": {"view_points": [{"from": 0, "to": 1, "content": "chapter"}]}})
+        return Success({})
+
+    async def fetch_text(_execution: ExecutionScope, _url: str, *, encoding: str | None = None):
+        return Success("<i />")
+
+    async def fetch_bin(_execution: ExecutionScope, _url: str):
+        return Success(b"cover")
+
+    monkeypatch.setattr(executor_module.Fetcher, "fetch_json", fetch_json)
+    monkeypatch.setattr(executor_module.Fetcher, "fetch_text", fetch_text)
+    monkeypatch.setattr(executor_module.Fetcher, "fetch_bin", fetch_bin)
 
 
 @pytest.mark.parametrize("cancelled", [False, True], ids=["failure", "cancellation"])
 @as_sync
-async def test_interrupted_mux_keeps_resume_inputs(
+async def test_interrupted_mux_cleans_transfer_owned_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     cancelled: bool,
 ):
     started = asyncio.Event()
+    transfer_directory = tmp_path / "transfer-owned"
 
     class InterruptedFFmpeg:
         async def exec_async(self, args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -138,17 +142,28 @@ async def test_interrupted_mux_keeps_resume_inputs(
                 await asyncio.Event().wait()
             return subprocess.CompletedProcess(args, 1, b"", b"ffmpeg failed")
 
-    async def write_audio_fragment(_scope: ExecutionScope, plan: DownloadPlan) -> None:
-        plan.paths.audio.write_bytes(b"resumable audio")
+    async def download_files(
+        _execution: ExecutionScope,
+        _sources,
+        *,
+        block_size: int,
+        banned_mirrors_pattern: str | None,
+    ) -> tuple[Path, ...]:
+        transfer_directory.mkdir(parents=True, exist_ok=True)
+        path = transfer_directory / "00.m4s.part"
+        path.write_bytes(b"downloaded audio")
+        return (path,)
 
     muxer = MediaMuxer(InterruptedFFmpeg())
-    monkeypatch.setattr(executor_module, "download_video_and_audio", write_audio_fragment)
+    monkeypatch.setattr(executor_module, "download_files", download_files)
     monkeypatch.setattr(executor_module, "MediaMuxer", lambda: muxer)
     execution = asyncio.create_task(
         process_download(
-            ExecutionScope(cast("Any", object())),
-            make_media_episode(),
-            make_request(tmp_path, audio=True),
+            _execution_scope(object()),
+            make_media_entry(),
+            make_metadata(),
+            ENTRY_PATH,
+            make_config(tmp_path, audio=True, chapter_info=True),
         )
     )
     if cancelled:
@@ -164,40 +179,40 @@ async def test_interrupted_mux_keeps_resume_inputs(
     output_dir = tmp_path / "output/series"
     temporary_dir = tmp_path / "temporary/series"
     assert (output_dir / "episode.zh-CN.srt").exists()
-    assert (temporary_dir / "episode_audio.m4s").read_bytes() == b"resumable audio"
-    assert (temporary_dir / "episode_cover.jpg").exists()
-    assert (temporary_dir / "episode_chapter_info.ini").exists()
+    assert not transfer_directory.exists()
+    assert not (temporary_dir / "episode_cover.jpg").exists()
+    assert not (temporary_dir / "episode_chapter_info.ini").exists()
     assert not (output_dir / "episode.m4a").exists()
 
 
 @as_sync
 async def test_resource_only_download_returns_final_artifacts_without_temporary_files(tmp_path: Path):
     result = await process_download(
-        ExecutionScope(cast("Any", object())),
-        make_resource_only_episode(),
-        make_request(tmp_path),
+        _execution_scope(object()),
+        make_resource_only_entry(),
+        make_metadata(),
+        ENTRY_PATH,
+        make_config(tmp_path),
     )
 
     output_dir = tmp_path / "output/series"
     assert result == ItemResult(
         state=ItemState.DONE,
-        output_path=output_dir / "episode.m4a",
         artifacts=(
             Artifact(kind=ArtifactKind.SUBTITLE, path=output_dir / "episode.zh-CN.srt"),
-            Artifact(kind=ArtifactKind.DANMAKU, path=output_dir / "episode.xml"),
+            Artifact(kind=ArtifactKind.DANMAKU, path=output_dir / "episode.ass"),
             Artifact(kind=ArtifactKind.METADATA, path=output_dir / "episode.nfo"),
             Artifact(kind=ArtifactKind.COVER, path=output_dir / "episode-poster.jpg"),
         ),
     )
+    assert result.output_path is None
     assert all(artifact.path.exists() for artifact in result.artifacts)
     assert not (tmp_path / "temporary/series/episode_cover.jpg").exists()
 
 
 @as_sync
 async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(tmp_path: Path):
-    episode = make_media_episode()
-    episode["metadata"] = None
-    episode["danmaku"] = {"source_type": None, "save_type": None, "data": []}
+    entry = replace(make_media_entry(), danmaku_source_type=None, danmaku_urls=())
     output_path = tmp_path / "output/series/episode.m4a"
     subtitle_path = tmp_path / "output/series/episode.zh-CN.srt"
     output_path.parent.mkdir(parents=True)
@@ -205,9 +220,11 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
     subtitle_path.write_text("stale subtitle")
 
     result = await process_download(
-        ExecutionScope(cast("Any", object())),
-        episode,
-        make_request(tmp_path, audio=True),
+        _execution_scope(object()),
+        entry,
+        make_metadata(),
+        ENTRY_PATH,
+        make_config(tmp_path, audio=True, metadata=False, chapter_info=True),
     )
 
     assert result == ItemResult(
@@ -226,34 +243,29 @@ async def test_existing_media_returns_artifacts_and_cleans_temporary_resources(t
 
 
 @as_sync
-async def test_missing_requested_audio_does_not_clean_uncreated_video_file(tmp_path: Path):
-    episode = make_resource_only_episode()
-    episode["videos"] = [
-        {
-            "url": "https://example.test/video",
-            "mirrors": [],
-            "codec": "avc",
-            "width": 1920,
-            "height": 1080,
-            "quality": 80,
-        }
-    ]
-    episode["subtitles"] = []
-    episode["metadata"] = None
-    episode["danmaku"] = {"source_type": None, "save_type": None, "data": []}
-    episode["cover_data"] = None
+async def test_missing_requested_audio_does_not_start_media_transfer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    entry = ResourceManifest(audio_requested=True)
 
+    async def unexpected_download(*_args: object, **_kwargs: object) -> tuple[Path, ...]:
+        raise AssertionError("media transfer must not start")
+
+    monkeypatch.setattr(executor_module, "download_files", unexpected_download)
     result = await process_download(
-        ExecutionScope(cast("Any", object())),
-        episode,
-        make_request(tmp_path, audio=True, save_cover=False),
+        _execution_scope(object()),
+        entry,
+        make_metadata(),
+        ENTRY_PATH,
+        make_config(tmp_path, audio=True, save_cover=False, metadata=False),
     )
 
     assert result == ItemResult(
         state=ItemState.SKIPPED,
-        output_path=tmp_path / "output/series/episode.m4a",
         skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
     )
+    assert result.output_path is None
 
 
 def test_multi_part_protobuf_danmaku_returns_every_output_path(tmp_path: Path):

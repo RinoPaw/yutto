@@ -70,7 +70,7 @@ biliass = { workspace = true }
 members = ["packages/*"]
 
 [tool.pytest]
-markers = ["api", "e2e", "processor", "biliass", "ignore", "ci_skip", "ci_only"]
+markers = ["api", "e2e", "live", "processor", "biliass", "ignore", "ci_skip", "ci_only"]
 
 [tool.ruff]
 line-length = 120

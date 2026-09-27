@@ -24,13 +24,9 @@ PathTemplateVariable = Literal[
 PathTemplateVariableDict = dict[PathTemplateVariable, int | str]
 UNKNOWN: str = "unknown_variable"
 
-_count: int = 0
-
 
 def repair_filename(filename: str) -> str:
     """修复不合法的文件名"""
-
-    global _count
 
     def to_full_width_chr(matchobj: re.Match[str]) -> str:
         char = matchobj.group(0)
@@ -56,10 +52,7 @@ def repair_filename(filename: str) -> str:
     filename = regex_non_printable.sub("", filename)
     filename = filename.strip()
     filename = regex_dots.sub("……", filename)
-    if not filename:
-        filename = f"未命名文件_{_count:04}"
-        _count += 1
-    return filename
+    return filename or "未命名文件"
 
 
 def create_time_formatter(name: str, value: int):
@@ -82,25 +75,27 @@ def create_time_formatter(name: str, value: int):
 def resolve_path_template(
     path_template: str, auto_path_template: str, subpath_variables: PathTemplateVariableDict
 ) -> str:
+    variables = dict(subpath_variables)
+
     # 保证所有传进来的值都满足路径要求
-    for key, value in subpath_variables.items():
+    for key, value in variables.items():
         # 未知变量警告
         if f"{{{key}}}" in path_template and value == UNKNOWN:
             emit_download_report("使用了未知的变量，可能导致产生错误的下载路径", ReportLevel.WARNING)
         # 只对字符串值修改，int 型不修改以适配高级模板
         if isinstance(value, str):
-            subpath_variables[key] = repair_filename(value)
+            variables[key] = repair_filename(value)
 
     # 将时间变量转换为对应的时间格式
     time_vars: list[PathTemplateVariable] = ["pubdate", "download_date"]
     for var in time_vars:
-        value = subpath_variables.pop(var)
+        value = variables.pop(var)
         if value == UNKNOWN:
             continue
         assert isinstance(value, int), f"变量 {var} 的值必须为 int 型，但是传入了 {value}"
         time_formatter = create_time_formatter(var, value)
         path_template = time_formatter(path_template)
-    return path_template.format(auto=auto_path_template.format(**subpath_variables), **subpath_variables)
+    return path_template.format(auto=auto_path_template.format(**variables), **variables)
 
 
 def create_unique_path_resolver():

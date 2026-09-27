@@ -6,6 +6,15 @@ TIME_FULL_FMT = "%Y-%m-%d %H:%M:%S"
 TIME_DATE_FMT = "%Y-%m-%d"
 
 
+def parse_local_timestamp(value: str) -> int:
+    for fmt in (TIME_DATE_FMT, TIME_FULL_FMT):
+        try:
+            return int(time.mktime(time.strptime(value, fmt)))
+        except ValueError:
+            pass
+    raise ValueError(f"无法解析时间 {value!r}，请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS")
+
+
 def get_time_stamp_by_now() -> int:
     return int(time.time())
 

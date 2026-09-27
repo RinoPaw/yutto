@@ -1,0 +1,326 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import replace
+from typing import TYPE_CHECKING, cast
+
+import pytest
+
+import yutto.__main__ as main_module
+import yutto.cli.formats as formats_module
+from yutto.cli.compat import normalize_argv
+from yutto.cli.formats import (
+    FormatListingEntry,
+    build_format_probe_config,
+    format_grouped_manifest_lines,
+    format_index_ranges,
+    format_manifest_lines,
+)
+from yutto.cli.parser import build_parser
+from yutto.config import DEFAULT_CONFIG, ResolvedConfig, SourceSpec
+from yutto.downloader.selector import select_streams
+from yutto.media import UgcPage
+from yutto.resource import ResourceManifest
+from yutto.types import AId, AudioUrlMeta, CId, VideoUrlMeta
+from yutto.utils.metadata import ItemMetaData
+
+if TYPE_CHECKING:
+    from yutto.core.execution import ExecutionScope
+    from yutto.media.codec import AudioCodec, VideoCodec
+    from yutto.media.quality import AudioQuality, VideoQuality
+
+
+def _config(
+    *,
+    metadata: bool = False,
+    ai_translation_language: str | None = None,
+    video_quality: int = 127,
+    video_codec: str = "avc:copy",
+    fetch_workers: int = 8,
+) -> ResolvedConfig:
+    return replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1xx411c7mD"),
+        resource=replace(
+            DEFAULT_CONFIG.resource,
+            metadata=metadata,
+            ai_translation_language=ai_translation_language,
+        ),
+        stream=replace(
+            DEFAULT_CONFIG.stream,
+            video_quality=video_quality,
+            video_codec=video_codec,
+        ),
+        network=replace(DEFAULT_CONFIG.network, fetch_workers=fetch_workers),
+    )
+
+
+def _video(
+    url: str,
+    *,
+    codec: VideoCodec = "avc",
+    width: int = 1920,
+    height: int = 1080,
+    quality: VideoQuality = 80,
+    mirrors: tuple[str, ...] = (),
+) -> VideoUrlMeta:
+    return VideoUrlMeta(url=url, mirrors=mirrors, codec=codec, width=width, height=height, quality=quality)
+
+
+def _audio(
+    url: str,
+    *,
+    codec: AudioCodec = "mp4a",
+    quality: AudioQuality = 30280,
+    mirrors: tuple[str, ...] = (),
+) -> AudioUrlMeta:
+    return AudioUrlMeta(url=url, mirrors=mirrors, codec=codec, width=0, height=0, quality=quality)
+
+
+def test_download_parser_accepts_preview_formats():
+    args = build_parser().parse_args(normalize_argv(["BV1xx411c7mD", "--preview-formats"]))
+
+    assert args.command == "download"
+    assert args.preview_formats is True
+
+
+def test_download_parser_rejects_removed_list_formats_alias():
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(normalize_argv(["BV1xx411c7mD", "--list-formats"]))
+
+    assert exit_info.value.code == 2
+
+
+def test_format_probe_config_fetches_only_stream_resources():
+    config = _config(metadata=True, ai_translation_language="en")
+
+    probe = build_format_probe_config(config)
+
+    assert probe.resource.video is True
+    assert probe.resource.audio is True
+    assert probe.resource.danmaku is False
+    assert probe.resource.subtitle is False
+    assert probe.resource.metadata is False
+    assert probe.resource.cover is False
+    assert probe.resource.chapter_info is False
+    assert probe.resource.save_cover is False
+    assert probe.resource.ai_translation_language == "en"
+    assert config.resource.metadata is True
+    assert config.resource.cover is True
+
+
+def test_format_manifest_lines_use_legacy_style_without_urls():
+    video = _video(
+        "https://signed.example/video",
+        mirrors=("https://mirror.example/video",),
+        codec="hevc",
+        width=3840,
+        height=2160,
+        quality=120,
+    )
+    audio = _audio("https://signed.example/audio")
+
+    rendered = "\n".join(format_manifest_lines(ResourceManifest(videos=(video,), audios=(audio,))))
+
+    assert "共包含以下 1 个视频流：" in rendered
+    assert "[HEVC]" in rendered
+    assert "[3840x2160]" in rendered
+    assert "4K 超高清" in rendered
+    assert "#2" in rendered
+    assert "共包含以下 1 个音频流：" in rendered
+    assert "[MP4A]" in rendered
+    assert "320kbps" in rendered
+    assert "SELECT" not in rendered
+    assert "TYPE" not in rendered
+    assert "signed.example" not in rendered
+    assert "mirror.example" not in rendered
+
+
+def test_format_manifest_lines_mark_exact_download_selection():
+    video_4k = _video(
+        "https://signed.example/4k",
+        codec="hevc",
+        width=3840,
+        height=2160,
+        quality=120,
+    )
+    video_1080p = _video("https://signed.example/1080p")
+    audio = _audio("https://signed.example/audio")
+    manifest = ResourceManifest(videos=(video_4k, video_1080p), audios=(audio,))
+    config = _config(video_quality=80, video_codec="avc:copy")
+
+    selection = select_streams(manifest, config)
+    rendered = format_manifest_lines(manifest, selection)
+
+    selected_lines = [line for line in rendered if line.startswith("*")]
+    assert len(selected_lines) == 2
+    assert any("[AVC " in line and "1920x1080" in line and "1080P" in line for line in selected_lines)
+    assert any("[MP4A]" in line and "320kbps" in line for line in selected_lines)
+    assert not any(line.startswith("*") and "3840x2160" in line for line in rendered)
+
+
+def test_format_manifest_lines_report_empty_manifest_like_legacy_output():
+    assert format_manifest_lines(ResourceManifest()) == ("不包含任何视频流", "不包含任何音频流")
+
+
+def test_format_index_ranges_compacts_contiguous_and_sparse_pages():
+    assert format_index_ranges([1, 2, 3, 5, 7, 8], prefix="P") == "P1-P3, P5, P7-P8"
+
+
+def test_grouped_format_listing_merges_same_formats_even_when_urls_differ():
+    manifests = []
+    for index in range(1, 101):
+        video = _video(
+            f"https://cdn{index}.example/video",
+            mirrors=(f"https://mirror{index}.example/video",),
+            codec="hevc",
+            width=3840,
+            height=2160,
+            quality=120,
+        )
+        audio = _audio(f"https://cdn{index}.example/audio")
+        manifests.append(ResourceManifest(videos=(video,), audios=(audio,)))
+
+    entries = tuple(
+        FormatListingEntry(
+            index=index,
+            title=f"P{index}",
+            manifest=manifest,
+            parent_key=42,
+            parent_title="百P视频",
+            page=index,
+        )
+        for index, manifest in enumerate(manifests, start=1)
+    )
+
+    rendered = "\n".join(format_grouped_manifest_lines(entries, total_items=100))
+
+    assert "格式组 1/1（100 个条目）" in rendered
+    assert "百P视频: P1-P100" in rendered
+    assert rendered.count("共包含以下 1 个视频流：") == 1
+    assert rendered.count("共包含以下 1 个音频流：") == 1
+    assert "cdn1.example" not in rendered
+    assert "cdn100.example" not in rendered
+
+
+def test_grouped_format_listing_keeps_different_format_sets_separate():
+    video_4k = _video(
+        "https://signed.example/4k",
+        codec="hevc",
+        width=3840,
+        height=2160,
+        quality=120,
+    )
+    video_1080p = _video("https://signed.example/1080p")
+    entries = (
+        FormatListingEntry(
+            index=1,
+            title="P1",
+            manifest=ResourceManifest(videos=(video_4k,)),
+            parent_key=42,
+            parent_title="多P视频",
+            page=1,
+        ),
+        FormatListingEntry(
+            index=2,
+            title="P2",
+            manifest=ResourceManifest(videos=(video_1080p,)),
+            parent_key=42,
+            parent_title="多P视频",
+            page=2,
+        ),
+    )
+
+    rendered = "\n".join(format_grouped_manifest_lines(entries, total_items=2))
+
+    assert "格式组 1/2（1 个条目）" in rendered
+    assert "格式组 2/2（1 个条目）" in rendered
+    assert "多P视频: P1" in rendered
+    assert "多P视频: P2" in rendered
+    assert rendered.count("共包含以下 1 个视频流：") == 2
+
+
+def test_grouped_format_listing_separates_different_displayed_mirror_counts():
+    video_one_url = _video("https://signed.example/one")
+    video_two_urls = _video(
+        "https://signed.example/two",
+        mirrors=("https://mirror.example/two",),
+    )
+    entries = (
+        FormatListingEntry(index=1, title="P1", manifest=ResourceManifest(videos=(video_one_url,))),
+        FormatListingEntry(index=2, title="P2", manifest=ResourceManifest(videos=(video_two_urls,))),
+    )
+
+    rendered = "\n".join(format_grouped_manifest_lines(entries, total_items=2))
+
+    assert "格式组 1/2（1 个条目）" in rendered
+    assert "格式组 2/2（1 个条目）" in rendered
+    assert "#1" in rendered
+    assert "#2" in rendered
+
+
+def test_format_manifest_resolution_respects_fetch_worker_limit(monkeypatch: pytest.MonkeyPatch):
+    config = _config(fetch_workers=2)
+    items = tuple(
+        UgcPage(
+            metadata=ItemMetaData(title=f"P{index}"),
+            aid=AId("1"),
+            cid=CId(str(index)),
+        )
+        for index in range(1, 6)
+    )
+    active = 0
+    max_active = 0
+
+    async def fake_resolve_resource_manifest(
+        _execution: object,
+        _item: UgcPage,
+        _config: ResolvedConfig,
+    ) -> ResourceManifest:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return ResourceManifest()
+
+    monkeypatch.setattr(formats_module, "resolve_resource_manifest", fake_resolve_resource_manifest)
+
+    outcomes = asyncio.run(
+        formats_module.resolve_format_manifests(
+            cast("ExecutionScope", object()),
+            items,
+            config,
+        )
+    )
+
+    assert len(outcomes) == 5
+    assert max_active == 2
+
+
+def test_preview_formats_mode_skips_ffmpeg_and_download(monkeypatch: pytest.MonkeyPatch):
+    captured: list[list[ResolvedConfig]] = []
+
+    monkeypatch.setattr(main_module.sys, "argv", ["yutto", "BV1xx411c7mD", "--preview-formats"])
+    monkeypatch.setattr(main_module, "search_for_settings_file", lambda: None)
+    monkeypatch.setattr(main_module, "resolve_credentials", lambda _options: None)
+    monkeypatch.setattr(
+        main_module,
+        "run_preview_formats",
+        lambda _scope_factory, configs, _renderer: captured.append(configs),
+    )
+    monkeypatch.setattr(
+        main_module.FFmpeg,
+        "setup_ffmpeg_path",
+        lambda *_args: pytest.fail("--preview-formats must not initialize FFmpeg"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "run_download",
+        lambda *_args, **_kwargs: pytest.fail("--preview-formats must not enter the download workflow"),
+    )
+
+    main_module.main()
+
+    assert len(captured) == 1
+    assert [config.source.value for config in captured[0]] == ["BV1xx411c7mD"]

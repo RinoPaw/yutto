@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -12,10 +13,11 @@ from yutto.core.result import (
     ItemResult,
     ItemSkipReason,
     ItemState,
-    ResolvedItem,
     ResolveResult,
 )
-from yutto.types import AId, BvId, CId
+from yutto.media import MediaEntry, UgcPage, UgcVideo
+from yutto.types import AId, CId
+from yutto.utils.metadata import ItemMetaData
 
 pytestmark = pytest.mark.processor
 
@@ -29,74 +31,34 @@ def test_result_models_are_frozen_and_reject_extra_fields():
         Artifact(kind=ArtifactKind.MEDIA, path=Path("video.mp4"), size=1)  # ty: ignore[unknown-argument]
 
 
-def test_resolved_item_is_a_typed_immutable_listing_snapshot():
-    payload: dict[str, object] = {
-        "avid": AId("1"),
-        "cid": CId("10"),
-        "url": "https://www.bilibili.com/video/av1?p=1",
-        "name": "P1",
-        "title": "标题",
-        "cover_url": "https://example.com/cover.jpg",
-        "planned_path": Path("标题/P1"),
-        "display_group": "标题",
-        "uploader": "某UP主",
-        "description": "视频简介",
-        "tags": ("标签A", "标签B"),
-        "pubdate": 1698148800,
-        "duration": 1559,
-    }
-    item = ResolvedItem.model_validate(payload)
-
-    assert isinstance(item.avid, AId)
-    assert isinstance(item.cid, CId)
-    assert item.tags == ("标签A", "标签B")
-    assert set(type(item).model_fields) == set(payload)
-    serialized = item.model_dump(mode="json")
-    assert serialized["avid"] == "1"
-    assert serialized["cid"] == "10"
-    assert serialized["planned_path"] == "标题/P1"
-    assert serialized["tags"] == ["标签A", "标签B"]
-    assert serialized["pubdate"] == 1698148800
-    assert serialized["duration"] == 1559
-    schema = ResolvedItem.model_json_schema(mode="serialization")
-    assert schema["properties"]["avid"]["type"] == "string"
-    assert schema["properties"]["cid"]["type"] == "string"
-
-    with pytest.raises(ValidationError, match="frozen"):
-        item.name = "changed"  # ty: ignore[invalid-assignment]
-    with pytest.raises(ValidationError, match="Extra inputs"):
-        ResolvedItem.model_validate({**payload, "play_url": "https://example.com/expiring"})
-
-
-@pytest.mark.parametrize("avid", [AId("808982399"), BvId("BV1f34y1k7D5"), BvId("bv1f34y1k7D5")])
-def test_listing_results_round_trip_through_json_with_typed_ids(avid: AId | BvId):
-    cid = CId("144541892")
-    item = ResolvedItem(
-        avid=avid,
-        cid=cid,
-        url="https://www.bilibili.com/video/av808982399?p=1",
-        name="P1",
-        title="标题",
-        cover_url="https://example.com/cover.jpg",
-        planned_path=Path("标题/P1"),
-        tags=("标签A", "标签B"),
+def test_resolve_result_keeps_media_tree_without_flat_projection():
+    aid = AId("808982399")
+    page = UgcPage(
+        aid=aid,
+        cid=CId("10"),
+        metadata=ItemMetaData(title="P2"),
     )
-    assert item.avid is avid
-    assert item.cid is cid
+    entry = MediaEntry(index=2, media=page)
+    video = UgcVideo(
+        aid=aid,
+        metadata=ItemMetaData(title="标题"),
+        items=(entry,),
+    )
+    result = ResolveResult(items=(video,))
 
-    restored_item = ResolvedItem.model_validate_json(item.model_dump_json())
-    restored_result = ResolveResult.model_validate_json(ResolveResult(items=(item,)).model_dump_json())
+    assert result.items == (video,)
+    root = result.items[0]
+    assert isinstance(root, UgcVideo)
+    assert root.items == (entry,)
+    assert root.items[0].media is page
+    assert root is video
 
-    assert restored_item == item
-    assert type(restored_item.avid) is type(avid)
-    assert isinstance(restored_item.cid, CId)
-    assert restored_result.items == (item,)
-    assert type(restored_result.items[0].avid) is type(avid)
-    assert isinstance(restored_result.items[0].cid, CId)
+    with pytest.raises(FrozenInstanceError):
+        result.items = ()  # ty: ignore[invalid-assignment]
 
 
-def test_item_result_validates_skip_reason_without_requiring_artifacts():
-    resource_only = ItemResult(state=ItemState.DONE, output_path=Path("video.mp4"))
+def test_item_result_output_path_only_describes_real_media_output():
+    resource_only = ItemResult(state=ItemState.DONE)
     media_download = ItemResult(
         state=ItemState.DONE,
         output_path=Path("video.mp4"),
@@ -108,25 +70,29 @@ def test_item_result_validates_skip_reason_without_requiring_artifacts():
         skip_reason=ItemSkipReason.ALREADY_EXISTS,
         artifacts=(Artifact(kind=ArtifactKind.MEDIA, path=Path("video.mp4")),),
     )
+    missing_media = ItemResult(
+        state=ItemState.SKIPPED,
+        skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
+    )
 
-    assert resource_only.artifacts == ()
+    assert resource_only.output_path is None
     assert resource_only.has_downloaded_media is False
     assert media_download.has_downloaded_media is True
     assert existing_media.has_downloaded_media is False
-    assert (
-        ItemResult(
-            state=ItemState.SKIPPED,
-            output_path=Path("video.mp4"),
-            skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
-        ).skip_reason
-        is ItemSkipReason.NO_MEDIA_STREAM
-    )
+    assert missing_media.output_path is None
 
     with pytest.raises(ValidationError, match="done item must not have"):
         ItemResult(
             state=ItemState.DONE,
-            output_path=Path("video.mp4"),
             skip_reason=ItemSkipReason.ALREADY_EXISTS,
         )
     with pytest.raises(ValidationError, match="skipped item must have"):
-        ItemResult(state=ItemState.SKIPPED, output_path=Path("video.mp4"))
+        ItemResult(state=ItemState.SKIPPED)
+    with pytest.raises(ValidationError, match="already-existing item must have"):
+        ItemResult(state=ItemState.SKIPPED, skip_reason=ItemSkipReason.ALREADY_EXISTS)
+    with pytest.raises(ValidationError, match="must not have an output path"):
+        ItemResult(
+            state=ItemState.SKIPPED,
+            output_path=Path("video.mp4"),
+            skip_reason=ItemSkipReason.NO_MEDIA_STREAM,
+        )

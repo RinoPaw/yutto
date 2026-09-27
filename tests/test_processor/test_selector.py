@@ -2,88 +2,77 @@ from __future__ import annotations
 
 import pytest
 
-from yutto.input_parser import (
-    parse_episodes_selection,
-    validate_episodes_selection,
+from yutto.exceptions import WrongArgumentError
+from yutto.selection import compile_selection, parse_selection
+
+pytestmark = pytest.mark.processor
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        "1",
+        "99",
+        "-1",
+        "$",
+        "1,2",
+        "1,-2,3,-4",
+        "1~3",
+        "1~-1",
+        "-2~-1",
+        "1~2,9~$",
+        "~2,9~",
+        "~",
+    ],
 )
+def test_selection_accepts_supported_syntax(selection: str) -> None:
+    parse_selection(selection)
 
 
-@pytest.mark.processor
-def test_regex():
-    # 单个
-    assert validate_episodes_selection("1")
-    assert validate_episodes_selection("99")
-    assert validate_episodes_selection("-1")
-    assert validate_episodes_selection("-99")
-    assert validate_episodes_selection("$")
-    assert not validate_episodes_selection("")
-    assert not validate_episodes_selection(" ")
-    assert not validate_episodes_selection("x")
-    assert not validate_episodes_selection("- 1")
-    assert not validate_episodes_selection("1$")
-
-    # 组合
-    assert validate_episodes_selection("1,2")
-    assert validate_episodes_selection("1,-2,3,-4")
-    assert not validate_episodes_selection("1, 2")
-    assert not validate_episodes_selection("1,")
-
-    # 范围
-    assert validate_episodes_selection("1~3")
-    assert validate_episodes_selection("1~-1")
-    assert validate_episodes_selection("-2~-1")
-    assert not validate_episodes_selection("1~2~3")
-
-    # 范围 + 组合
-    assert validate_episodes_selection("1~2,9~$")
-    assert validate_episodes_selection("0~10,12~14,-2~$")
-
-    # 起止省略语法糖
-    assert validate_episodes_selection("~2,9~")
-    assert validate_episodes_selection("9~,~2")
-    assert validate_episodes_selection("~")
+@pytest.mark.parametrize(
+    "selection",
+    ["", " ", "x", "- 1", "1$", "1,", "1~2~3", "1,,2", "01"],
+)
+def test_selection_rejects_invalid_syntax(selection: str) -> None:
+    with pytest.raises(WrongArgumentError):
+        parse_selection(selection)
 
 
-@pytest.mark.processor
-def test_single():
-    assert parse_episodes_selection("1", 24) == [1]
-    assert parse_episodes_selection("11", 24) == [11]
-    assert parse_episodes_selection("-1", 24) == [24]
-    assert parse_episodes_selection("-10", 24) == [15]
-    assert parse_episodes_selection("$", 24) == [24]
-    assert parse_episodes_selection("25", 24) == []
+def test_selection_resolves_single_and_negative_positions() -> None:
+    assert compile_selection("1", 24) == (1,)
+    assert compile_selection("11", 24) == (11,)
+    assert compile_selection("-1", 24) == (24,)
+    assert compile_selection("-10", 24) == (15,)
+    assert compile_selection("$", 24) == (24,)
 
 
-@pytest.mark.processor
-def test_compose():
-    assert parse_episodes_selection("1,2,4", 24) == [1, 2, 4]
-    assert parse_episodes_selection("11,14,15", 24) == [11, 14, 15]
-    assert parse_episodes_selection("11,14,25", 24) == [11, 14]
-    assert parse_episodes_selection("11,-1,$", 24) == [11, 24]
-    assert parse_episodes_selection("$,-10", 24) == [15, 24]
+def test_selection_resolves_composition_and_deduplicates() -> None:
+    assert compile_selection("1,2,4", 24) == (1, 2, 4)
+    assert compile_selection("11,-1,$", 24) == (11, 24)
+    assert compile_selection("3,1,3,1~2", 4) == (3, 1, 2)
 
 
-@pytest.mark.processor
-def test_range():
-    assert parse_episodes_selection("1~4", 24) == [1, 2, 3, 4]
-    assert parse_episodes_selection("1~100", 6) == [1, 2, 3, 4, 5, 6]
-    assert parse_episodes_selection("4~10", 6) == [4, 5, 6]
-    assert parse_episodes_selection("2~-2", 6) == [2, 3, 4, 5]
-    assert parse_episodes_selection("2~$", 6) == [2, 3, 4, 5, 6]
+def test_selection_resolves_ranges_and_preserves_direction() -> None:
+    assert compile_selection("1~4", 24) == (1, 2, 3, 4)
+    assert compile_selection("2~-2", 6) == (2, 3, 4, 5)
+    assert compile_selection("2~$", 6) == (2, 3, 4, 5, 6)
+    assert compile_selection("3~1", 4) == (3, 2, 1)
 
 
-@pytest.mark.processor
-def test_range_and_compose():
-    assert parse_episodes_selection("1~4,6~8", 24) == [1, 2, 3, 4, 6, 7, 8]
-    assert parse_episodes_selection("1~4,2~6", 24) == [1, 2, 3, 4, 5, 6]
-    assert parse_episodes_selection("1~4,5~6", 24) == [1, 2, 3, 4, 5, 6]
-    assert parse_episodes_selection("1~4,5~6,8", 24) == [1, 2, 3, 4, 5, 6, 8]
-    assert parse_episodes_selection("3,5~7,12,17", 24) == [3, 5, 6, 7, 12, 17]
-    assert parse_episodes_selection("1~3,10,12~14,16,-4~$", 24) == [1, 2, 3, 10, 12, 13, 14, 16, 21, 22, 23, 24]
+def test_selection_resolves_open_ranges() -> None:
+    assert compile_selection("~4,20~", 24) == (1, 2, 3, 4, 20, 21, 22, 23, 24)
+    assert compile_selection("~", 24) == tuple(range(1, 25))
 
 
-@pytest.mark.processor
-def test_sugar():
-    assert parse_episodes_selection("~4,20~", 24) == parse_episodes_selection("1~4,20~24", 24)
-    assert parse_episodes_selection("~4,20~$", 24) == parse_episodes_selection("1~4,20~24", 24)
-    assert parse_episodes_selection("~", 24) == parse_episodes_selection("1~24", 24)
+def test_selection_allows_whitespace_between_tokens() -> None:
+    assert compile_selection("  3 , 1 ~ -1 , ^  ", 4) == (3, 1, 2, 4)
+
+
+def test_selection_rejects_zero_position() -> None:
+    with pytest.raises(WrongArgumentError):
+        compile_selection("0", 24)
+
+
+@pytest.mark.parametrize("selection", ["25", "-25"])
+def test_selection_ignores_out_of_range_positions(selection: str) -> None:
+    assert compile_selection(selection, 24) == ()

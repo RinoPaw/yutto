@@ -18,6 +18,7 @@ class ErrorCode(Enum):
     CRYPTO_ERROR = 19
     POSTPROCESSING_ERROR = 20
     RESOLVE_FAILED_ERROR = 21
+    API_RESPONSE_ERROR = 22
 
     # 异常状况，但并不算错误
     PAUSED_DOWNLOAD = 101
@@ -87,3 +88,9 @@ class ResolveFailedError(YuttoBaseException):
     """解析任务未得到任何条目，且存在预期内的失败（多个失败聚合时使用；单一失败直接抛原始异常）"""
 
     code = ErrorCode.RESOLVE_FAILED_ERROR
+
+
+class ApiResponseError(YuttoBaseException):
+    """第三方 API 返回了无法按当前协议解释的响应。"""
+
+    code = ErrorCode.API_RESPONSE_ERROR

@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from yutto.config import ResolvedConfig, SourceSpec
 from yutto.core.application import YuttoApplication
 from yutto.core.events import DownloadBatchStarted, DownloadRequestQueued, DownloadStage, DownloadStageChanged
 from yutto.core.execution import ExecutionScopeFactory, RequestExecutionScopeFactory
 from yutto.core.operation import emit_download_event
-from yutto.core.request import DownloadRequest
 from yutto.core.result import DownloadResult, ResolveResult
 from yutto.utils.functional import as_sync
 
@@ -38,9 +38,9 @@ class RecordingWorkflow:
     async def execute(
         self,
         scope_factory: ExecutionScopeFactory,
-        requests: Sequence[DownloadRequest],
+        configs: Sequence[ResolvedConfig],
     ) -> DownloadResult:
-        self.trace.append(("execute", (scope_factory, tuple(requests))))
+        self.trace.append(("execute", (scope_factory, tuple(configs))))
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
         return self.result
 
@@ -53,15 +53,15 @@ class RecordingResolveWorkflow:
     async def execute_resolve(
         self,
         scope_factory: ExecutionScopeFactory,
-        requests: Sequence[DownloadRequest],
+        configs: Sequence[ResolvedConfig],
     ) -> ResolveResult:
-        self.trace.append(("execute_resolve", (scope_factory, tuple(requests))))
+        self.trace.append(("execute_resolve", (scope_factory, tuple(configs))))
         emit_download_event(DownloadStageChanged(name=DownloadStage.RESOLVING))
         return self.result
 
 
-def make_request(url: str) -> DownloadRequest:
-    return DownloadRequest.model_validate({"source": {"url": url}})
+def make_config(url: str) -> ResolvedConfig:
+    return ResolvedConfig(source=SourceSpec(value=url))
 
 
 @as_sync
@@ -70,16 +70,16 @@ async def test_application_preserves_queue_order_and_emits_batch_events():
     trace: list[tuple[str, object]] = []
     workflow = RecordingWorkflow(trace)
     sink = RecordingEventSink(trace)
-    requests = [make_request("BV1first"), make_request("BV1second")]
+    configs = [make_config("BV1first"), make_config("BV1second")]
 
     application = YuttoApplication(scope_factory, workflow=workflow, event_sink=sink)
-    result = await application.download_all(requests)
+    result = await application.download_all(configs)
 
     assert trace == [
         ("event", DownloadBatchStarted(total=2)),
         ("event", DownloadRequestQueued(url="BV1first", index=1, total=2)),
         ("event", DownloadRequestQueued(url="BV1second", index=2, total=2)),
-        ("execute", (scope_factory, tuple(requests))),
+        ("execute", (scope_factory, tuple(configs))),
         ("event", DownloadStageChanged(name=DownloadStage.RESOLVING)),
     ]
     assert sink.events == [
@@ -97,18 +97,18 @@ async def test_single_download_does_not_emit_batch_presentation_events():
     workflow = RecordingWorkflow(trace)
     sink = RecordingEventSink(trace)
     scope_factory = RequestExecutionScopeFactory()
-    request = make_request("BV1single")
+    config = make_config("BV1single")
     application = YuttoApplication(
         scope_factory,
         workflow=workflow,
         event_sink=sink,
     )
 
-    result = await application.download(request)
+    result = await application.download(config)
 
     assert sink.events == [DownloadStageChanged(name=DownloadStage.RESOLVING)]
     assert trace == [
-        ("execute", (scope_factory, (request,))),
+        ("execute", (scope_factory, (config,))),
         ("event", DownloadStageChanged(name=DownloadStage.RESOLVING)),
     ]
     assert result is workflow.result
@@ -121,7 +121,7 @@ async def test_application_resolve_uses_resolve_workflow_and_event_sink():
     workflow = RecordingWorkflow(trace)
     resolve_workflow = RecordingResolveWorkflow(trace)
     sink = RecordingEventSink(trace)
-    request = make_request("BV1resolve")
+    config = make_config("BV1resolve")
     application = YuttoApplication(
         scope_factory,
         workflow=workflow,
@@ -129,11 +129,11 @@ async def test_application_resolve_uses_resolve_workflow_and_event_sink():
         resolve_workflow=resolve_workflow,
     )
 
-    result = await application.resolve(request)
+    result = await application.resolve(config)
 
     assert result is resolve_workflow.result
     assert trace == [
-        ("execute_resolve", (scope_factory, (request,))),
+        ("execute_resolve", (scope_factory, (config,))),
         ("event", DownloadStageChanged(name=DownloadStage.RESOLVING)),
     ]
 
@@ -143,4 +143,4 @@ async def test_application_resolve_requires_resolve_workflow():
     application = YuttoApplication(RequestExecutionScopeFactory(), workflow=RecordingWorkflow([]))
 
     with pytest.raises(RuntimeError, match="resolve workflow"):
-        await application.resolve(make_request("BV1resolve"))
+        await application.resolve(make_config("BV1resolve"))

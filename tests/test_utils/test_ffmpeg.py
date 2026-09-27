@@ -3,24 +3,25 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
 import yutto.utils.ffmpeg as ffmpeg_module
-from yutto.core.request import DownloadRequest
-from yutto.core.result import ResolvedItem
+from yutto.config import DEFAULT_CONFIG, SourceSpec
 from yutto.downloader.media_muxer import MediaMuxer
 from yutto.downloader.planner import DownloadPlan, DownloadPlanner, should_attach_hvc1_tag
 from yutto.exceptions import PostprocessingError, WrongArgumentError
-from yutto.types import AId, CId
+from yutto.resource import ResourceManifest
+from yutto.types import AudioUrlMeta, VideoUrlMeta
 from yutto.utils.ffmpeg import FFmpeg, FFmpegCommandBuilder
 from yutto.utils.functional import Singleton, as_sync
 
 if TYPE_CHECKING:
     from yutto.media.codec import VideoCodec
-    from yutto.types import AudioUrlMeta, EpisodeData, VideoUrlMeta
+    from yutto.media.quality import VideoQuality
 
 
 def make_ffmpeg(path: str) -> FFmpeg:
@@ -62,27 +63,24 @@ def test_ffmpeg_uses_default_path(reset_ffmpeg_singleton: None):
 
 
 def make_audio() -> AudioUrlMeta:
-    return {
-        "url": "https://example.com/audio",
-        "mirrors": [],
-        "codec": "mp4a",
-        "width": 0,
-        "height": 0,
-        "quality": 30280,
-    }
+    return AudioUrlMeta(
+        url="https://example.com/audio",
+        mirrors=(),
+        codec="mp4a",
+        width=0,
+        height=0,
+        quality=30280,
+    )
 
 
-def make_video(*, codec: VideoCodec = "hevc", quality: int = 80) -> VideoUrlMeta:
-    return cast(
-        "VideoUrlMeta",
-        {
-            "url": "https://example.com/video",
-            "mirrors": [],
-            "codec": codec,
-            "width": 1920,
-            "height": 1080,
-            "quality": quality,
-        },
+def make_video(*, codec: VideoCodec = "hevc", quality: VideoQuality = 80) -> VideoUrlMeta:
+    return VideoUrlMeta(
+        url="https://example.com/video",
+        mirrors=(),
+        codec=codec,
+        width=1920,
+        height=1080,
+        quality=quality,
     )
 
 
@@ -92,53 +90,34 @@ def make_audio_plan(
     audio_save_codec: str = "copy",
 ) -> DownloadPlan:
     path = Path("output")
-    episode = cast(
-        "EpisodeData",
-        {
-            "info": {
-                "listing": ResolvedItem(
-                    avid=AId("1"),
-                    cid=CId("1"),
-                    url="https://www.bilibili.com/video/av1?p=1",
-                    name=path.name,
-                    title=path.name,
-                    cover_url="",
-                    planned_path=path,
-                ),
-                "path": path,
-            },
-            "videos": [],
-            "audios": [make_audio()],
-            "subtitles": [],
-            "metadata": None,
-            "danmaku": {"source_type": None, "save_type": None, "data": []},
-            "cover_data": None,
-            "chapter_info_data": [],
-        },
+    resources = ResourceManifest(audio_requested=True, audios=(make_audio(),))
+    config = replace(
+        DEFAULT_CONFIG,
+        source=SourceSpec(value="BV1muxer"),
+        resource=replace(
+            DEFAULT_CONFIG.resource,
+            video=False,
+            audio=True,
+            danmaku=False,
+            subtitle=False,
+            metadata=False,
+            cover=False,
+            chapter_info=False,
+        ),
+        stream=replace(DEFAULT_CONFIG.stream, audio_codec=f"mp4a:{audio_save_codec}"),
+        output=replace(
+            DEFAULT_CONFIG.output,
+            directory=tmp_path,
+            temporary_directory=tmp_path,
+        ),
     )
-    request = DownloadRequest.model_validate(
-        {
-            "source": {"url": "BV1muxer"},
-            "resources": {
-                "video": False,
-                "audio": True,
-                "danmaku": False,
-                "subtitle": False,
-                "metadata": False,
-                "cover": False,
-                "chapter_info": False,
-            },
-            "stream": {
-                "audio_download_codec": "mp4a",
-                "audio_save_codec": audio_save_codec,
-            },
-            "output": {
-                "directory": tmp_path,
-                "temporary_directory": tmp_path,
-            },
-        }
-    )
-    return DownloadPlanner().plan(episode, request)
+    return DownloadPlanner().plan(resources, path, config)
+
+
+def make_audio_input(tmp_path: Path) -> Path:
+    audio_path = tmp_path / "input.m4a"
+    audio_path.write_bytes(b"audio")
+    return audio_path
 
 
 @pytest.mark.parametrize(
@@ -438,7 +417,8 @@ async def test_media_muxer_uses_async_ffmpeg(tmp_path: Path):
             return subprocess.CompletedProcess(args, 0, b"", b"ffmpeg detail")
 
     plan = make_audio_plan(tmp_path, audio_save_codec="mp4a")
-    await MediaMuxer(FakeFFmpeg()).mux(plan)
+    audio_path = make_audio_input(tmp_path)
+    await MediaMuxer(FakeFFmpeg()).mux(plan, audio_path=audio_path)
 
     assert len(commands) == 1
     assert commands[0][-1] == str(plan.paths.output)
@@ -455,9 +435,10 @@ async def test_merge_success_code_without_output_is_structured_error(
             return subprocess.CompletedProcess(args, 0, b"", b"")
 
     plan = make_audio_plan(tmp_path)
+    audio_path = make_audio_input(tmp_path)
 
     with pytest.raises(PostprocessingError, match="未生成目标文件") as error:
-        await MediaMuxer(MissingOutputFFmpeg()).mux(plan)
+        await MediaMuxer(MissingOutputFFmpeg()).mux(plan, audio_path=audio_path)
 
     assert error.value.code.value == 20
 
@@ -471,9 +452,10 @@ async def test_merge_failure_removes_partial_output_and_is_structured(tmp_path: 
             return subprocess.CompletedProcess(args, 1, b"", b"ffmpeg detail")
 
     plan = make_audio_plan(tmp_path)
+    audio_path = make_audio_input(tmp_path)
 
     with pytest.raises(PostprocessingError, match="ffmpeg detail") as error:
-        await MediaMuxer(FailingFFmpeg()).mux(plan)
+        await MediaMuxer(FailingFFmpeg()).mux(plan, audio_path=audio_path)
 
     assert error.value.code.value == 20
     assert plan.paths.output.exists() is False
@@ -492,7 +474,8 @@ async def test_merge_cancellation_removes_partial_output(tmp_path: Path):
             raise AssertionError("unreachable")
 
     plan = make_audio_plan(tmp_path)
-    merging = asyncio.create_task(MediaMuxer(BlockingFFmpeg()).mux(plan))
+    audio_path = make_audio_input(tmp_path)
+    merging = asyncio.create_task(MediaMuxer(BlockingFFmpeg()).mux(plan, audio_path=audio_path))
     await started.wait()
 
     merging.cancel()

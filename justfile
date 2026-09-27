@@ -82,9 +82,13 @@ ci-lint:
 
 ci-test pyversion:
   uv run -p {{pyversion}} pytest -m "(api or processor or biliass) and not (ci_skip or ignore)" --reruns 3 --reruns-delay 1
+  uv run -p {{pyversion}} pytest tests/test_download_manager_media.py tests/test_listing.py tests/test_resource.py tests/test_selection.py tests/test_source.py tests/test_source_all_favourites.py tests/test_source_publication_filter.py tests/test_source_ugc_containers.py --reruns 3 --reruns-delay 1
 
 ci-e2e-test pyversion:
-  uv run -p {{pyversion}} pytest -m "e2e and not (ci_skip or ignore)"
+  uv run -p {{pyversion}} pytest -m "e2e and not (ci_skip or ignore or live)"
+
+ci-live-e2e-test pyversion:
+  uv run -p {{pyversion}} pytest -m "e2e and live and not (ci_skip or ignore)"
 
 # docker specific
 docker-run *ARGS:

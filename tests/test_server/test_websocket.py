@@ -4,20 +4,19 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from itertools import count
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from returns.result import Success
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.typing import Origin
 
-from yutto.core.execution import ExecutionScope
-from yutto.core.request import DownloadRequest
+from yutto.cli.settings import YuttoConfig
+from yutto.config import ResolvedConfig
 from yutto.core.result import DownloadResult, ResolveResult
-from yutto.extractor.utils.batch import resolve_ugc_video_lists
 from yutto.runtime import TaskContext, TaskRuntime, TaskSnapshot, TaskState, monotonic_seq_allocator
-from yutto.server.service import ServerPolicy, ServerPolicyOptions
+from yutto.server.service import ServerPolicy, ServerPolicyOptions, config_parser_from_settings
 from yutto.server.websocket import (
     REQUEST_REJECTED_ERROR,
     WebSocketServerOptions,
@@ -25,26 +24,21 @@ from yutto.server.websocket import (
     _SlowConsumerCloser,
     _task_snapshot_order,
 )
-from yutto.types import AId
-from yutto.utils.fetcher import Fetcher
-from yutto.utils.filter import PublicationTimeFilter
 from yutto.utils.functional import as_sync
 
 pytestmark = pytest.mark.processor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
-    from yutto.api.ugc_video import UgcVideoList
-    from yutto.extractor.utils.batch import IndexedResolveItem
     from yutto.runtime import EventReplay, TaskEvent
 
 
 class FakeDownloadTaskApi:
     def __init__(self, *, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
-        self.runtime = TaskRuntime[DownloadRequest, DownloadResult](
+        self.submissions: list[tuple[ResolvedConfig, ResolvedConfig]] = []
+        self.runtime = TaskRuntime[ResolvedConfig, DownloadResult](
             self._run,
             task_id_factory=lambda: "task-1",
             seq_allocator=seq_allocator,
@@ -56,16 +50,23 @@ class FakeDownloadTaskApi:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, DownloadResult]:
-        return await self.runtime.submit(request)
+    async def submit(
+        self,
+        config: ResolvedConfig,
+        *,
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, DownloadResult]:
+        execution = config if execution_config is None else execution_config
+        self.submissions.append((config, execution))
+        return await self.runtime.submit(config)
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None:
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None:
         return self.runtime.get(task_id)
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, DownloadResult], ...]:
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, DownloadResult], ...]:
         return self.runtime.list()
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, DownloadResult] | None:
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, DownloadResult] | None:
         return await self.runtime.cancel(task_id)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
@@ -74,7 +75,7 @@ class FakeDownloadTaskApi:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, request: DownloadRequest, context: TaskContext) -> DownloadResult:
+    async def _run(self, config: ResolvedConfig, context: TaskContext) -> DownloadResult:
         await self.release.wait()
         context.emit("progress", {"current": 1, "total": 1})
         return DownloadResult()
@@ -84,8 +85,9 @@ class FakeResolveTaskApi:
     def __init__(self, *, item_count: int = 0, seq_allocator: Callable[[], int] | None = None) -> None:
         self.release = asyncio.Event()
         self.item_count = item_count
+        self.submissions: list[tuple[ResolvedConfig, ResolvedConfig]] = []
         ids = count(1)
-        self.runtime = TaskRuntime[DownloadRequest, ResolveResult](
+        self.runtime = TaskRuntime[ResolvedConfig, ResolveResult](
             self._run,
             task_id_factory=lambda: f"resolve-{next(ids)}",
             seq_allocator=seq_allocator,
@@ -97,16 +99,23 @@ class FakeResolveTaskApi:
     async def close(self, *, cancel_pending: bool = False) -> None:
         await self.runtime.close(cancel_pending=cancel_pending)
 
-    async def submit(self, request: DownloadRequest) -> TaskSnapshot[DownloadRequest, ResolveResult]:
-        return await self.runtime.submit(request)
+    async def submit(
+        self,
+        config: ResolvedConfig,
+        *,
+        execution_config: ResolvedConfig | None = None,
+    ) -> TaskSnapshot[ResolvedConfig, ResolveResult]:
+        execution = config if execution_config is None else execution_config
+        self.submissions.append((config, execution))
+        return await self.runtime.submit(config)
 
-    def get(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None:
+    def get(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None:
         return self.runtime.get(task_id)
 
-    def list(self) -> tuple[TaskSnapshot[DownloadRequest, ResolveResult], ...]:
+    def list(self) -> tuple[TaskSnapshot[ResolvedConfig, ResolveResult], ...]:
         return self.runtime.list()
 
-    async def cancel(self, task_id: str) -> TaskSnapshot[DownloadRequest, ResolveResult] | None:
+    async def cancel(self, task_id: str) -> TaskSnapshot[ResolvedConfig, ResolveResult] | None:
         return await self.runtime.cancel(task_id)
 
     def replay(self, task_id: str, *, after_seq: int = 0) -> EventReplay | None:
@@ -115,52 +124,13 @@ class FakeResolveTaskApi:
     def add_event_listener(self, listener: Callable[[TaskEvent], None]) -> Callable[[], None]:
         return self.runtime.add_event_listener(listener)
 
-    async def _run(self, request: DownloadRequest, context: TaskContext) -> ResolveResult:
+    async def _run(self, config: ResolvedConfig, context: TaskContext) -> ResolveResult:
         await self.release.wait()
         for index in range(self.item_count):
             context.emit("item_listed", {"avid": str(index), "url": f"https://example.com/{index}"})
-            # 与修复后的 DownloadManager.resolve_items 一致：事件生产逐条让出控制权
+            # 与修复后的 DownloadManager resolve 流程一致：事件生产逐条让出控制权
             await asyncio.sleep(0)
         return ResolveResult(items=())
-
-
-class BatchStreamingResolveApi(FakeResolveTaskApi):
-    """经真实 resolve_ugc_video_lists 推流的 resolve 服务，复现生产端的完整事件路径"""
-
-    def __init__(self, *, video_count: int, pages_per_video: int) -> None:
-        super().__init__()
-        self.video_count = video_count
-        self.pages_per_video = pages_per_video
-
-    async def _run(self, request: DownloadRequest, context: TaskContext) -> ResolveResult:
-        await self.release.wait()
-
-        async def on_resolved(resolved: IndexedResolveItem[UgcVideoList]) -> None:
-            # 模拟内置提取器的回调：逐分集 emit 并让出控制权
-            for page in range(self.pages_per_video):
-                context.emit("item_listed", {"avid": str(resolved.source), "page": page})
-                await asyncio.sleep(0)
-
-        scope = ExecutionScope(cast("Any", object()))
-        await resolve_ugc_video_lists(
-            scope,
-            [AId(str(index + 1)) for index in range(self.video_count)],
-            publication_time_filter=PublicationTimeFilter.from_strings(None, None),
-            on_resolved=on_resolved,
-        )
-        return ResolveResult(items=())
-
-
-def _patch_batch_listing(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_get_ugc_video_list(scope: ExecutionScope, avid: Any):
-        # 立即返回：所有视频几乎同时就绪，复现并发完成的最坏情况
-        return {"title": str(avid), "pubdate": 1700000000, "avid": avid, "pages": []}
-
-    async def fake_touch_url(scope: ExecutionScope, url: str):
-        return Success(None)
-
-    monkeypatch.setattr("yutto.extractor.utils.batch.get_ugc_video_list", fake_get_ugc_video_list)
-    monkeypatch.setattr(Fetcher, "touch_url", fake_touch_url)
 
 
 def rpc_request(request_id: int, method: str, params: object | None = None) -> str:
@@ -184,7 +154,7 @@ async def start_server(
     token: str = "test-token",
     service: FakeDownloadTaskApi | None = None,
     resolve_service: FakeResolveTaskApi | None = None,
-    prepare_request: Callable[[DownloadRequest], DownloadRequest] | None = None,
+    prepare_config: Callable[[ResolvedConfig], ResolvedConfig] | None = None,
 ) -> tuple[YuttoWebSocketServer, FakeDownloadTaskApi, str]:
     service = service or FakeDownloadTaskApi()
     server = YuttoWebSocketServer(
@@ -195,7 +165,8 @@ async def start_server(
             port=0,
             allowed_origins=allowed_origins,
         ),
-        prepare_request=prepare_request,
+        prepare_config=prepare_config,
+        parse_config=config_parser_from_settings(YuttoConfig()),
         resolve_service=resolve_service,
     )
     await server.start()
@@ -291,7 +262,7 @@ async def test_server_info_and_exact_origin_allowlist():
                     {
                         "request": {
                             "source": {"url": "BV1xx"},
-                            "resources": {"cover": False, "save_cover": True},
+                            "resources": {"unknown": True},
                         }
                     },
                 )
@@ -299,6 +270,7 @@ async def test_server_info_and_exact_origin_allowlist():
             assert (await receive_json(connection))["error"] == {
                 "code": -32602,
                 "message": "Invalid params",
+                "data": {"reason": "unknown resources fields: unknown"},
             }
     finally:
         await server.close()
@@ -327,7 +299,7 @@ async def test_server_info_and_exact_origin_allowlist():
             "download.start",
             {
                 "source": {"url": "BV1invalid"},
-                "network": {"fetch_workers": 0},
+                "network": {"fetch_workers": 9},
             },
             "network.fetch_workers must be between 1 and 8",
         ),
@@ -352,7 +324,7 @@ async def test_server_policy_rejects_invalid_requests_before_task_submission(
     server, _, uri = await start_server(
         service=download_service,
         resolve_service=resolve_service,
-        prepare_request=policy.prepare_request,
+        prepare_config=policy.prepare_config,
     )
     try:
         async with connect(uri, proxy=None) as connection:
@@ -368,6 +340,50 @@ async def test_server_policy_rejects_invalid_requests_before_task_submission(
 
             assert download_service.list() == ()
             assert resolve_service.list() == ()
+    finally:
+        await server.close()
+
+
+@pytest.mark.processor
+@as_sync
+async def test_server_keeps_public_request_config_separate_from_execution_config(tmp_path: Path):
+    service = FakeDownloadTaskApi()
+    policy = ServerPolicy(
+        ServerPolicyOptions(
+            download_root=tmp_path / "downloads",
+            tmp_root=tmp_path / "temporary",
+            auth_file=tmp_path / "auth.toml",
+        )
+    )
+    server, _, uri = await start_server(service=service, prepare_config=policy.prepare_config)
+    try:
+        async with connect(uri, proxy=None) as connection:
+            await connection.send(rpc_request(1, "server.authenticate", {"token": "test-token"}))
+            await receive_json(connection)
+            await connection.send(
+                rpc_request(
+                    2,
+                    "download.start",
+                    {
+                        "request": {
+                            "source": {"url": "BV1scope"},
+                            "output": {
+                                "directory": "shows/season-1",
+                                "temporary_directory": "work",
+                            },
+                        }
+                    },
+                )
+            )
+            started = (await receive_json(connection))["result"]
+
+            assert started["payload"]["output"]["directory"] == "shows/season-1"
+            assert started["payload"]["output"]["temporary_directory"] == "work"
+            request_config, execution_config = service.submissions[0]
+            assert request_config.output.directory == Path("shows/season-1")
+            assert request_config.output.temporary_directory == Path("work")
+            assert execution_config.output.directory == (tmp_path / "downloads/shows/season-1").resolve()
+            assert execution_config.output.temporary_directory == (tmp_path / "temporary/work").resolve()
     finally:
         await server.close()
 
@@ -409,7 +425,7 @@ async def test_download_task_lifecycle_replay_and_live_notifications():
             await connection.send(rpc_request(4, "task.get", {"task_id": "task-1"}))
             completed = (await receive_json(connection))["result"]
             assert completed["state"] == "completed"
-            assert completed["payload"]["source"]["url"].endswith("BV1xx")
+            assert completed["payload"]["source"]["value"].endswith("BV1xx")
             assert completed["result"] == {"items": []}
 
             await connection.send(rpc_request(5, "task.list"))
@@ -569,76 +585,6 @@ async def test_item_listed_burst_beyond_event_queue_is_fully_delivered():
                         break
             # 事件生产逐条让出控制权后，超过每连接发送队列（event_queue_size=128）的
             # 列表也能完整送达，而不是在第 129 条触发 slow-consumer 断连
-            assert delivered == 200
-    finally:
-        await server.close()
-
-
-@pytest.mark.processor
-@as_sync
-async def test_simultaneously_completed_videos_stream_fully_over_websocket(monkeypatch: pytest.MonkeyPatch):
-    _patch_batch_listing(monkeypatch)
-    resolve = BatchStreamingResolveApi(video_count=200, pages_per_video=1)
-    server, _, uri = await start_server(resolve_service=resolve)
-    try:
-        async with connect(uri, proxy=None) as connection:
-            await connection.send(rpc_request(1, "server.authenticate", {"token": "test-token"}))
-            await receive_json(connection)
-            await connection.send(
-                rpc_request(2, "resolve.start", {"request": {"source": {"url": "https://www.bilibili.com/video/BV1s"}}})
-            )
-            await receive_json(connection)
-            await connection.send(rpc_request(3, "task.subscribe", {"task_id": "resolve-1", "after_seq": 0}))
-            await receive_json(connection)
-
-            resolve.release.set()
-            delivered = 0
-            async with asyncio.timeout(30):
-                while True:
-                    notification = await receive_json(connection)
-                    if notification.get("method") != "task.event":
-                        continue
-                    params = notification["params"]
-                    if params["kind"] == "item_listed":
-                        delivered += 1
-                    elif params["kind"] == "state" and params["state"] == "completed":
-                        break
-            # 200 个视频同时就绪：单一 publisher 串行发布，事件不再在 sender 运行前灌满队列
-            assert delivered == 200
-    finally:
-        await server.close()
-
-
-@pytest.mark.processor
-@as_sync
-async def test_single_video_with_more_pages_than_queue_streams_fully(monkeypatch: pytest.MonkeyPatch):
-    _patch_batch_listing(monkeypatch)
-    resolve = BatchStreamingResolveApi(video_count=1, pages_per_video=200)
-    server, _, uri = await start_server(resolve_service=resolve)
-    try:
-        async with connect(uri, proxy=None) as connection:
-            await connection.send(rpc_request(1, "server.authenticate", {"token": "test-token"}))
-            await receive_json(connection)
-            await connection.send(
-                rpc_request(2, "resolve.start", {"request": {"source": {"url": "https://www.bilibili.com/video/BV1p"}}})
-            )
-            await receive_json(connection)
-            await connection.send(rpc_request(3, "task.subscribe", {"task_id": "resolve-1", "after_seq": 0}))
-            await receive_json(connection)
-
-            resolve.release.set()
-            delivered = 0
-            async with asyncio.timeout(30):
-                while True:
-                    notification = await receive_json(connection)
-                    if notification.get("method") != "task.event":
-                        continue
-                    params = notification["params"]
-                    if params["kind"] == "item_listed":
-                        delivered += 1
-                    elif params["kind"] == "state" and params["state"] == "completed":
-                        break
-            # 单视频 200 分 P（> event_queue_size=128）：逐分集让出使事件全部送达
             assert delivered == 200
     finally:
         await server.close()
