@@ -171,9 +171,7 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
         )
     )
     if "auth_file" in config.auth.model_fields_set:
-        credential_updates["file"] = (
-            None if config.auth.auth_file is None else Path(config.auth.auth_file).expanduser()
-        )
+        credential_updates["file"] = None if config.auth.auth_file is None else Path(config.auth.auth_file).expanduser()
 
     access_updates = _present_updates(
         basic,
@@ -279,11 +277,7 @@ def resolved_config_from_settings(config: YuttoConfig) -> ResolvedConfig:
 
 
 def _present_updates(model: BaseModel, fields: dict[str, str]) -> dict[str, Any]:
-    return {
-        target: getattr(model, source)
-        for source, target in fields.items()
-        if source in model.model_fields_set
-    }
+    return {target: getattr(model, source) for source, target in fields.items() if source in model.model_fields_set}
 
 
 def search_for_settings_file() -> Path | None:
