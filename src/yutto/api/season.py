@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
@@ -81,6 +82,13 @@ def _optional_int(value: object, description: str) -> int | None:
         raise NotFoundError(f"无法解析{description}，原因：API 响应格式异常") from error
 
 
+def _bangumi_episode_title(title: str, extra_title: str) -> str:
+    title_parts = [f"第{title}话" if re.fullmatch(r"\d*\.?\d*", title) else title]
+    if extra_title:
+        title_parts.append(extra_title)
+    return " ".join(title_parts)
+
+
 def _decode_bangumi_episode(item: dict[str, Any]) -> BangumiEpisodeInfo:
     episode_id = item.get("id")
     cid = item.get("cid")
@@ -97,8 +105,9 @@ def _decode_bangumi_episode(item: dict[str, Any]) -> BangumiEpisodeInfo:
     else:
         raise NotFoundError("无法解析番剧剧集，原因：API 响应缺少 aid/bvid")
 
+    short_title_text = str(short_title)
     long_title = str(item.get("long_title", ""))
-    title = f"{short_title} {long_title}" if long_title else str(short_title)
+    title = _bangumi_episode_title(short_title_text, long_title)
     show_title = str(item.get("share_copy", title))
     duration_ms = _optional_int(item.get("duration"), "番剧剧集时长") or 0
     return BangumiEpisodeInfo(
