@@ -156,7 +156,9 @@ class UgcVideoSource(MediaSource):
     id: AvId
     page: int | None = None
 
-    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult[UgcVideo | UgcPage]:
+    async def resolve(
+        self, execution: ExecutionScope, config: ResolvedConfig
+    ) -> MediaResolveResult[UgcVideo | UgcPage]:
         video_info = await get_ugc_video_info(execution, self.id)
         aid = video_info.aid
         tags = await get_ugc_video_tags(execution, aid)
