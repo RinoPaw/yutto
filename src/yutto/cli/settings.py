@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from yutto.config import DEFAULT_CONFIG, ResolvedConfig
 from yutto.media.quality import AudioQuality, VideoQuality
@@ -25,7 +25,11 @@ class _ConfigModel(BaseModel):
 class YuttoBasicConfig(_ConfigModel):
     """Persistent configuration overrides for basic download and CLI behavior."""
 
-    download_workers: int | None = Field(default=None, gt=0)
+    download_workers: int | None = Field(
+        default=None,
+        gt=0,
+        validation_alias=AliasChoices("download_workers", "num_workers"),
+    )
     jobs: int | None = Field(default=None, gt=0)
     fetch_workers: int | None = Field(default=None, gt=0)
     video_quality: VideoQuality | None = None
@@ -46,7 +50,10 @@ class YuttoBasicConfig(_ConfigModel):
     sessdata: str | None = None  # legacy 兼容字段，推荐使用 [auth].auth
     subpath_template: str | None = None
     aliases: dict[str, str] | None = None
-    metadata_premiered_format: str | None = None
+    metadata_premiered_format: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata_premiered_format", "metadata_format_premiered"),
+    )
     download_interval: int | None = None
     banned_mirrors_pattern: str | None = None
     vip_strict: bool | None = None
@@ -72,19 +79,58 @@ class YuttoResourceConfig(_ConfigModel):
 class YuttoDanmakuConfig(_ConfigModel):
     """Persistent danmaku overrides."""
 
-    danmaku_font_size: int | None = None
-    danmaku_font: str | None = None
-    danmaku_opacity: float | None = None
-    danmaku_display_region_ratio: float | None = None
-    danmaku_speed: float | None = None
-    danmaku_block_top: bool | None = None
-    danmaku_block_bottom: bool | None = None
-    danmaku_block_scroll: bool | None = None
-    danmaku_block_reverse: bool | None = None
-    danmaku_block_fixed: bool | None = None
-    danmaku_block_special: bool | None = None
-    danmaku_block_colorful: bool | None = None
-    danmaku_block_keyword_patterns: list[str] | None = None
+    danmaku_font_size: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_font_size", "font_size"),
+    )
+    danmaku_font: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_font", "font"),
+    )
+    danmaku_opacity: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_opacity", "opacity"),
+    )
+    danmaku_display_region_ratio: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_display_region_ratio", "display_region_ratio"),
+    )
+    danmaku_speed: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_speed", "speed"),
+    )
+    danmaku_block_top: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_top", "block_top"),
+    )
+    danmaku_block_bottom: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_bottom", "block_bottom"),
+    )
+    danmaku_block_scroll: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_scroll", "block_scroll"),
+    )
+    danmaku_block_reverse: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_reverse", "block_reverse"),
+    )
+    danmaku_block_fixed: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_fixed", "block_fixed"),
+    )
+    danmaku_block_special: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_special", "block_special"),
+    )
+    danmaku_block_colorful: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_colorful", "block_colorful"),
+    )
+    danmaku_block_keyword_patterns: list[str] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("danmaku_block_keyword_patterns", "block_keyword_patterns"),
+    )
 
 
 class YuttoBatchConfig(_ConfigModel):
@@ -92,8 +138,14 @@ class YuttoBatchConfig(_ConfigModel):
 
     with_extra_episodes: bool | None = None
     skip_preview: bool | None = None
-    published_since: str | None = None
-    published_before: str | None = None
+    published_since: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("published_since", "batch_filter_start_time"),
+    )
+    published_before: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("published_before", "batch_filter_end_time"),
+    )
 
 
 class YuttoAuthConfig(_ConfigModel):
