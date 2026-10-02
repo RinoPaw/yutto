@@ -8,6 +8,7 @@ from returns.result import Success
 
 from yutto.config import DEFAULT_CONFIG
 from yutto.core.operation import bind_download_report_sink
+from yutto.media import UgcVideo
 from yutto.source import MediaResolveDiagnostic, UgcVideoSource
 from yutto.types import AvId
 
@@ -55,4 +56,5 @@ def test_source_returns_selection_diagnostics_without_rendering(monkeypatch: pyt
 
     assert reports == []
     assert result.diagnostics == (MediaResolveDiagnostic(total=3, out_of_range=(5,), empty=False),)
+    assert isinstance(result.media, UgcVideo)
     assert [entry.index for entry in result.media.items] == [3, 1]

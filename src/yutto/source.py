@@ -156,7 +156,9 @@ class UgcVideoSource(MediaSource):
     id: AvId
     page: int | None = None
 
-    async def resolve(self, execution: ExecutionScope, config: ResolvedConfig) -> MediaResolveResult[UgcVideo]:
+    async def resolve(
+        self, execution: ExecutionScope, config: ResolvedConfig
+    ) -> MediaResolveResult[UgcVideo | UgcPage]:
         video_info = await get_ugc_video_info(execution, self.id)
         aid = video_info.aid
         tags = await get_ugc_video_tags(execution, aid)
@@ -232,6 +234,9 @@ class UgcVideoSource(MediaSource):
             )
             for index in indexes
         )
+        if selection is None:
+            return MediaResolveResult(media=page_items[0].media, source_index=indexes[0])
+
         return MediaResolveResult(
             media=UgcVideo(
                 aid=aid,
@@ -263,6 +268,8 @@ async def _resolve_ugc_videos(
                 error=error,
             )
 
+        if not isinstance(result.media, UgcVideo):
+            raise TypeError("container UGC resolution must produce UgcVideo")
         if not _publication_time_matches(result.media.metadata.published_at, video_config):
             return None
 
@@ -598,7 +605,11 @@ class BangumiEpisodeSource(MediaSource):
                 season_id=result.season_id,
                 metadata=season_metadata,
                 items=tuple(
-                    MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items
+                    MediaEntry(
+                        index=index,
+                        media=_apply_container_metadata_to_episode(_parse_bangumi_episode(item), season_metadata),
+                    )
+                    for index, item in episode_items
                 ),
             ),
             diagnostics=tuple(diagnostics),
@@ -627,12 +638,17 @@ class BangumiSeasonSource(MediaSource):
         selection = parse_selection(expression if expression is not None else "~")
         diagnostics: list[MediaResolveDiagnostic] = []
         episode_items = _select_items(episode_items, selection, diagnostics)
+        season_metadata = _make_bangumi_season_metadata(result)
         return MediaResolveResult(
             media=BangumiSeason(
                 season_id=season_id,
-                metadata=_make_bangumi_season_metadata(result),
+                metadata=season_metadata,
                 items=tuple(
-                    MediaEntry(index=index, media=_parse_bangumi_episode(item)) for index, item in episode_items
+                    MediaEntry(
+                        index=index,
+                        media=_apply_container_metadata_to_episode(_parse_bangumi_episode(item), season_metadata),
+                    )
+                    for index, item in episode_items
                 ),
             ),
             diagnostics=tuple(diagnostics),
