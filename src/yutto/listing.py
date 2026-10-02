@@ -173,6 +173,10 @@ def _resolve_media_path(
 ) -> Path:
     relation_index = index if index is not None else 1
     if isinstance(item, UgcPage):
+        if not ancestry:
+            variables = _path_variables(None, item, item.aid, index=relation_index)
+            return Path(resolve_path_template(subpath_template, "{title}", variables))
+
         video, auto_path, name, title, username, series_title = _ugc_context(ancestry, item)
         variables = _path_variables(
             video,
