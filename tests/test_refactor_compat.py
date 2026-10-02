@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+import pytest
 from returns.result import Success
 
 from yutto.api.ugc import get_ugc_video_info
@@ -10,6 +11,8 @@ from yutto.cli.settings import YuttoConfig, resolved_config_from_settings
 from yutto.core.execution import ExecutionScope
 from yutto.types import BvId
 from yutto.utils.time import parse_local_timestamp
+
+pytestmark = pytest.mark.processor
 
 
 def test_legacy_yutto_toml_names_resolve_into_typed_config() -> None:
@@ -62,8 +65,8 @@ def test_legacy_yutto_toml_names_resolve_into_typed_config() -> None:
     assert config.selection.published_before == parse_local_timestamp("2024-02-03")
 
 
-def test_ugc_decoder_normalizes_meaningless_page_titles(monkeypatch) -> None:
-    async def fake_fetch_json(execution: object, url: str, **kwargs: Any) -> Success[dict[str, Any]]:
+def test_ugc_decoder_normalizes_meaningless_page_titles(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch_json(_execution: object, _url: str, **_kwargs: Any) -> Success[dict[str, Any]]:
         return Success(
             {
                 "code": 0,
