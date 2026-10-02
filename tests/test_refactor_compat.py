@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from returns.result import Success
 
 from yutto.api.ugc import get_ugc_video_info
 from yutto.cli.settings import YuttoConfig, resolved_config_from_settings
-from yutto.core.execution import ExecutionScope
 from yutto.types import BvId
 from yutto.utils.time import parse_local_timestamp
+
+if TYPE_CHECKING:
+    from yutto.core.execution import ExecutionScope
 
 pytestmark = pytest.mark.processor
 
