@@ -9,7 +9,8 @@ from returns.result import Success
 
 from yutto.config import DEFAULT_CONFIG, ResolvedConfig
 from yutto.exceptions import NoAccessPermissionError, NotFoundError, WrongArgumentError
-from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeason, UgcVideo
+from yutto.listing import resolve_media_paths
+from yutto.media import BangumiEpisode, BangumiSeason, CheeseEpisode, CheeseSeason, UgcPage, UgcVideo
 from yutto.parser import parse
 from yutto.source import (
     AmbiguousEpisodeSource,
@@ -71,6 +72,13 @@ def _bangumi_season_response(*episode_ids: str) -> dict[str, Any]:
             "season_id": 456,
             "media_id": 789,
             "title": "番剧",
+            "evaluate": "番剧简介",
+            "styles": ["动画"],
+            "up_info": {
+                "mid": 42,
+                "uname": "番剧UP",
+                "avatar": "https://img/up.jpg",
+            },
             "episodes": [
                 {
                     "id": int(episode_id),
@@ -165,8 +173,27 @@ def test_bangumi_episode_source_single_request_resolution(monkeypatch: pytest.Mo
     assert isinstance(result.media, BangumiEpisode)
     assert result.media.episode_id == EpisodeId("123")
     assert result.source_index == 1
-    assert result.media.metadata.title == "1 第1话"
+    assert result.media.metadata.title == "第1话 第1话"
+    assert result.media.metadata.owner == "番剧UP"
+    assert result.media.metadata.genre == ("动画",)
+    assert [actor.name for actor in result.media.metadata.actors] == ["番剧UP"]
     assert len(calls) == 1
+
+
+def test_bangumi_container_children_receive_same_season_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _bangumi_season_response("123")
+    _install_fetcher_stub(monkeypatch, {"pgc/view/web/season": response})
+    direct = asyncio.run(BangumiEpisodeSource(id=EpisodeId("123")).resolve(_EXECUTION, _DEFAULT_CONFIG))
+
+    _install_fetcher_stub(monkeypatch, {"pgc/view/web/season": response})
+    season = asyncio.run(BangumiSeasonSource(id=SeasonId("456")).resolve(_EXECUTION, _DEFAULT_CONFIG))
+
+    assert isinstance(direct.media, BangumiEpisode)
+    assert isinstance(season.media, BangumiSeason)
+    child = season.media.items[0].media
+    assert child.metadata.owner == direct.media.metadata.owner
+    assert child.metadata.genre == direct.media.metadata.genre
+    assert child.metadata.actors == direct.media.metadata.actors
 
 
 def test_cheese_episode_source_rejects_quirk_response(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,12 +309,15 @@ def test_ugc_selection_overrides_url_page_at_resolve_time(monkeypatch: pytest.Mo
     source = parse("https://www.bilibili.com/video/BV1D84y1t76J?p=2")
     assert isinstance(source, UgcVideoSource)
     result = asyncio.run(source.resolve(_EXECUTION, _DEFAULT_CONFIG))
-    assert isinstance(result.media, UgcVideo)
-    assert [entry.index for entry in result.media.items] == [2]
+    assert isinstance(result.media, UgcPage)
+    assert result.source_index == 2
+    assert result.media.metadata.title == "P2"
+    assert str(resolve_media_paths(result.media, source_index=result.source_index)[0].path) == "投稿"
 
     result = asyncio.run(source.resolve(_EXECUTION, _config(expression="3,5,1,3")))
     assert isinstance(result.media, UgcVideo)
     assert [entry.index for entry in result.media.items] == [3, 1]
+    assert [str(entry.path) for entry in resolve_media_paths(result.media)] == ["投稿/P3", "投稿/P1"]
 
 
 @pytest.mark.parametrize(
