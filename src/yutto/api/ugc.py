@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from yutto.types import AvId, CollectionId, SeriesId
 
 WATCH_LATER_API = "https://api.bilibili.com/x/v2/history/toview/web"
+_VIDEO_FILE_EXTENSIONS = (".mp4", ".flv", ".mkv", ".avi", ".wmv", ".mov", ".mpg", ".mpeg", ".ts")
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,17 +151,23 @@ def _decode_ugc_staff(value: object) -> tuple[UgcStaffInfo, ...]:
     return tuple(staff)
 
 
+def _normalize_ugc_page_title(value: object, *, video_title: str, index: int) -> str:
+    title = "" if value is None else str(value)
+    if not title or any(title.endswith(extension) for extension in _VIDEO_FILE_EXTENSIONS):
+        return f"{video_title}_P{index:02}"
+    return title
+
+
 def _decode_ugc_pages(value: object, *, video_title: str) -> tuple[UgcPageInfo, ...]:
     pages: list[UgcPageInfo] = []
-    for item in _dict_list(value, "视频分 P"):
+    for index, item in enumerate(_dict_list(value, "视频分 P"), start=1):
         cid = item.get("cid")
         if cid is None:
             raise NoAccessPermissionError("无法解析视频分 P，原因：API 响应缺少 cid")
-        title = item.get("part")
         pages.append(
             UgcPageInfo(
                 cid=CId(cid),
-                title=str(title) if title is not None else video_title,
+                title=_normalize_ugc_page_title(item.get("part"), video_title=video_title, index=index),
                 duration=_decode_optional_int(item.get("duration"), "视频分 P 时长") or 0,
             )
         )
